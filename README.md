@@ -1,495 +1,408 @@
-# 🌟 Lumentix Backend – Stellar Event Platform API
+# 🌟 Lumentix Backend – Stellar Event Platform API (NestJS)
 
-The backend powering **Lumentix**, a decentralized event management platform built on the Stellar blockchain. Think of this as the brain that makes everything work—handling events, payments, sponsors, and all that blockchain magic ✨
+The backend powering **Lumentix**, a decentralized event management platform built on the Stellar blockchain.
 
----
-
-## 🎯 What Does This Backend Do?
-
-This API is the bridge between your frontend and the Stellar network. It handles:
-
-- **Event Management**: Create, list, update, and delete events
-- **User Authentication**: Traditional auth + Stellar wallet linking
-- **Payment Orchestration**: Process payments, manage escrow, issue ticket tokens
-- **Sponsor System**: Match sponsors with events, handle contributions
-- **Ticket Verification**: Validate tickets on-chain via QR codes
-- **Refund Logic**: Handle cancellations and automatic refunds
-
-Basically, if it involves data or blockchain operations, this backend does it (and does it well).
+This backend is built with **NestJS + TypeScript + TypeORM + PostgreSQL** and serves as the core API layer that manages events, users, payments, sponsors, and blockchain operations ✨
 
 ---
 
-## 🛠️ Tech Stack
+# 🎯 What This Backend Does
 
-- **Runtime**: Node.js 18+
-- **Framework**: Express.js (or Fastify if you're feeling fancy)
-- **Database**: PostgreSQL (for events, users, registrations)
-- **Stellar SDK**: `stellar-sdk` for blockchain operations
-- **ORM**: Prisma or TypeORM (your choice)
-- **Authentication**: JWT + Stellar wallet verification
-- **API Style**: RESTful (GraphQL coming in Phase 2 maybe?)
+This API acts as the bridge between your frontend and the Stellar network. It handles:
+
+- Event management (CRUD)
+- User authentication + wallet linking
+- Payment orchestration & escrow handling
+- Sponsor contributions
+- Ticket issuance & verification
+- Refund workflows
+- Stellar blockchain interactions
+
+If it involves business logic, data, or blockchain operations — it happens here.
 
 ---
 
-## 🚀 Quick Start
+# 🛠️ Tech Stack (Updated)
 
-### Prerequisites
+- **Framework:** NestJS
+- **Language:** TypeScript
+- **Runtime:** Node.js 18+
+- **Database:** PostgreSQL
+- **ORM:** TypeORM
+- **Blockchain SDK:** stellar-sdk
+- **Authentication:** JWT + Wallet verification
+- **API Style:** REST
+- **Validation:** class-validator + class-transformer
+- **Docs:** Swagger (OpenAPI)
 
-- Node.js 18+ and npm/yarn/pnpm
-- PostgreSQL 14+ (or Docker)
-- A Stellar account (testnet for development)
-- Some testnet XLM (get it from [Stellar Laboratory](https://laboratory.stellar.org/))
+---
 
-### Installation
+# 🚀 Quick Start
+
+## Prerequisites
+
+- Node.js 18+
+- PostgreSQL 14+
+- npm / yarn / pnpm
+- Stellar testnet account + test XLM
+
+---
+
+## Installation
 
 ```bash
-# Install dependencies
+# install deps
 npm install
 
-# Set up environment variables
+# copy env
 cp .env.example .env
-# Edit .env with your config
 
-# Run database migrations
-npm run migrate
+# update env values
+# then run migrations
+npm run typeorm:migration:run
 
-# Start development server
-npm run dev
+# start dev server
+npm run start:dev
 ```
 
-The API will be running at `http://localhost:8000` (or whatever port you configure).
+API runs at:
+
+```
+http://localhost:3000
+```
+
+Swagger docs:
+
+```
+http://localhost:3000/api-docs
+```
 
 ---
 
-## 📁 Project Structure
+# 📁 Project Structure (NestJS Style)
 
 ```
 lumentix-backend/
 ├── src/
-│   ├── controllers/        # Request handlers
-│   │   ├── events.js
-│   │   ├── users.js
-│   │   ├── payments.js
-│   │   └── sponsors.js
-│   ├── services/           # Business logic
-│   │   ├── stellar.js      # Stellar SDK wrapper
-│   │   ├── payments.js      # Payment processing
-│   │   ├── tickets.js      # Ticket token management
-│   │   └── escrow.js       # Escrow account handling
-│   ├── models/             # Database models
-│   │   ├── Event.js
-│   │   ├── User.js
-│   │   ├── Registration.js
-│   │   └── Sponsor.js
-│   ├── routes/             # API routes
-│   │   ├── events.js
-│   │   ├── auth.js
-│   │   ├── payments.js
-│   │   └── sponsors.js
-│   ├── middleware/         # Custom middleware
-│   │   ├── auth.js
-│   │   ├── validation.js
-│   │   └── errorHandler.js
-│   ├── utils/              # Helpers and utilities
-│   │   ├── stellar.js
-│   │   └── validators.js
-│   └── app.js              # Express app setup
-├── migrations/             # Database migrations
-├── tests/                  # Test files
-├── .env.example            # Environment variables template
+│   ├── main.ts
+│   ├── app.module.ts
+│
+│   ├── config/
+│   │   ├── database.config.ts
+│   │   └── stellar.config.ts
+│
+│   ├── common/
+│   │   ├── guards/
+│   │   ├── filters/
+│   │   ├── interceptors/
+│   │   └── decorators/
+│
+│   ├── modules/
+│   │   ├── auth/
+│   │   │   ├── auth.module.ts
+│   │   │   ├── auth.controller.ts
+│   │   │   ├── auth.service.ts
+│   │   │   └── dto/
+│   │
+│   │   ├── users/
+│   │   ├── events/
+│   │   ├── payments/
+│   │   ├── sponsors/
+│   │   ├── tickets/
+│   │
+│   │   └── stellar/
+│   │       └── stellar.service.ts
+│
+├── test/
+├── .env.example
 ├── package.json
-└── README.md               # This file!
+└── README.md
 ```
 
 ---
 
-## 🔑 Core Features
+# 🔑 Core Modules
 
-### 1. Event Management
+## Events Module
 
-**Endpoints:**
-- `GET /api/events` - List all events (with filters)
-- `GET /api/events/:id` - Get event details
-- `POST /api/events` - Create new event (organizer only)
-- `PUT /api/events/:id` - Update event
-- `DELETE /api/events/:id` - Delete event
+**Endpoints**
 
-**What it does:**
-- Stores event metadata (title, description, dates, images) in PostgreSQL
-- Creates Stellar asset for ticket tokens
-- Sets up escrow account for payments
-- Links organizer's Stellar account
-
-### 2. Registration System
-
-**Endpoints:**
-- `POST /api/events/:id/register` - Register for event
-- `GET /api/events/:id/registrations` - List registrations (organizer only)
-- `GET /api/users/registrations` - Get user's registrations
-
-**Flow for Paid Events:**
-1. User initiates registration
-2. Backend creates payment transaction
-3. User approves via wallet
-4. Payment sent to escrow account
-5. Ticket token issued to user
-6. Registration record saved to database
-
-**Flow for Free Events:**
-1. User clicks register
-2. Optional: Issue free ticket token
-3. Registration record saved
-4. Done! (much simpler)
-
-### 3. Payment Processing
-
-**Endpoints:**
-- `POST /api/payments/initiate` - Start payment flow
-- `GET /api/payments/:id/status` - Check payment status
-- `POST /api/payments/:id/refund` - Process refund
-
-**How it works:**
-- Uses Stellar SDK to build transactions
-- Creates escrow accounts for event funds
-- Issues ticket tokens (e.g., `EVENT2024-TICKET`)
-- Supports XLM, USDC, EURT, and other Stellar assets
-- Handles multi-currency via path payments
-
-### 4. Sponsor System
-
-**Endpoints:**
-- `GET /api/sponsors/requests` - List events seeking sponsors
-- `POST /api/events/:id/sponsors/request` - Create sponsor request
-- `POST /api/sponsors/contribute` - Sponsor an event
-- `GET /api/events/:id/sponsors` - List event sponsors
-
-**Features:**
-- Sponsor tiers (Bronze/Silver/Gold)
-- Funding goals and deadlines
-- Multi-signature escrow for sponsor funds
-- Automatic milestone-based payouts
-
-### 5. Ticket Verification
-
-**Endpoints:**
-- `POST /api/tickets/verify` - Verify ticket via QR code
-- `GET /api/tickets/:id` - Get ticket details
-
-**Process:**
-- QR code contains ticket token ID
-- Backend queries Stellar network via Horizon API
-- Validates token ownership
-- Marks ticket as used (optional: burn token)
-
----
-
-## 🔐 Authentication
-
-### Traditional Auth
-- Email/password registration
-- JWT tokens for session management
-- Password hashing with bcrypt
-
-### Stellar Wallet Linking
-- Users can link their Stellar wallet
-- Verification via signed challenge transaction
-- Supports Freighter, LOBSTR, and other wallets
-
-### API Authentication
-- Protected routes require JWT token
-- Include token in `Authorization: Bearer <token>` header
-
----
-
-## 💰 Stellar Integration
-
-### Network Configuration
-
-```javascript
-// Testnet (development)
-const server = new StellarSdk.Server('https://horizon-testnet.stellar.org');
-const networkPassphrase = 'Test SDF Network ; September 2015';
-
-// Mainnet (production)
-const server = new StellarSdk.Server('https://horizon.stellar.org');
-const networkPassphrase = 'Public Global Stellar Network ; September 2015';
+```
+GET    /events
+GET    /events/:id
+POST   /events
+PATCH  /events/:id
+DELETE /events/:id
 ```
 
-### Key Operations
+**Responsibilities**
 
-**Creating Escrow Accounts:**
-- Generate keypair for each event
-- Fund with minimum balance (1 XLM)
-- Set up time-bound operations for auto-refunds
-
-**Issuing Ticket Tokens:**
-- Create asset code (e.g., `EVENT2024-TICKET`)
-- Issue tokens to user accounts
-- Set trustlines if needed
-
-**Processing Payments:**
-- Build payment transaction
-- Add memo with event/registration ID
-- Submit to network
-- Monitor via Horizon API
+- Store event metadata in PostgreSQL
+- Create Stellar asset codes for tickets
+- Setup escrow accounts
+- Link organizer wallet
 
 ---
 
-## 🗄️ Database Schema
+## Registration Module
 
-### Core Tables
+**Endpoints**
 
-**Events**
-- `id`, `title`, `description`, `organizer_id`
-- `start_date`, `end_date`, `location`
-- `price_xlm`, `price_usdc`, `max_attendees`
-- `stellar_asset_code`, `escrow_account_secret`
-- `sponsor_goal`, `sponsor_deadline`
-- `created_at`, `updated_at`
+```
+POST /events/:id/register
+GET  /events/:id/registrations
+GET  /users/me/registrations
+```
 
-**Users**
-- `id`, `email`, `password_hash`
-- `stellar_public_key`, `wallet_linked`
-- `role` (user/organizer/admin)
-- `created_at`, `updated_at`
+**Paid Flow**
 
-**Registrations**
-- `id`, `event_id`, `user_id`
-- `ticket_token_id`, `payment_tx_hash`
-- `status` (pending/confirmed/cancelled)
-- `created_at`, `updated_at`
-
-**Sponsors**
-- `id`, `event_id`, `sponsor_user_id`
-- `tier`, `amount`, `payment_tx_hash`
-- `status`, `created_at`
+1. Registration request created
+2. Payment transaction built
+3. Wallet approval
+4. Funds sent to escrow
+5. Ticket token issued
+6. DB record confirmed
 
 ---
 
-## 🔧 Environment Variables
+## Payments Module
 
-Create a `.env` file:
+**Endpoints**
+
+```
+POST /payments/initiate
+GET  /payments/:id/status
+POST /payments/:id/refund
+```
+
+**Features**
+
+- Stellar transaction building
+- Escrow funding
+- Ticket token issuance
+- Multi-asset support
+- Path payments
+
+---
+
+## Sponsors Module
+
+Sponsor tiers, funding goals, contribution tracking, escrow distribution.
+
+---
+
+## Tickets Module
+
+QR-based ticket verification via Stellar ownership lookup.
+
+---
+
+# 🔐 Authentication (NestJS)
+
+## JWT Auth
+
+- Passport + JWT strategy
+- Access tokens
+- Refresh tokens (optional)
+- Role-based guards
+
+```
+Authorization: Bearer <token>
+```
+
+## Wallet Linking
+
+- Challenge signing
+- Public key verification
+- Wallet binding to user entity
+
+---
+
+# 🗄️ Database (TypeORM)
+
+## Entities
+
+### UserEntity
+
+- id
+- email
+- passwordHash
+- stellarPublicKey
+- role
+- createdAt
+
+### EventEntity
+
+- id
+- title
+- description
+- price
+- assetCode
+- escrowAccount
+- organizerId
+
+### RegistrationEntity
+
+- id
+- eventId
+- userId
+- paymentTxHash
+- ticketTokenId
+- status
+
+### SponsorEntity
+
+- id
+- eventId
+- userId
+- amount
+- tier
+
+---
+
+# ⚙️ Environment Variables (Updated)
 
 ```env
-# Server
-PORT=8000
+PORT=3000
 NODE_ENV=development
 
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/lumentix
+# Postgres
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=password
+DB_NAME=lumentix
+
+# TypeORM
+DB_SYNCHRONIZE=false
+DB_LOGGING=true
+
+# JWT
+JWT_SECRET=super_secret
+JWT_EXPIRES=1h
 
 # Stellar
 STELLAR_NETWORK=testnet
 HORIZON_URL=https://horizon-testnet.stellar.org
-STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 
-# Platform Account (for fees, escrow management)
-PLATFORM_SECRET_KEY=your_secret_key_here
-PLATFORM_PUBLIC_KEY=your_public_key_here
-
-# JWT
-JWT_SECRET=your_super_secret_jwt_key
-JWT_EXPIRES_IN=7d
+PLATFORM_PUBLIC_KEY=
+PLATFORM_SECRET_KEY=
 
 # CORS
 CORS_ORIGIN=http://localhost:3000
-
-# Optional: IPFS (for event images)
-IPFS_GATEWAY=https://ipfs.io/ipfs/
 ```
 
 ---
 
-## 🧪 Testing
+# 🧪 Testing (NestJS)
 
 ```bash
-# Run all tests
-npm test
-
-# Run with coverage
-npm run test:coverage
-
-# Run integration tests (requires testnet)
-npm run test:integration
+npm run test
+npm run test:e2e
+npm run test:cov
 ```
 
-**Testnet Setup:**
-- Get testnet XLM from [Stellar Laboratory](https://laboratory.stellar.org/)
-- Use testnet Horizon API
-- Create test accounts for different scenarios
-
 ---
 
-## 🚨 Error Handling
+# 📚 Swagger Setup
 
-The API uses consistent error responses:
+Swagger is enabled in `main.ts`:
 
-```json
-{
-  "error": {
-    "code": "EVENT_NOT_FOUND",
-    "message": "Event with ID 123 does not exist",
-    "status": 404
-  }
-}
+- Global config
+- JWT bearer scheme
+- Module tags
+- DTO decorators
+
+Docs available at:
+
+```
+/api-docs
 ```
 
-**Common Error Codes:**
-- `INVALID_CREDENTIALS` - Auth failure
-- `EVENT_NOT_FOUND` - Event doesn't exist
-- `PAYMENT_FAILED` - Stellar transaction failed
-- `INSUFFICIENT_BALANCE` - Not enough XLM
-- `TICKET_ALREADY_USED` - Ticket verification failed
+---
+
+# 🔒 Security
+
+- DTO validation (class-validator)
+- Global validation pipe
+- Guards for protected routes
+- Rate limiting (nestjs/throttler)
+- Env-based secrets
+- TypeORM parameterized queries
+- CORS config
+- Helmet middleware
 
 ---
 
-## 📊 API Rate Limiting
+# 📊 Logging & Monitoring
 
-- **Public endpoints**: 100 requests/minute
-- **Authenticated endpoints**: 1000 requests/minute
-- **Payment endpoints**: 10 requests/minute (to prevent spam)
-
----
-
-## 🔒 Security Best Practices
-
-- ✅ Always validate user input
-- ✅ Use parameterized queries (prevent SQL injection)
-- ✅ Rate limit sensitive endpoints
-- ✅ Store secrets in environment variables
-- ✅ Use HTTPS in production
-- ✅ Validate Stellar signatures
-- ✅ Implement CORS properly
-- ✅ Log suspicious activities
+- NestJS Logger or Winston
+- Structured logs
+- Error filters
+- Request tracing interceptor
 
 ---
 
-## 🐛 Debugging
-
-### Enable Stellar Transaction Logging
-
-```javascript
-// In your stellar service
-console.log('Transaction XDR:', transaction.toXDR());
-console.log('Transaction Hash:', transaction.hash().toString('hex'));
-```
-
-### Check Horizon API
+# 🚀 Migration Commands (TypeORM)
 
 ```bash
-# Get account info
-curl https://horizon-testnet.stellar.org/accounts/GABCD...
+# generate migration
+npm run typeorm:migration:generate -- src/database/migrations/init
 
-# Get transaction
-curl https://horizon-testnet.stellar.org/transactions/abc123...
+# run migration
+npm run typeorm:migration:run
+
+# revert
+npm run typeorm:migration:revert
 ```
 
 ---
 
-## 📈 Monitoring & Logging
+# 🐛 Debugging Stellar
 
-- **Logging**: Use Winston or Pino for structured logs
-- **Monitoring**: Track API response times, error rates
-- **Alerts**: Set up alerts for failed payments, high error rates
-- **Analytics**: Track event creation, registrations, payments
+Log transactions inside `stellar.service.ts`:
 
----
-
-## 🗺️ Roadmap
-
-### Phase 1: MVP ✅
-- [x] Basic event CRUD
-- [x] User authentication
-- [x] Free and paid registration
-- [x] Basic payment processing
-- [x] Sponsor listing
-
-### Phase 2: Enhanced Features 🚧
-- [ ] Transferable ticket tokens
-- [ ] Multi-currency support
-- [ ] Automated refunds (time-bound operations)
-- [ ] QR code ticket verification
-- [ ] Sponsor tiers and benefits
-- [ ] Revenue sharing (platform fees)
-
-### Phase 3: Advanced Features 🔮
-- [ ] Soroban smart contracts
-- [ ] Recurring events
-- [ ] Event analytics API
-- [ ] Sponsor matching algorithm
-- [ ] Multi-signature escrow
-- [ ] NFT event badges
+```ts
+this.logger.debug(transaction.toXDR());
+this.logger.debug(transaction.hash().toString('hex'));
+```
 
 ---
 
-## 🤝 Contributing
+# 🗺️ Roadmap
 
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Write tests for your changes
-4. Commit (`git commit -m 'Add amazing feature'`)
-5. Push (`git push origin feature/amazing-feature`)
-6. Open a Pull Request
+### Phase 1 — MVP
 
-**Code Style:**
-- Use ESLint/Prettier
-- Follow existing patterns
-- Write meaningful commit messages
-- Add tests for new features
+- Event CRUD
+- Auth
+- Registration
+- Payments
+- Sponsor system
 
----
+### Phase 2
 
-## 📚 Resources
+- Refund automation
+- Ticket transfer
+- QR verification
+- Multi-currency
 
-- [Stellar Documentation](https://developers.stellar.org/)
-- [Stellar SDK (JavaScript)](https://github.com/stellar/js-stellar-sdk)
-- [Horizon API Reference](https://developers.stellar.org/api)
-- [Soroban Smart Contracts](https://soroban.stellar.org/)
-- [Express.js Guide](https://expressjs.com/)
+### Phase 3
+
+- Soroban contracts
+- Multi-sig escrow
+- Analytics
 
 ---
 
-## 💡 Tips & Tricks
+# 🤝 Contributing
 
-**Development:**
-- Use Stellar testnet for everything until you're ready
-- Keep testnet XLM handy (you can always get more)
-- Use Stellar Laboratory to inspect transactions
-- Test with multiple accounts (organizer, attendee, sponsor)
+- Follow NestJS module structure
+- Use DTOs for all input
+- Separate guards/services/controllers
+- Write tests
+- Use Prettier + ESLint
 
-**Production:**
-- Monitor escrow account balances
-- Set up alerts for failed transactions
-- Keep platform account funded
-- Backup database regularly
-- Use environment-specific configs
+## License
 
----
-
-## 🆘 Troubleshooting
-
-**"Insufficient balance" errors:**
-- Check account has enough XLM for fees
-- Verify minimum balance requirements (1 XLM per account)
-
-**"Transaction failed" errors:**
-- Check network passphrase matches
-- Verify account sequence numbers
-- Ensure trustlines are set for custom assets
-
-**Database connection issues:**
-- Verify PostgreSQL is running
-- Check DATABASE_URL in .env
-- Ensure database exists
-
----
-
-## 📄 License
-
-MIT License - do whatever you want with it!
-
----
-
-**Built with ❤️ and ⚡ on the Stellar network**
-
-*Remember: With great blockchain power comes great responsibility (and really low fees)*
+Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
