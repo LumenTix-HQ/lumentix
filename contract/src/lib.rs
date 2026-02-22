@@ -1,6 +1,7 @@
 #![no_std]
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 extern crate alloc;
 use alloc::string::String;
 use alloc::string::ToString;
@@ -8,30 +9,35 @@ use soroban_sdk::{contractimpl, contracttype, Env, Address, Vec, Symbol};
 =======
 use soroban_sdk::{contractimpl, contracttype, Env, Address, Vec, Symbol, String, BytesN};
 >>>>>>> 79a4553 (wip: add tests to contract)
+=======
+use soroban_sdk::{contracttype, Env, Address, Vec, Symbol, String, symbol_short};
+>>>>>>> 2a1a6e6 (feat(contract): implement on-chain sponsor tier management with Soroban)
 
 #[contracttype]
+#[derive(Clone)]
 pub struct Tier {
     pub price: i128,
     pub max_sponsors: u32,
     pub sponsor_count: u32,
 }
 
-pub struct SponsorsContract;
-
-impl SponsorsContract {
-    fn organizer_key(event_id: &String) -> (Symbol, String) {
-        (Symbol::short("org"), event_id.clone())
-    }
-
-    fn tier_key(event_id: &String, tier_id: &String) -> (Symbol, String, String) {
-        (Symbol::short("tier"), event_id.clone(), tier_id.clone())
-    }
-
-    fn contributions_key(event_id: &String, tier_id: &String) -> (Symbol, String, String) {
-        (Symbol::short("contrib"), event_id.clone(), tier_id.clone())
-    }
+pub fn register_sponsor_tier(
+    env: &Env,
+    event_id: String,
+    tier_id: String,
+    price: i128,
+    max_sponsors: u32,
+) {
+    let key = (symbol_short!("tier"), event_id.clone(), tier_id.clone());
+    let tier = Tier {
+        price,
+        max_sponsors,
+        sponsor_count: 0,
+    };
+    env.storage().persistent().set(&key, &tier);
 }
 
+<<<<<<< HEAD
 #[contractimpl]
 impl SponsorsContract {
     // Register a sponsor tier for an event. The first caller for a given event becomes
@@ -87,21 +93,40 @@ impl SponsorsContract {
 
         tier.sponsor_count = tier.sponsor_count.saturating_add(1);
         env.storage().set(&key, &tier);
+=======
+pub fn contribute(env: &Env, event_id: String, tier_id: String, sponsor: Address, amount: i128) {
+    let key = (symbol_short!("tier"), event_id.clone(), tier_id.clone());
+    
+    let mut tier = if let Some(t) = env.storage().persistent().get::<(Symbol, String, String), Tier>(&key) {
+        t
+    } else {
+        panic!("tier not found");
+    };
+
+    if tier.sponsor_count >= tier.max_sponsors {
+        panic!("tier is full");
     }
 
-    // View function: returns (count, sponsors)
-    pub fn get_tier_contributions(env: Env, event_id: String, tier_id: String) -> (u32, Vec<Address>) {
-        let key = SponsorsContract::contributions_key(&event_id, &tier_id);
-        let list: Vec<Address> = env
-            .storage()
-            .get::<(Symbol, String, String), Vec<Address>>(&key)
-            .unwrap_or_else(|| Vec::new(&env));
-
-        let count = list.len() as u32;
-        (count, list)
+    if amount != tier.price {
+        panic!("incorrect amount");
+>>>>>>> 2a1a6e6 (feat(contract): implement on-chain sponsor tier management with Soroban)
     }
+
+    let ckey = (symbol_short!("contrib"), event_id.clone(), tier_id.clone());
+    let mut list: Vec<Address> = if let Some(list) = env.storage().persistent().get::<(Symbol, String, String), Vec<Address>>(&ckey) {
+        list
+    } else {
+        Vec::new(env)
+    };
+
+    list.push_back(sponsor.clone());
+    env.storage().persistent().set(&ckey, &list);
+
+    tier.sponsor_count = tier.sponsor_count.saturating_add(1);
+    env.storage().persistent().set(&key, &tier);
 }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 #[cfg(test)]
 mod tests {
@@ -114,79 +139,92 @@ mod test {
     mod tests {
         use super::*;
         use soroban_sdk::{Env, Address, BytesN};
+=======
+pub fn get_tier_contributions(env: &Env, event_id: String, tier_id: String) -> (u32, Vec<Address>) {
+    let key = (symbol_short!("contrib"), event_id.clone(), tier_id.clone());
+    let list: Vec<Address> = if let Some(list) = env.storage().persistent().get::<(Symbol, String, String), Vec<Address>>(&key) {
+        list
+    } else {
+        Vec::new(env)
+    };
+>>>>>>> 2a1a6e6 (feat(contract): implement on-chain sponsor tier management with Soroban)
 
-        fn addr(env: &Env, b: u8) -> Address {
-            Address::from_contract_id(env, &BytesN::from_array(env, &[b; 32]))
-        }
+    let count = list.len();
+    (count, list)
+}
 
-        #[test]
-        fn register_and_contribute_flow() {
-            let env = Env::default();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
 
-            let organizer = addr(&env, 1);
-            env.set_invoker(organizer.clone());
+    #[test]
+    fn test_simple_register() {
+        let env = Env::default();
+        env.mock_all_auths();
 
-            // create on-chain strings
-            let event = String::from_str(&env, "event1");
-            let tier = String::from_str(&env, "tierA");
+        let event = String::from_str(&env, "event1");
+        let tier = String::from_str(&env, "tierA");
 
-            // register a tier
-            SponsorsContract::register_sponsor_tier(env.clone(), event.clone(), tier.clone(), 100_i128, 2u32);
+        register_sponsor_tier(&env, event, tier, 100_i128, 2u32);
+    }
 
-            // contribute one sponsor
-            let sponsor1 = addr(&env, 2);
-            SponsorsContract::contribute(env.clone(), event.clone(), tier.clone(), sponsor1.clone(), 100_i128);
+    #[test]
+    fn register_and_contribute_flow() {
+        let env = Env::default();
+        env.mock_all_auths();
 
-            // verify contributions
-            let (count, list) = SponsorsContract::get_tier_contributions(env.clone(), event.clone(), tier.clone());
-            assert_eq!(count, 1);
-            assert_eq!(list.len(), 1usize);
+        let event = String::from_str(&env, "event1");
+        let tier = String::from_str(&env, "tierA");
 
-            // contribute second sponsor
-            let sponsor2 = addr(&env, 3);
-            SponsorsContract::contribute(env.clone(), event.clone(), tier.clone(), sponsor2.clone(), 100_i128);
+        register_sponsor_tier(&env, event.clone(), tier.clone(), 100_i128, 2u32);
 
-            let (count2, list2) = SponsorsContract::get_tier_contributions(env.clone(), event.clone(), tier.clone());
-            assert_eq!(count2, 2);
-            assert_eq!(list2.len(), 2usize);
-        }
+        let sponsor1 = Address::generate(&env);
+        contribute(&env, event.clone(), tier.clone(), sponsor1, 100_i128);
 
-        #[test]
-        #[should_panic(expected = "tier is full")]
-        fn contribute_beyond_capacity_panics() {
-            let env = Env::default();
-            let organizer = addr(&env, 10);
-            env.set_invoker(organizer.clone());
+        let (count, list) = get_tier_contributions(&env, event.clone(), tier.clone());
+        assert_eq!(count, 1u32);
+        assert_eq!(list.len(), 1u32);
 
-            let event = String::from_str(&env, "e2");
-            let tier = String::from_str(&env, "tX");
+        let sponsor2 = Address::generate(&env);
+        contribute(&env, event.clone(), tier.clone(), sponsor2, 100_i128);
 
-            SponsorsContract::register_sponsor_tier(env.clone(), event.clone(), tier.clone(), 50_i128, 1u32);
+        let (count2, list2) = get_tier_contributions(&env, event.clone(), tier.clone());
+        assert_eq!(count2, 2u32);
+        assert_eq!(list2.len(), 2u32);
+    }
 
-            let s1 = addr(&env, 11);
-            SponsorsContract::contribute(env.clone(), event.clone(), tier.clone(), s1.clone(), 50_i128);
+    #[test]
+    #[should_panic(expected = "tier is full")]
+    fn contribute_beyond_capacity_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
 
-            // second contribution should panic
-            let s2 = addr(&env, 12);
-            SponsorsContract::contribute(env.clone(), event.clone(), tier.clone(), s2.clone(), 50_i128);
-        }
+        let event = String::from_str(&env, "e2");
+        let tier = String::from_str(&env, "tX");
 
-        #[test]
-        #[should_panic(expected = "incorrect amount")]
-        fn incorrect_amount_panics() {
-            let env = Env::default();
-            let organizer = addr(&env, 20);
-            env.set_invoker(organizer.clone());
+        register_sponsor_tier(&env, event.clone(), tier.clone(), 50_i128, 1u32);
 
-            let event = String::from_str(&env, "e3");
-            let tier = String::from_str(&env, "tY");
+        let s1 = Address::generate(&env);
+        contribute(&env, event.clone(), tier.clone(), s1, 50_i128);
 
-            SponsorsContract::register_sponsor_tier(env.clone(), event.clone(), tier.clone(), 123_i128, 2u32);
+        let s2 = Address::generate(&env);
+        contribute(&env, event.clone(), tier.clone(), s2, 50_i128);
+    }
 
-            let s = addr(&env, 21);
-            // incorrect amount should panic
-            SponsorsContract::contribute(env.clone(), event.clone(), tier.clone(), s.clone(), 1_i128);
-        }
+    #[test]
+    #[should_panic(expected = "incorrect amount")]
+    fn incorrect_amount_panics() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let event = String::from_str(&env, "e3");
+        let tier = String::from_str(&env, "tY");
+
+        register_sponsor_tier(&env, event.clone(), tier.clone(), 123_i128, 2u32);
+
+        let s = Address::generate(&env);
+        contribute(&env, event.clone(), tier.clone(), s, 1_i128);
     }
 >>>>>>> 79a4553 (wip: add tests to contract)
 }
