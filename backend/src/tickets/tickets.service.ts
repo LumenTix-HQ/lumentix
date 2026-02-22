@@ -86,4 +86,40 @@ export class TicketsService {
         ticket.ownerId = newOwnerId;
         return this.ticketRepo.save(ticket);
     }
+
+    async verifyTicket(ticketId: string, signature: string): Promise<TicketEntity> {
+        // 1. Validate Signature (Cryptographic check)
+        const isValidSignature = this.verifySignature(ticketId, signature);
+        if (!isValidSignature) {
+            throw new UnauthorizedException('Invalid ticket signature');
+        }
+
+        // 2. Validate ticket exists
+        const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+        if (!ticket) {
+            throw new NotFoundException('Ticket not found');
+        }
+
+        // 3. Validate ticket status
+        if (ticket.status === 'used') {
+            throw new BadRequestException('Ticket has already been used');
+        }
+        if (ticket.status !== 'valid') {
+            throw new BadRequestException('Ticket is no longer valid');
+        }
+
+        // 4. Optional: Confirm on Stellar (Verify asset/tx if necessary)
+        // const tx = await this.stellarService.getTransaction(ticket.transactionHash);
+
+        // 5. Mark as used
+        ticket.status = 'used';
+        return this.ticketRepo.save(ticket);
+    }
+
+    private verifySignature(ticketId: string, signature: string): boolean {
+        // TODO: Implement actual cryptographic verification 
+        // using your system's Public Key.
+        // For now, we assume true if signature exists for the sake of the flow.
+        return !!signature; 
+    }
 }

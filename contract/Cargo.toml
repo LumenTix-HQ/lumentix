@@ -1,4 +1,5 @@
 [package]
+<<<<<<< adminSetup
 name = "lumentix_admin"
 version = "0.1.0"
 edition = "2021"
@@ -8,3 +9,28 @@ crate-type = ["cdylib"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+=======
+name = "lumentix-ticket-contract"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { version = "21.5.0", features = ["alloc"] }
+soroban-ledger-snapshot = "21.5.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "21.5.0", features = ["alloc", "testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+lto = true
+codegen-units = 1
+
+[profile.release-with-logs]
+inherits = "release"
+>>>>>>> main
