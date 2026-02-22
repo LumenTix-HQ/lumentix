@@ -1,200 +1,31 @@
-# Lumentix Soroban Smart Contract
+Lumentix on-chain sponsors contract (Soroban)
 
-A comprehensive ticketing and event management smart contract built on Stellar's Soroban platform.
+This directory contains a Soroban smart contract that provides an on-chain
+equivalent for sponsor tiers and contributions. It implements three primary
+functions:
 
-## Features
+- `register_sponsor_tier(env, event_id, tier_id, price, max_sponsors)`
+  - Registers a tier for an event. The first caller for a given event is
+    recorded as the event organizer; subsequent calls require the organizer's
+    authorization.
+- `contribute(env, event_id, tier_id, sponsor, amount)`
+  - Verifies capacity, records the sponsor in the tier contribution list, and
+    increments the sponsor count. Token payment handling is intentionally
+    left minimal and should be integrated with a token client (transfer/pull)
+    per your token strategy.
+- `get_tier_contributions(env, event_id, tier_id)`
+  - View that returns the sponsor count and the list of sponsor addresses.
 
-- **Event Management**: Create, cancel, and complete events
-- **Ticket Sales**: Purchase and validate tickets with escrow protection
-- **Token Integration**: Full SAC token support for payments and refunds
-- **Refund System**: Automatic token refunds for cancelled events
-- **Escrow Protection**: Funds held in contract until event completion
-- **Comprehensive Error Handling**: Clear error types for debugging
-- **Input Validation**: All inputs validated before processing
+Notes / Next steps
+- The contract is a minimal, first-pass implementation. You should:
+  - Add explicit token transfer semantics (token client calls / allowances).
+  - Add events/logs for registrations and contributions for better auditability.
+  - Add unit tests using the Soroban SDK test harness and CI steps to build.
 
-## Error Handling
-
-The contract uses a comprehensive `LumentixError` enum with 18 distinct error types:
-
-| Error Code | Error Name              | Description                   |
-| ---------- | ----------------------- | ----------------------------- |
-| 1          | NotInitialized          | Contract not initialized      |
-| 2          | AlreadyInitialized      | Contract already initialized  |
-| 3          | Unauthorized            | Caller not authorized         |
-| 4          | EventNotFound           | Event ID doesn't exist        |
-| 5          | TicketNotFound          | Ticket ID doesn't exist       |
-| 6          | EventSoldOut            | Maximum capacity reached      |
-| 7          | TicketAlreadyUsed       | Ticket already validated      |
-| 8          | InvalidStatusTransition | Invalid state change          |
-| 9          | InsufficientFunds       | Payment too low               |
-| 10         | RefundNotAllowed        | Refund not permitted          |
-| 11         | EventNotCancelled       | Event must be cancelled first |
-| 12         | EscrowAlreadyReleased   | Funds already released        |
-| 13         | InvalidAmount           | Amount must be > 0            |
-| 14         | CapacityExceeded        | Capacity must be > 0          |
-| 15         | InvalidTimeRange        | Start must be before end      |
-| 16         | EmptyString             | String cannot be empty        |
-| 17         | InvalidAddress          | Invalid address provided      |
-| 18         | InsufficientEscrow      | Escrow balance too low        |
-
-## Input Validation
-
-All contract functions validate inputs before processing:
-
-- **Amounts**: Must be positive (> 0)
-- **Capacity**: Must be positive (> 0)
-- **Time Ranges**: Start time must be before end time
-- **Strings**: Cannot be empty
-- **Addresses**: Validated by Soroban SDK
-
-## Contract Functions
-
-### Initialization
-
-```rust
-initialize(admin: Address, token: Address) -> Result<(), LumentixError>
-```
-
-Initialize the contract with an admin address and payment token. Can only be called once.
-
-### Event Management
-
-```rust
-create_event(
-    organizer: Address,
-    name: String,
-    description: String,
-    location: String,
-    start_time: u64,
-    end_time: u64,
-    ticket_price: i128,
-    max_tickets: u32,
-) -> Result<u64, LumentixError>
-```
-
-Create a new event. Returns the event ID.
-
-**Validations**:
-
-- Price must be > 0
-- Capacity must be > 0
-- Start time < end time
-- Name cannot be empty
-
-```rust
-cancel_event(organizer: Address, event_id: u64) -> Result<(), LumentixError>
-```
-
-Cancel an event. Only the organizer can cancel. Enables refunds.
-
-```rust
-complete_event(organizer: Address, event_id: u64) -> Result<(), LumentixError>
-```
-
-Mark an event as completed after the end time. Required before releasing escrow.
-
-### Ticket Management
-
-```rust
-purchase_ticket(
-    buyer: Address,
-    event_id: u64,
-    payment_amount: i128,
-) -> Result<u64, LumentixError>
-```
-
-Purchase a ticket for an event. Transfers tokens from buyer to contract. Returns the ticket ID.
-
-**Validations**:
-
-- Event must be active
-- Event not sold out
-- Payment >= ticket price
-
-```rust
-use_ticket(ticket_id: u64, validator: Address) -> Result<(), LumentixError>
-```
-
-Mark a ticket as used. Only the event organizer can validate tickets.
-
-```rust
-refund_ticket(ticket_id: u64, buyer: Address) -> Result<(), LumentixError>
-```
-
-Request a refund for a ticket. Only available if event is cancelled. Transfers tokens back to buyer.
-
-```rust
-process_refund(env: Env, event_id: u64, ticket_id: u64, buyer: Address) -> Result<(), LumentixError>
-```
-
-Alias for refund_ticket that verifies event association.
-
-### Escrow ManagementTransfers tokens from contract to organizer.
-
-```rust
-release_escrow(organizer: Address, event_id: u64) -> Result<i128, LumentixError>
-```
-
-Release escrow funds to the organizer. Only available after event completion.
-
-### Query Functions
-
-```rust
-get_event(event_id: u64) -> Result<Event, LumentixError>
-get_ticket(ticket_id: u64) -> Result<Ticket, LumentixError>
-get_admin() -> Result<Address, LumentixError>
-```
-
-## Building
+Build (requires Rust + Soroban CLI):
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+cd contract
+cargo build --target wasm32-unknown-unknown
 ```
-
-## Testing
-
-```bash
-cargo test
-```
-
-## Deployment
-
-1. Build the contract:
-
-```bash
-soroban contract build
-```
-
-2. Deploy to testnet:
-
-```bash
-soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/lumentix_contract.wasm \
-  --source <YOUR_SECRET_KEY> \
-  --rpc-url https://soroban-testnet.stellar.org \
-  --network-passphrase "Test SDF Network ; September 2015"
-```
-
-3. Initialize the contract:
-
-```bash
-soroban contract invoke \
-  --id <CONTRACT_ID> \
-  --source <YOUR_SECRET_KEY> \
-  --rpc-url https://soroban-testnet.stellar.org \
-  --network-passphrase "Test SDF Network ; September 2015" \
-  -- initialize \
-  --admin <ADMIN_ADDRESS>
-```
-
-## Security Considerations
-
-1. **Authorization**: All state-changing functions require caller authentication
-2. **Validation**: All inputs validated before processing
-3. **Escrow**: Funds held securely until event completion or cancellation
-4. **Error Handling**: No panic! calls - all errors returned explicitly
-5. **State Transitions**: Strict validation of status changes
-
-## License
-
-MIT
+Contract Folder

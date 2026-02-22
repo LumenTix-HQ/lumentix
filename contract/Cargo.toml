@@ -1,28 +1,20 @@
 [package]
-name = "lumentix-ticket-contract"
-name = "lumentix-contract"
+name = "lumentix_sponsors"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-soroban-sdk = { version = "21.5.0", features = ["alloc"] }
-soroban-ledger-snapshot = "21.5.0"
+soroban-sdk = { version = "25.1.1", features = ["alloc"] }
 
 [dev-dependencies]
-soroban-sdk = { version = "21.5.0", features = ["alloc", "testutils"] }
+soroban-sdk = { version = "25.1.1", features = ["alloc", "testutils"] }
 
 [profile.release]
 opt-level = "z"
 overflow-checks = true
-debug = 0
-debug-assertions = false
-panic = "abort"
-
-[profile.release-with-logs]
-inherits = "release"
-debug-assertions = true
-overflow-checks = true
+lto = true
+codegen-units = 1
