@@ -8,8 +8,6 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-<<<<<<< HEAD
-<<<<<<< HEAD
 soroban-sdk = { version = "25.1.1", features = ["alloc"] }
 
 [dev-dependencies]
@@ -20,11 +18,3 @@ opt-level = "z"
 overflow-checks = true
 lto = true
 codegen-units = 1
-=======
-=======
-soroban-sdk = "25.1.1"
-
-[dev-dependencies]
->>>>>>> 2a1a6e6 (feat(contract): implement on-chain sponsor tier management with Soroban)
-soroban-sdk = { version = "25.1.1", features = ["testutils"] }
->>>>>>> 79a4553 (wip: add tests to contract)
