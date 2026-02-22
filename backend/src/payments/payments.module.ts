@@ -7,6 +7,7 @@ import { AuditModule } from '../audit/audit.module';
 import { EventsModule } from '../events/events.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { EscrowModule } from './escrow.module';
+import { RefundModule } from './refunds/refund.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { EscrowModule } from './escrow.module';
     StellarModule,
     AuditModule,
     EscrowModule,
+    RefundModule, 
   ],
   providers: [PaymentsService],
   controllers: [PaymentsController],

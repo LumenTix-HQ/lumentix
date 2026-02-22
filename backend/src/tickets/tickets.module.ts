@@ -7,6 +7,7 @@ import { TicketsController } from './tickets.controller';
 
 import { PaymentsModule } from '../payments/payments.module';
 import { StellarModule } from '../stellar/stellar.module';
+import { VerificationController } from './verification/verification.controller';
 
 @Module({
     imports: [
@@ -15,7 +16,7 @@ import { StellarModule } from '../stellar/stellar.module';
         StellarModule,
     ],
     providers: [TicketsService],
-    controllers: [TicketsController],
+    controllers: [TicketsController, VerificationController], 
     exports: [TicketsService],
 })
 export class TicketsModule { }
