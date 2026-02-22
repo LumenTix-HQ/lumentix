@@ -1,4 +1,7 @@
-/target/
-Cargo.lock
-*.wasm
-*.wasm.gz
+# Rust's output directory
+target
+
+# Local settings
+.soroban
+.stellar
+test_snapshots
