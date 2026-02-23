@@ -1,3 +1,4 @@
+// Lumentix Smart Contract - Core Logic
 use std::collections::HashMap;
 use std::cell::RefCell;
 use serde::{Serialize, Deserialize};
