@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use crate::TicketContract;
 use soroban_sdk::{symbol_short, testutils, Address, Env};
 
@@ -208,7 +210,7 @@ fn test_ticket_immutability() {
 }
 
 #[test]
-#[should_panic(expected = "not ticket owner")]
+#[should_panic(expected = "Unauthorized: not the ticket owner")]
 fn test_transfer_unauthorized() {
     let (env, contract_id) = setup();
 
@@ -256,5 +258,125 @@ fn test_mark_nonexistent_ticket() {
 
     env.as_contract(&contract_id, || {
         TicketContract::mark_ticket_used(env.clone(), ticket_id);
+    });
+}
+
+#[test]
+fn test_is_ticket_owner_correct_owner() {
+    let (env, contract_id) = setup();
+
+    let ticket_id = symbol_short!("TICKET9");
+    let event_id = symbol_short!("EVENT9");
+    let owner = <Address as testutils::Address>::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        TicketContract::issue_ticket(env.clone(), ticket_id.clone(), event_id, owner.clone());
+
+        let result = TicketContract::is_ticket_owner(env.clone(), ticket_id, owner.clone());
+        assert!(result);
+    });
+}
+
+#[test]
+fn test_is_ticket_owner_wrong_owner() {
+    let (env, contract_id) = setup();
+
+    let ticket_id = symbol_short!("TICKETA");
+    let event_id = symbol_short!("EVENTA");
+    let owner = <Address as testutils::Address>::generate(&env);
+    let other = <Address as testutils::Address>::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        TicketContract::issue_ticket(env.clone(), ticket_id.clone(), event_id, owner.clone());
+
+        let result = TicketContract::is_ticket_owner(env.clone(), ticket_id, other);
+        assert!(!result);
+    });
+}
+
+#[test]
+#[should_panic(expected = "Ticket not found")]
+fn test_is_ticket_owner_nonexistent() {
+    let (env, contract_id) = setup();
+
+    let ticket_id = symbol_short!("NOEXIST");
+    let address = <Address as testutils::Address>::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        TicketContract::is_ticket_owner(env.clone(), ticket_id, address);
+    });
+}
+
+#[test]
+fn test_get_ticket_status_not_used() {
+    let (env, contract_id) = setup();
+
+    let ticket_id = symbol_short!("TICKETB");
+    let event_id = symbol_short!("EVENTB");
+    let owner = <Address as testutils::Address>::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        TicketContract::issue_ticket(env.clone(), ticket_id.clone(), event_id, owner.clone());
+
+        let (status_owner, is_used) =
+            TicketContract::get_ticket_status(env.clone(), ticket_id);
+        assert_eq!(status_owner, owner);
+        assert!(!is_used);
+    });
+}
+
+#[test]
+fn test_get_ticket_status_after_use() {
+    let (env, contract_id) = setup();
+
+    let ticket_id = symbol_short!("TICKETC");
+    let event_id = symbol_short!("EVENTC");
+    let owner = <Address as testutils::Address>::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        TicketContract::issue_ticket(env.clone(), ticket_id.clone(), event_id, owner.clone());
+        TicketContract::mark_ticket_used(env.clone(), ticket_id.clone());
+
+        let (status_owner, is_used) =
+            TicketContract::get_ticket_status(env.clone(), ticket_id);
+        assert_eq!(status_owner, owner);
+        assert!(is_used);
+    });
+}
+
+#[test]
+fn test_get_ticket_status_after_transfer() {
+    let (env, contract_id) = setup();
+
+    let ticket_id = symbol_short!("TICKETD");
+    let event_id = symbol_short!("EVENTD");
+    let owner = <Address as testutils::Address>::generate(&env);
+    let new_owner = <Address as testutils::Address>::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        TicketContract::issue_ticket(env.clone(), ticket_id.clone(), event_id, owner.clone());
+        TicketContract::transfer_ticket(
+            env.clone(),
+            ticket_id.clone(),
+            owner.clone(),
+            new_owner.clone(),
+        );
+
+        let (status_owner, is_used) =
+            TicketContract::get_ticket_status(env.clone(), ticket_id);
+        assert_eq!(status_owner, new_owner);
+        assert!(!is_used);
+    });
+}
+
+#[test]
+#[should_panic(expected = "Ticket not found")]
+fn test_get_ticket_status_nonexistent() {
+    let (env, contract_id) = setup();
+
+    let ticket_id = symbol_short!("NOEXIST");
+
+    env.as_contract(&contract_id, || {
+        TicketContract::get_ticket_status(env.clone(), ticket_id);
     });
 }

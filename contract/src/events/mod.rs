@@ -1,5 +1,6 @@
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
+//a type for tranfer of event
 pub struct TransferEvent;
 
 impl TransferEvent {
