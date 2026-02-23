@@ -1,5 +1,4 @@
 [package]
-<<<<<<< adminSetup
 name = "lumentix_admin"
 version = "0.1.0"
 edition = "2021"
@@ -9,8 +8,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-=======
 name = "lumentix-ticket-contract"
+name = "lumentix-contract"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -30,7 +29,11 @@ opt-level = "z"
 overflow-checks = true
 lto = true
 codegen-units = 1
+strip = "symbols"
+debug = 0
+debug-assertions = false
+panic = "abort"
 
 [profile.release-with-logs]
 inherits = "release"
->>>>>>> main
+debug-assertions = true
