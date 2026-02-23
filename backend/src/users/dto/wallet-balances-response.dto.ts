@@ -18,6 +18,11 @@ export class WalletBalancesResponseDto {
   @ApiProperty({ type: [BalanceEntryDto] })
   balances: BalanceEntryDto[];
 
-  @ApiProperty({ example: '2025-07-04T12:00:00.000Z', nullable: true })
+  @ApiProperty({
+    example: '2025-07-04T12:00:00.000Z',
+    nullable: true,
+    description:
+      'Timestamp of the last reconciliation run that updated these balances',
+  })
   lastUpdatedAt: string | null;
 }

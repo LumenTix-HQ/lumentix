@@ -4,7 +4,6 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { corsOptions, helmetOptions } from './common/security/security.config';
-import { RateLimitGuard } from './common/security/rate-limit.guard';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -14,8 +13,6 @@ async function bootstrap() {
 
   app.use(helmet(helmetOptions));
   app.enableCors(corsOptions);
-
-  app.useGlobalGuards(new RateLimitGuard(100, 60_000));
 
   app.useGlobalPipes(
     new ValidationPipe({

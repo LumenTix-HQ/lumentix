@@ -9,15 +9,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
-import Redis from 'ioredis';
 import { Keypair } from '@stellar/stellar-sdk';
+import Redis from 'ioredis';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { StellarService } from '../stellar/stellar.service';
-import { REDIS_CLIENT } from '../common/redis/redis.module';
+import { REDIS_CLIENT } from '../common/redis/redis.provider';
 
-// Nonce TTL in seconds (5 minutes)
-const NONCE_TTL_SECONDS = 300;
+const NONCE_TTL_SECONDS = 300; // 5 minutes
 
 @Injectable()
 export class WalletService {
@@ -29,25 +28,34 @@ export class WalletService {
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
     @Inject(REDIS_CLIENT)
-    private readonly redis: Redis, // ← replaced Map with Redis
+    private readonly redis: Redis,
   ) {}
 
-  // ── STEP 1 — Issue challenge ────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // STEP 1 — Issue challenge
+  // ─────────────────────────────────────────────────────────────────────────
 
   async requestChallenge(publicKey: string): Promise<{ message: string }> {
     this.validatePublicKeyFormat(publicKey);
 
     const nonce = crypto.randomBytes(32).toString('hex');
-    const key = this.nonceKey(publicKey);
 
-    await this.redis.set(key, nonce, 'EX', NONCE_TTL_SECONDS);
+    // Overwrite any existing nonce for this key; TTL ensures auto-expiry
+    await this.redis.set(
+      `wallet:nonce:${publicKey}`,
+      nonce,
+      'EX',
+      NONCE_TTL_SECONDS,
+    );
 
     const message = `Sign this message to link wallet: ${nonce}`;
     this.logger.log(`Challenge issued for ${publicKey}`);
     return { message };
   }
 
-  // ── STEP 2 — Verify signature & link wallet ─────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // STEP 2 — Verify signature & link wallet
+  // ─────────────────────────────────────────────────────────────────────────
 
   async verifyAndLink(
     userId: string,
@@ -56,8 +64,7 @@ export class WalletService {
   ): Promise<Omit<User, 'passwordHash'>> {
     this.validatePublicKeyFormat(publicKey);
 
-    const key = this.nonceKey(publicKey);
-    const nonce = await this.redis.get(key);
+    const nonce = await this.redis.get(`wallet:nonce:${publicKey}`);
 
     if (!nonce) {
       throw new BadRequestException(
@@ -73,7 +80,7 @@ export class WalletService {
     }
 
     // Consume nonce immediately — prevents replay attacks
-    await this.redis.del(key);
+    await this.redis.del(`wallet:nonce:${publicKey}`);
 
     const existingOwner = await this.usersRepository.findOne({
       where: { stellarPublicKey: publicKey },
@@ -96,11 +103,9 @@ export class WalletService {
     return this.usersService.updateWallet(userId, publicKey);
   }
 
-  // ── Private helpers ─────────────────────────────────────────────────────
-
-  private nonceKey(publicKey: string): string {
-    return `wallet:nonce:${publicKey}`;
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Private helpers
+  // ─────────────────────────────────────────────────────────────────────────
 
   private verifySignature(
     publicKey: string,

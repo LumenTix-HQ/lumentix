@@ -32,6 +32,20 @@ export class User {
   @Column({ nullable: true, type: 'varchar' })
   stellarPublicKey: string | null;
 
+  /**
+   * JSONB map of currency code → balance amount.
+   * e.g. { "XLM": 1500.50, "USDC": 250.00 }
+   * Populated and updated by the reconciliation job after confirmed payments/refunds.
+   */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  balances: Record<string, number> | null;
+
+  /**
+   * Set by the reconciliation job each time it writes to `balances`.
+   */
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  balancesUpdatedAt: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 
