@@ -33,10 +33,9 @@ export class HealthController {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Stellar Horizon unreachable';
-      throw new HealthCheckError(
-        'Stellar check failed',
-        { stellar: { status: 'down', message } },
-      );
+      throw new HealthCheckError('Stellar check failed', {
+        stellar: { status: 'down', message },
+      });
     }
   }
 }

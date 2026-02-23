@@ -99,7 +99,9 @@ describe('StellarWebhookService', () => {
       );
       mockSponsorsService.confirmSponsorPayment.mockResolvedValue({});
 
-      await service.handlePayment(makePayment({ transaction_hash: 'tx-sponsor' }));
+      await service.handlePayment(
+        makePayment({ transaction_hash: 'tx-sponsor' }),
+      );
 
       expect(mockSponsorsService.confirmSponsorPayment).toHaveBeenCalledWith(
         'tx-sponsor',
@@ -107,9 +109,7 @@ describe('StellarWebhookService', () => {
     });
 
     it('skips non-payment operation types', async () => {
-      await service.handlePayment(
-        makePayment({ type: 'set_options' as any }),
-      );
+      await service.handlePayment(makePayment({ type: 'set_options' as any }));
 
       expect(mockPaymentsService.confirmPayment).not.toHaveBeenCalled();
       expect(mockSponsorsService.confirmSponsorPayment).not.toHaveBeenCalled();
@@ -128,9 +128,7 @@ describe('StellarWebhookService', () => {
         new Error('unexpected db error'),
       );
 
-      await expect(
-        service.handlePayment(makePayment()),
-      ).resolves.not.toThrow();
+      await expect(service.handlePayment(makePayment())).resolves.not.toThrow();
     });
 
     it('does not crash the stream on unexpected sponsor error', async () => {
@@ -141,19 +139,22 @@ describe('StellarWebhookService', () => {
         new Error('unexpected sponsor error'),
       );
 
-      await expect(
-        service.handlePayment(makePayment()),
-      ).resolves.not.toThrow();
+      await expect(service.handlePayment(makePayment())).resolves.not.toThrow();
     });
 
     it('handles create_account operation type', async () => {
       mockPaymentsService.confirmPayment.mockResolvedValue({});
 
       await service.handlePayment(
-        makePayment({ type: 'create_account' as any, transaction_hash: 'tx-create' }),
+        makePayment({
+          type: 'create_account' as any,
+          transaction_hash: 'tx-create',
+        }),
       );
 
-      expect(mockPaymentsService.confirmPayment).toHaveBeenCalledWith('tx-create');
+      expect(mockPaymentsService.confirmPayment).toHaveBeenCalledWith(
+        'tx-create',
+      );
     });
   });
 
@@ -164,7 +165,9 @@ describe('StellarWebhookService', () => {
       jest.useFakeTimers();
 
       mockStellarService.streamPayments
-        .mockImplementationOnce(() => { throw new Error('connection refused'); })
+        .mockImplementationOnce(() => {
+          throw new Error('connection refused');
+        })
         .mockReturnValue(mockStreamCloser);
 
       service.onModuleInit();

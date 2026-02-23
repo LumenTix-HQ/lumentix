@@ -52,7 +52,9 @@ describe('TicketsService', () => {
       transactionHash: 'hash',
     });
 
-    await expect(service.issueTicket('p1')).rejects.toThrow('Payment not confirmed');
+    await expect(service.issueTicket('p1')).rejects.toThrow(
+      'Payment not confirmed',
+    );
   });
 
   it('Issues ticket when confirmed and tx memo matches paymentId', async () => {
