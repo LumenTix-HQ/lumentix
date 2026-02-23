@@ -106,6 +106,20 @@ export class EscrowService {
     return publicKey;
   }
 
+  /**
+ * Decrypt the AES-256-GCM encrypted escrow secret stored on the Event entity.
+ * Format expected: "<iv_hex>:<authTag_hex>:<ciphertext_hex>"
+ *
+ * @param encryptedSecret  The value of event.escrowSecretEncrypted
+ * @returns                The plaintext Stellar secret key
+ */
+
+  async decryptEscrowSecret(encryptedSecret: string): Promise<string> {
+  // Delegate to your existing internal decrypt logic.
+  // Rename/adjust if your method is called something else.
+  return this.decrypt(encryptedSecret);
+}
+
   // ─────────────────────────────────────────────────────────────────────────
   // Release funds — called when event is completed
   // ─────────────────────────────────────────────────────────────────────────

@@ -1,4 +1,11 @@
+# Rust's output directory
 target/
-Cargo.lock
+
+# Build artifacts
 *.wasm
+Cargo.lock
+
+# Local settings
 .soroban/
+.stellar/
+test_snapshots/
