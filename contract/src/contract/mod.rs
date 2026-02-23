@@ -5,6 +5,7 @@ use soroban_sdk::{contract, contractimpl, log, Address, Env, Symbol};
 #[contract]
 pub struct TicketContract;
 
+/// contract implementation to issue ticket, get ticket, transfer ticket and also mark ticket as used
 #[contractimpl]
 impl TicketContract {
     /// Issue a new ticket to an owner for a specific event.
@@ -42,7 +43,7 @@ impl TicketContract {
             .expect("Ticket not found");
 
         if ticket.owner != from {
-            panic!("Unauthorized: not ticket owner");
+            panic!("Unauthorized: not the ticket owner");
         }
 
         if ticket.is_used {
@@ -92,4 +93,27 @@ impl TicketContract {
 
         used_ticket
     }
+
+    /// Returns true if the given address is the current owner of the ticket.
+    pub fn is_ticket_owner(env: Env, ticket_id: Symbol, address: Address) -> bool {
+        let ticket = env
+            .storage()
+            .persistent()
+            .get::<Symbol, Ticket>(&ticket_id)
+            .expect("Ticket not found");
+
+        ticket.owner == address
+    }
+
+    /// Returns the current owner and used status of a ticket as a tuple (Address, bool).
+    pub fn get_ticket_status(env: Env, ticket_id: Symbol) -> (Address, bool) {
+        let ticket = env
+            .storage()
+            .persistent()
+            .get::<Symbol, Ticket>(&ticket_id)
+            .expect("Ticket not found");
+
+        (ticket.owner, ticket.is_used)
+    }
+    
 }
