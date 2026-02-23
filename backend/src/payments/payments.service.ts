@@ -61,7 +61,7 @@ export class PaymentsService {
     // 1. Validate event exists
     const event = await this.eventsService.getEventById(eventId);
 
-    // 2. Validate event is published — covers suspended (CANCELLED) events too
+    // 2. Validate event status
     if (event.status === EventStatus.CANCELLED) {
       throw new BadRequestException(
         `Event "${event.title}" has been suspended and is no longer available for purchase.`,
@@ -82,7 +82,30 @@ export class PaymentsService {
       );
     }
 
-    // 4. Check for existing payment for this user and event
+    // 4. ── Capacity check ────────────────────────────────────────────────────
+    //    Count PENDING + CONFIRMED payments to prevent overselling.
+    //    NOTE: For events with very high concurrency (flash sales etc.) consider
+    //    wrapping this block and the payment INSERT in a serializable transaction
+    //    with a pessimistic write-lock on the event row:
+    //      await this.paymentsRepository.manager.transaction(
+    //        'SERIALIZABLE', async (em) => { ... }
+    //      );
+    if (event.maxAttendees !== null) {
+      const soldCount = await this.paymentsRepository.count({
+        where: {
+          eventId,
+          status: In([PaymentStatus.PENDING, PaymentStatus.CONFIRMED]),
+        },
+      });
+
+      if (soldCount >= event.maxAttendees) {
+        throw new BadRequestException(
+          `This event has reached its maximum capacity of ${event.maxAttendees} attendees.`,
+        );
+      }
+    }
+
+    // 5. Check for existing payment for this user and event
     const existing = await this.paymentsRepository.findOne({
       where: {
         userId,
@@ -97,7 +120,7 @@ export class PaymentsService {
       );
     }
 
-    // 5. Persist a pending payment record
+    // 6. Persist a pending payment record
     const payment = this.paymentsRepository.create({
       eventId,
       userId,

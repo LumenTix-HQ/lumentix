@@ -31,6 +31,14 @@ export class TicketEntity {
   @Column({ type: 'varchar', length: 16, default: 'valid' })
   status!: TicketStatus;
 
+  /**
+   * Hex-encoded SHA256withRSA/Ed25519 signature over this ticket's UUID.
+   * Generated at issuance using TICKET_SIGNING_PRIVATE_KEY.
+   * Verified at scan time using TICKET_SIGNING_PUBLIC_KEY.
+   */
+  @Column({ type: 'text', nullable: true })
+  signature!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

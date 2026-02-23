@@ -6,6 +6,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { PaymentsService } from '../payments/payments.service';
 import { StellarService } from '../stellar/stellar.service';
 import { PaymentStatus } from '../payments/entities/payment.entity';
+import { ConfigService } from '@nestjs/config';
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -106,5 +107,87 @@ describe('TicketsService', () => {
     await expect(service.transferTicket('t1', 'uX', 'u2')).rejects.toThrow(
       'Not ticket owner',
     );
+  });
+  describe('verifyTicket', () => {
+    // Generate a real throwaway keypair so tests are self-contained
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+    });
+    const privatePem = privateKey.export({
+      type: 'pkcs8',
+      format: 'pem',
+    }) as string;
+    const publicPem = publicKey.export({
+      type: 'spki',
+      format: 'pem',
+    }) as string;
+
+    const configServiceMock = {
+      get: jest.fn((key: string) => {
+        if (key === 'TICKET_SIGNING_PRIVATE_KEY') return privatePem;
+        if (key === 'TICKET_SIGNING_PUBLIC_KEY') return publicPem;
+        return undefined;
+      }),
+    };
+
+    beforeEach(async () => {
+      jest.clearAllMocks();
+
+      const moduleRef = await Test.createTestingModule({
+        providers: [
+          TicketsService,
+          { provide: getRepositoryToken(TicketEntity), useValue: repo },
+          { provide: PaymentsService, useValue: paymentsServiceMock },
+          { provide: 'PaymentsService', useValue: paymentsServiceMock },
+          { provide: StellarService, useValue: stellarServiceMock },
+          { provide: 'StellarService', useValue: stellarServiceMock },
+          { provide: ConfigService, useValue: configServiceMock },
+        ],
+      }).compile();
+
+      service = moduleRef.get(TicketsService);
+    });
+
+    function makeSignature(ticketId: string): string {
+      const signer = crypto.createSign('SHA256');
+      signer.update(ticketId);
+      signer.end();
+      return signer.sign(privatePem, 'hex');
+    }
+
+    it('marks ticket as used when signature is valid', async () => {
+      const ticketId = 'ticket-uuid-1234';
+      const signature = makeSignature(ticketId);
+
+      repo.findOne.mockResolvedValue({ id: ticketId, status: 'valid' });
+
+      const result = await service.verifyTicket(ticketId, signature);
+      expect(result.status).toBe('used');
+      expect(repo.save).toHaveBeenCalled();
+    });
+
+    it('rejects an arbitrary truthy string as signature', async () => {
+      await expect(
+        service.verifyTicket('ticket-uuid-1234', 'not-a-real-signature'),
+      ).rejects.toThrow('Invalid ticket signature');
+    });
+
+    it('rejects a valid signature for a different ticketId', async () => {
+      const signature = makeSignature('other-ticket-id');
+      await expect(
+        service.verifyTicket('ticket-uuid-1234', signature),
+      ).rejects.toThrow('Invalid ticket signature');
+    });
+
+    it('rejects a used ticket even with a valid signature', async () => {
+      const ticketId = 'ticket-uuid-used';
+      const signature = makeSignature(ticketId);
+
+      repo.findOne.mockResolvedValue({ id: ticketId, status: 'used' });
+
+      await expect(service.verifyTicket(ticketId, signature)).rejects.toThrow(
+        'Ticket has already been used',
+      );
+    });
   });
 });

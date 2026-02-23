@@ -1,9 +1,13 @@
+import * as crypto from 'crypto';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -19,6 +23,7 @@ export class TicketsService {
     private readonly ticketRepo: Repository<TicketEntity>,
     private readonly paymentsService: PaymentsService,
     private readonly stellarService: StellarService,
+    private readonly configService: ConfigService,
   ) {}
 
   async issueTicket(paymentId: string): Promise<TicketEntity> {
@@ -64,7 +69,10 @@ export class TicketsService {
       status: 'valid',
     });
 
-    return this.ticketRepo.save(ticket);
+    // Persist first to obtain the auto-generated UUID, then sign it
+    const saved = await this.ticketRepo.save(ticket);
+    saved.signature = this.signTicketId(saved.id);
+    return this.ticketRepo.save(saved);
   }
 
   async transferTicket(
@@ -91,19 +99,19 @@ export class TicketsService {
     ticketId: string,
     signature: string,
   ): Promise<TicketEntity> {
-    // 1. Validate Signature (Cryptographic check)
-    const isValidSignature = this.verifySignature(ticketId, signature);
-    if (!isValidSignature) {
+    // 1. Cryptographic signature check — must come before any DB lookup
+    //    to avoid leaking ticket existence to unauthenticated callers.
+    if (!this.verifySignature(ticketId, signature)) {
       throw new UnauthorizedException('Invalid ticket signature');
     }
 
-    // 2. Validate ticket exists
+    // 2. Ticket existence check
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) {
       throw new NotFoundException('Ticket not found');
     }
 
-    // 3. Validate ticket status
+    // 3. Status guard
     if (ticket.status === 'used') {
       throw new BadRequestException('Ticket has already been used');
     }
@@ -111,18 +119,58 @@ export class TicketsService {
       throw new BadRequestException('Ticket is no longer valid');
     }
 
-    // 4. Optional: Confirm on Stellar (Verify asset/tx if necessary)
-    // const tx = await this.stellarService.getTransaction(ticket.transactionHash);
-
-    // 5. Mark as used
+    // 4. Mark as used — atomic save prevents double-scan in practice;
+    //    a DB-level unique partial index on (id, status='used') is recommended
+    //    for high-throughput gate scenarios.
     ticket.status = 'used';
     return this.ticketRepo.save(ticket);
   }
 
+  // ─── Private helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Signs `ticketId` with the server's PEM-formatted private key.
+   * Algorithm: SHA-256 with RSA-PSS or EC depending on key type.
+   * Returns a lowercase hex string.
+   */
+  private signTicketId(ticketId: string): string {
+    const privateKey = this.configService.get<string>(
+      'TICKET_SIGNING_PRIVATE_KEY',
+    );
+    if (!privateKey) {
+      throw new InternalServerErrorException(
+        'TICKET_SIGNING_PRIVATE_KEY is not configured.',
+      );
+    }
+
+    const signer = crypto.createSign('SHA256');
+    signer.update(ticketId);
+    signer.end();
+    return signer.sign(privateKey, 'hex');
+  }
+
+  /**
+   * Verifies that `signature` (hex) was produced by signing `ticketId`
+   * with the private key corresponding to TICKET_SIGNING_PUBLIC_KEY.
+   */
   private verifySignature(ticketId: string, signature: string): boolean {
-    // TODO: Implement actual cryptographic verification
-    // using your system's Public Key.
-    // For now, we assume true if signature exists for the sake of the flow.
-    return !!signature;
+    const publicKey = this.configService.get<string>(
+      'TICKET_SIGNING_PUBLIC_KEY',
+    );
+    if (!publicKey) {
+      throw new InternalServerErrorException(
+        'TICKET_SIGNING_PUBLIC_KEY is not configured.',
+      );
+    }
+
+    try {
+      const verifier = crypto.createVerify('SHA256');
+      verifier.update(ticketId);
+      verifier.end();
+      return verifier.verify(publicKey, signature, 'hex');
+    } catch {
+      // Malformed signature string (wrong length, non-hex, etc.)
+      return false;
+    }
   }
 }
