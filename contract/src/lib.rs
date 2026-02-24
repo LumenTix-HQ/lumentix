@@ -10,8 +10,6 @@ mod test;
 
 pub use error::LumentixError;
 pub use types::*;
-use soroban_sdk::{ contract, contractimpl, symbol_short, Address, Env, Symbol, Vec };
-
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
 #[contract]
@@ -146,7 +144,7 @@ impl LumentixContract {
         let mut event = storage::get_event(&env, event_id)?;
 
         // Validate event status
-        if event.status != EventStatus::Active {
+        if event.status != EventStatus::Published {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
@@ -178,8 +176,28 @@ impl LumentixContract {
         event.tickets_sold += 1;
         storage::set_event(&env, event_id, &event);
 
-        // Store payment in escrow
-        storage::add_escrow(&env, event_id, payment_amount);
+        // Calculate and split platform fee
+        let fee_bps = storage::get_platform_fee_bps(&env);
+        let fee_amount = (payment_amount * (fee_bps as i128)) / 10000;
+        let organizer_amount = payment_amount - fee_amount;
+
+        if fee_amount > 0 {
+            storage::add_platform_balance(&env, fee_amount);
+            
+            // Emit fee collected event
+            env.events().publish(
+                (soroban_sdk::symbol_short!("fee_col"),),
+                FeeCollectedEvent {
+                    ticket_id,
+                    event_id,
+                    platform_fee: fee_amount,
+                    organizer_amount,
+                },
+            );
+        }
+
+        // Store remaining payment in escrow
+        storage::add_escrow(&env, event_id, organizer_amount);
 
         Ok(ticket_id)
     }
@@ -233,7 +251,7 @@ impl LumentixContract {
             return Err(LumentixError::Unauthorized);
         }
 
-        if event.status != EventStatus::Active {
+        if event.status != EventStatus::Published {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
@@ -342,7 +360,7 @@ impl LumentixContract {
             return Err(LumentixError::Unauthorized);
         }
 
-        if event.status != EventStatus::Active {
+        if event.status != EventStatus::Published {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
@@ -398,8 +416,6 @@ impl LumentixContract {
         
         Ok(availability)
     }
-}
-
     /// Set platform fee in basis points (only admin can call)
     /// fee_bps: basis points (e.g., 250 = 2.5%, max 10000 = 100%)
     pub fn set_platform_fee(env: Env, admin: Address, fee_bps: u32) -> Result<(), LumentixError> {
@@ -473,9 +489,7 @@ mod contract;
 mod events;
 mod models;
 
-#[cfg(test)]
-mod tests;
+
 
 pub use contract::TicketContract;
 pub use events::TransferEvent;
-pub use models::Ticket;

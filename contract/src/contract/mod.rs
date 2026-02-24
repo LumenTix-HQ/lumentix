@@ -1,3 +1,11 @@
+use soroban_sdk::{contract, contractimpl, log, Address, Env, Symbol, Vec};
+use crate::models::{Ticket, DataKey, EscrowConfig};
+
+#[contract]
+pub struct TicketContract;
+
+#[contractimpl]
+impl TicketContract {
     /// Returns true if the given address is the current owner of the ticket.
     pub fn is_ticket_owner(env: Env, ticket_id: Symbol, address: Address) -> bool {
         let ticket = env
@@ -113,3 +121,4 @@
                 .remove(&DataKey::EscrowApproval(event_id.clone(), signer.clone()));
         }
     }
+}

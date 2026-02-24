@@ -35,7 +35,7 @@ pub fn validate_time_range(start_time: u64, end_time: u64) -> Result<(), Lumenti
 
 /// Validate that a string is not empty
 pub fn validate_string_not_empty(s: &String) -> Result<(), LumentixError> {
-    if s.len() == 0 {
+    if s.is_empty() {
         return Err(LumentixError::EmptyString);
     }
     Ok(())

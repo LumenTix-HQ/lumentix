@@ -5,6 +5,7 @@ use soroban_sdk::{Address, Env};
 // Storage keys
 const INITIALIZED: &str = "INIT";
 const ADMIN: &str = "ADMIN";
+#[allow(dead_code)]
 const TOKEN: &str = "TOKEN";
 const EVENT_ID_COUNTER: &str = "EVENT_CTR";
 const TICKET_ID_COUNTER: &str = "TICKET_CTR";
@@ -35,11 +36,13 @@ pub fn get_admin(env: &Env) -> Address {
 }
 
 /// Set token address
+#[allow(dead_code)]
 pub fn set_token(env: &Env, token: &Address) {
     env.storage().instance().set(&TOKEN, token);
 }
 
 /// Get token address
+#[allow(dead_code)]
 pub fn get_token(env: &Env) -> Address {
     env.storage().instance().get(&TOKEN).unwrap()
 }
