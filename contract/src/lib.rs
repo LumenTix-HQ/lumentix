@@ -10,6 +10,7 @@ mod test;
 
 pub use error::LumentixError;
 pub use types::*;
+use soroban_sdk::{ contract, contractimpl, symbol_short, Address, Env, Symbol, Vec };
 
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
@@ -75,11 +76,6 @@ impl LumentixContract {
 
         storage::set_event(&env, event_id, &event);
         storage::increment_event_id(&env);
-
-        env.events().publish(
-            (soroban_sdk::symbol_short!("created"),),
-            (event_id, organizer),
-        );
 
         Ok(event_id)
     }
@@ -149,8 +145,8 @@ impl LumentixContract {
 
         let mut event = storage::get_event(&env, event_id)?;
 
-        // Validate event status - only published events can sell tickets
-        if event.status != EventStatus::Published {
+        // Validate event status
+        if event.status != EventStatus::Active {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
@@ -182,27 +178,8 @@ impl LumentixContract {
         event.tickets_sold += 1;
         storage::set_event(&env, event_id, &event);
 
-        // Calculate platform fee and organizer amount
-        let fee_bps = storage::get_platform_fee_bps(&env);
-        let platform_fee = (payment_amount * fee_bps as i128) / 10000;
-        let organizer_amount = payment_amount - platform_fee;
-
-        // Store organizer amount in escrow
-        storage::add_escrow(&env, event_id, organizer_amount);
-
-        // Add platform fee to platform balance
-        storage::add_platform_balance(&env, platform_fee);
-
-        // Emit fee collected event
-        env.events().publish(
-            (soroban_sdk::symbol_short!("fee_coll"),),
-            FeeCollectedEvent {
-                ticket_id,
-                event_id,
-                platform_fee,
-                organizer_amount,
-            },
-        );
+        // Store payment in escrow
+        storage::add_escrow(&env, event_id, payment_amount);
 
         Ok(ticket_id)
     }
@@ -256,16 +233,12 @@ impl LumentixContract {
             return Err(LumentixError::Unauthorized);
         }
 
-        // Can only cancel published events
-        if event.status != EventStatus::Published {
+        if event.status != EventStatus::Active {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
         event.status = EventStatus::Cancelled;
         storage::set_event(&env, event_id, &event);
-
-        env.events()
-            .publish((soroban_sdk::symbol_short!("cancelled"),), (event_id,));
 
         Ok(())
     }
@@ -364,8 +337,7 @@ impl LumentixContract {
             return Err(LumentixError::Unauthorized);
         }
 
-        // Can only complete published events
-        if event.status != EventStatus::Published {
+        if event.status != EventStatus::Active {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
@@ -376,9 +348,6 @@ impl LumentixContract {
 
         event.status = EventStatus::Completed;
         storage::set_event(&env, event_id, &event);
-
-        env.events()
-            .publish((soroban_sdk::symbol_short!("completed"),), (event_id,));
 
         Ok(())
     }
@@ -478,3 +447,14 @@ impl LumentixContract {
         storage::get_platform_balance(&env)
     }
 }
+
+mod contract;
+mod events;
+mod models;
+
+#[cfg(test)]
+mod tests;
+
+pub use contract::TicketContract;
+pub use events::TransferEvent;
+pub use models::Ticket;
