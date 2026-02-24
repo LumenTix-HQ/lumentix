@@ -6,6 +6,6 @@ target/
 Cargo.lock
 
 # Local settings
-.soroban/
-.stellar/
-test_snapshots/
+.soroban
+.stellar
+test_snapshots

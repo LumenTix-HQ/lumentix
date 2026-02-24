@@ -1,12 +1,13 @@
 use soroban_sdk::{contracttype, Address, String};
 
-/// Event status enum
+/// Event status enum mirroring backend statuses
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EventStatus {
-    Active,
-    Cancelled,
+    Draft,
+    Published,
     Completed,
+    Cancelled,
 }
 
 /// Event structure
@@ -36,4 +37,14 @@ pub struct Ticket {
     pub purchase_time: u64,
     pub used: bool,
     pub refunded: bool,
+}
+
+/// Fee collected event for tracking platform fees
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeeCollectedEvent {
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub platform_fee: i128,
+    pub organizer_amount: i128,
 }

@@ -1,7 +1,7 @@
-/* eslint-disable @typescript-eslint/require-await */
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -10,33 +10,25 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import { Keypair } from '@stellar/stellar-sdk';
+import Redis from 'ioredis';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { StellarService } from '../stellar/stellar.service';
+import { REDIS_CLIENT } from '../common/redis/redis.provider';
 
-// Nonce TTL: 5 minutes
-const NONCE_TTL_MS = 5 * 60 * 1000;
-
-interface NonceEntry {
-  nonce: string;
-  createdAt: number;
-}
+const NONCE_TTL_SECONDS = 300; // 5 minutes
 
 @Injectable()
 export class WalletService {
   private readonly logger = new Logger(WalletService.name);
-
-  /**
-   * In-memory nonce store: publicKey → NonceEntry
-   * In production this should be Redis / a DB table.
-   */
-  private readonly nonceStore = new Map<string, NonceEntry>();
 
   constructor(
     private readonly usersService: UsersService,
     private readonly stellarService: StellarService,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @Inject(REDIS_CLIENT)
+    private readonly redis: Redis,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -47,7 +39,14 @@ export class WalletService {
     this.validatePublicKeyFormat(publicKey);
 
     const nonce = crypto.randomBytes(32).toString('hex');
-    this.nonceStore.set(publicKey, { nonce, createdAt: Date.now() });
+
+    // Overwrite any existing nonce for this key; TTL ensures auto-expiry
+    await this.redis.set(
+      `wallet:nonce:${publicKey}`,
+      nonce,
+      'EX',
+      NONCE_TTL_SECONDS,
+    );
 
     const message = `Sign this message to link wallet: ${nonce}`;
     this.logger.log(`Challenge issued for ${publicKey}`);
@@ -65,33 +64,24 @@ export class WalletService {
   ): Promise<Omit<User, 'passwordHash'>> {
     this.validatePublicKeyFormat(publicKey);
 
-    // 1. Retrieve & validate nonce
-    const entry = this.nonceStore.get(publicKey);
-    if (!entry) {
+    const nonce = await this.redis.get(`wallet:nonce:${publicKey}`);
+
+    if (!nonce) {
       throw new BadRequestException(
         'No active challenge found for this public key. Request a new challenge.',
       );
     }
 
-    if (Date.now() - entry.createdAt > NONCE_TTL_MS) {
-      this.nonceStore.delete(publicKey);
-      throw new BadRequestException(
-        'Challenge has expired. Request a new one.',
-      );
-    }
-
-    // 2. Verify the signature cryptographically using Stellar SDK (via StellarService)
-    const message = `Sign this message to link wallet: ${entry.nonce}`;
+    const message = `Sign this message to link wallet: ${nonce}`;
     const isValid = this.verifySignature(publicKey, message, signature);
 
     if (!isValid) {
       throw new UnauthorizedException('Invalid signature.');
     }
 
-    // 3. Nonce is consumed — remove it to prevent replay attacks
-    this.nonceStore.delete(publicKey);
+    // Consume nonce immediately — prevents replay attacks
+    await this.redis.del(`wallet:nonce:${publicKey}`);
 
-    // 4. Enforce public key uniqueness across users
     const existingOwner = await this.usersRepository.findOne({
       where: { stellarPublicKey: publicKey },
     });
@@ -102,17 +92,14 @@ export class WalletService {
       );
     }
 
-    // 5. Optionally verify account exists on-chain via StellarService
     try {
       await this.stellarService.getAccount(publicKey);
     } catch {
-      // Account may not yet be funded on testnet — log but do not block linking
       this.logger.warn(
         `Stellar account ${publicKey} not found on network (may be unfunded). Proceeding with link.`,
       );
     }
 
-    // 6. Persist
     return this.usersService.updateWallet(userId, publicKey);
   }
 
@@ -120,11 +107,6 @@ export class WalletService {
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Verify a Stellar ed25519 signature.
-   * Uses only the Stellar SDK Keypair — no direct Stellar SDK usage escapes this class.
-   * All blockchain/network access uses StellarService.
-   */
   private verifySignature(
     publicKey: string,
     message: string,

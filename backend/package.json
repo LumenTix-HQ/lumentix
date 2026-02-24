@@ -30,6 +30,7 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.2.6",
     "@nestjs/terminus": "^11.0.0",
+    "@nestjs/throttler": "^6.5.0",
     "@nestjs/typeorm": "^11.0.0",
     "@stellar/stellar-sdk": "^14.5.0",
     "bcrypt": "^6.0.0",
@@ -38,6 +39,8 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "helmet": "^8.1.0",
+    "ioredis": "^5.9.3",
+    "nestjs-throttler-storage-redis": "^0.5.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pg": "^8.18.0",
@@ -58,6 +61,7 @@
     "@types/bull": "^3.15.9",
     "@types/express": "^5.0.0",
     "@types/helmet": "^0.0.48",
+    "@types/ioredis": "^4.28.10",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.7",
     "@types/passport-jwt": "^4.0.1",
@@ -87,6 +91,9 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

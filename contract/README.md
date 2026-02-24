@@ -6,8 +6,9 @@ A comprehensive ticketing and event management smart contract built on Stellar's
 
 - **Event Management**: Create, cancel, and complete events
 - **Ticket Sales**: Purchase and validate tickets with escrow protection
-- **Refund System**: Automatic refunds for cancelled events
-- **Escrow Protection**: Funds held in escrow until event completion
+- **Token Integration**: Full SAC token support for payments and refunds
+- **Refund System**: Automatic token refunds for cancelled events
+- **Escrow Protection**: Funds held in contract until event completion
 - **Comprehensive Error Handling**: Clear error types for debugging
 - **Input Validation**: All inputs validated before processing
 
@@ -15,26 +16,26 @@ A comprehensive ticketing and event management smart contract built on Stellar's
 
 The contract uses a comprehensive `LumentixError` enum with 18 distinct error types:
 
-| Error Code | Error Name | Description |
-|------------|------------|-------------|
-| 1 | NotInitialized | Contract not initialized |
-| 2 | AlreadyInitialized | Contract already initialized |
-| 3 | Unauthorized | Caller not authorized |
-| 4 | EventNotFound | Event ID doesn't exist |
-| 5 | TicketNotFound | Ticket ID doesn't exist |
-| 6 | EventSoldOut | Maximum capacity reached |
-| 7 | TicketAlreadyUsed | Ticket already validated |
-| 8 | InvalidStatusTransition | Invalid state change |
-| 9 | InsufficientFunds | Payment too low |
-| 10 | RefundNotAllowed | Refund not permitted |
-| 11 | EventNotCancelled | Event must be cancelled first |
-| 12 | EscrowAlreadyReleased | Funds already released |
-| 13 | InvalidAmount | Amount must be > 0 |
-| 14 | CapacityExceeded | Capacity must be > 0 |
-| 15 | InvalidTimeRange | Start must be before end |
-| 16 | EmptyString | String cannot be empty |
-| 17 | InvalidAddress | Invalid address provided |
-| 18 | InsufficientEscrow | Escrow balance too low |
+| Error Code | Error Name              | Description                   |
+| ---------- | ----------------------- | ----------------------------- |
+| 1          | NotInitialized          | Contract not initialized      |
+| 2          | AlreadyInitialized      | Contract already initialized  |
+| 3          | Unauthorized            | Caller not authorized         |
+| 4          | EventNotFound           | Event ID doesn't exist        |
+| 5          | TicketNotFound          | Ticket ID doesn't exist       |
+| 6          | EventSoldOut            | Maximum capacity reached      |
+| 7          | TicketAlreadyUsed       | Ticket already validated      |
+| 8          | InvalidStatusTransition | Invalid state change          |
+| 9          | InsufficientFunds       | Payment too low               |
+| 10         | RefundNotAllowed        | Refund not permitted          |
+| 11         | EventNotCancelled       | Event must be cancelled first |
+| 12         | EscrowAlreadyReleased   | Funds already released        |
+| 13         | InvalidAmount           | Amount must be > 0            |
+| 14         | CapacityExceeded        | Capacity must be > 0          |
+| 15         | InvalidTimeRange        | Start must be before end      |
+| 16         | EmptyString             | String cannot be empty        |
+| 17         | InvalidAddress          | Invalid address provided      |
+| 18         | InsufficientEscrow      | Escrow balance too low        |
 
 ## Input Validation
 
@@ -51,10 +52,10 @@ All contract functions validate inputs before processing:
 ### Initialization
 
 ```rust
-initialize(admin: Address) -> Result<(), LumentixError>
+initialize(admin: Address, token: Address) -> Result<(), LumentixError>
 ```
 
-Initialize the contract with an admin address. Can only be called once.
+Initialize the contract with an admin address and payment token. Can only be called once.
 
 ### Event Management
 
@@ -74,6 +75,7 @@ create_event(
 Create a new event. Returns the event ID.
 
 **Validations**:
+
 - Price must be > 0
 - Capacity must be > 0
 - Start time < end time
@@ -101,9 +103,10 @@ purchase_ticket(
 ) -> Result<u64, LumentixError>
 ```
 
-Purchase a ticket for an event. Returns the ticket ID.
+Purchase a ticket for an event. Transfers tokens from buyer to contract. Returns the ticket ID.
 
 **Validations**:
+
 - Event must be active
 - Event not sold out
 - Payment >= ticket price
@@ -118,9 +121,15 @@ Mark a ticket as used. Only the event organizer can validate tickets.
 refund_ticket(ticket_id: u64, buyer: Address) -> Result<(), LumentixError>
 ```
 
-Request a refund for a ticket. Only available if event is cancelled.
+Request a refund for a ticket. Only available if event is cancelled. Transfers tokens back to buyer.
 
-### Escrow Management
+```rust
+process_refund(env: Env, event_id: u64, ticket_id: u64, buyer: Address) -> Result<(), LumentixError>
+```
+
+Alias for refund_ticket that verifies event association.
+
+### Escrow ManagementTransfers tokens from contract to organizer.
 
 ```rust
 release_escrow(organizer: Address, event_id: u64) -> Result<i128, LumentixError>
@@ -151,11 +160,13 @@ cargo test
 ## Deployment
 
 1. Build the contract:
+
 ```bash
 soroban contract build
 ```
 
 2. Deploy to testnet:
+
 ```bash
 soroban contract deploy \
   --wasm target/wasm32-unknown-unknown/release/lumentix_contract.wasm \
@@ -165,6 +176,7 @@ soroban contract deploy \
 ```
 
 3. Initialize the contract:
+
 ```bash
 soroban contract invoke \
   --id <CONTRACT_ID> \

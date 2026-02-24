@@ -1,15 +1,18 @@
-use soroban_sdk::{Address, Env};
 use crate::error::LumentixError;
 use crate::types::{Event, Ticket};
+use soroban_sdk::{Address, Env};
 
 // Storage keys
 const INITIALIZED: &str = "INIT";
 const ADMIN: &str = "ADMIN";
+const TOKEN: &str = "TOKEN";
 const EVENT_ID_COUNTER: &str = "EVENT_CTR";
 const TICKET_ID_COUNTER: &str = "TICKET_CTR";
 const EVENT_PREFIX: &str = "EVENT_";
 const TICKET_PREFIX: &str = "TICKET_";
 const ESCROW_PREFIX: &str = "ESCROW_";
+const PLATFORM_FEE_BPS: &str = "PLATFORM_FEE_BPS";
+const PLATFORM_BALANCE: &str = "PLATFORM_BAL";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -31,12 +34,19 @@ pub fn get_admin(env: &Env) -> Address {
     env.storage().instance().get(&ADMIN).unwrap()
 }
 
+/// Set token address
+pub fn set_token(env: &Env, token: &Address) {
+    env.storage().instance().set(&TOKEN, token);
+}
+
+/// Get token address
+pub fn get_token(env: &Env) -> Address {
+    env.storage().instance().get(&TOKEN).unwrap()
+}
+
 /// Get next event ID
 pub fn get_next_event_id(env: &Env) -> u64 {
-    env.storage()
-        .instance()
-        .get(&EVENT_ID_COUNTER)
-        .unwrap_or(1)
+    env.storage().instance().get(&EVENT_ID_COUNTER).unwrap_or(1)
 }
 
 /// Increment event ID counter
@@ -106,11 +116,11 @@ pub fn get_escrow(env: &Env, event_id: u64) -> Result<i128, LumentixError> {
 pub fn deduct_escrow(env: &Env, event_id: u64, amount: i128) -> Result<(), LumentixError> {
     let key = (ESCROW_PREFIX, event_id);
     let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-    
+
     if current < amount {
         return Err(LumentixError::InsufficientEscrow);
     }
-    
+
     env.storage().persistent().set(&key, &(current - amount));
     Ok(())
 }
@@ -119,4 +129,30 @@ pub fn deduct_escrow(env: &Env, event_id: u64, amount: i128) -> Result<(), Lumen
 pub fn clear_escrow(env: &Env, event_id: u64) {
     let key = (ESCROW_PREFIX, event_id);
     env.storage().persistent().set(&key, &0i128);
+}
+
+/// Set platform fee in basis points (e.g., 250 = 2.5%)
+pub fn set_platform_fee_bps(env: &Env, fee_bps: u32) {
+    env.storage().instance().set(&PLATFORM_FEE_BPS, &fee_bps);
+}
+
+/// Get platform fee in basis points
+pub fn get_platform_fee_bps(env: &Env) -> u32 {
+    env.storage().instance().get(&PLATFORM_FEE_BPS).unwrap_or(0)
+}
+
+/// Add amount to platform balance
+pub fn add_platform_balance(env: &Env, amount: i128) {
+    let current: i128 = env.storage().instance().get(&PLATFORM_BALANCE).unwrap_or(0);
+    env.storage().instance().set(&PLATFORM_BALANCE, &(current + amount));
+}
+
+/// Get platform balance
+pub fn get_platform_balance(env: &Env) -> i128 {
+    env.storage().instance().get(&PLATFORM_BALANCE).unwrap_or(0)
+}
+
+/// Clear platform balance (after withdrawal)
+pub fn clear_platform_balance(env: &Env) {
+    env.storage().instance().set(&PLATFORM_BALANCE, &0i128);
 }
