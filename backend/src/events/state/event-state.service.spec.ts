@@ -18,13 +18,19 @@ describe('EventStateService', () => {
 
     it('allows published → completed', () => {
       expect(() =>
-        service.validateTransition(EventStatus.PUBLISHED, EventStatus.COMPLETED),
+        service.validateTransition(
+          EventStatus.PUBLISHED,
+          EventStatus.COMPLETED,
+        ),
       ).not.toThrow();
     });
 
     it('allows published → cancelled', () => {
       expect(() =>
-        service.validateTransition(EventStatus.PUBLISHED, EventStatus.CANCELLED),
+        service.validateTransition(
+          EventStatus.PUBLISHED,
+          EventStatus.CANCELLED,
+        ),
       ).not.toThrow();
     });
   });
@@ -45,7 +51,10 @@ describe('EventStateService', () => {
     it('rejects completed → any status', () => {
       for (const next of Object.values(EventStatus)) {
         expect(() =>
-          service.validateTransition(EventStatus.COMPLETED, next as EventStatus),
+          service.validateTransition(
+            EventStatus.COMPLETED,
+            next as EventStatus,
+          ),
         ).toThrow(BadRequestException);
       }
     });
@@ -53,7 +62,10 @@ describe('EventStateService', () => {
     it('rejects cancelled → any status', () => {
       for (const next of Object.values(EventStatus)) {
         expect(() =>
-          service.validateTransition(EventStatus.CANCELLED, next as EventStatus),
+          service.validateTransition(
+            EventStatus.CANCELLED,
+            next as EventStatus,
+          ),
         ).toThrow(BadRequestException);
       }
     });

@@ -2,10 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
 import { App } from 'supertest/types';
-import {
-  TypeOrmHealthIndicator,
-  HealthCheckError,
-} from '@nestjs/terminus';
+import { TypeOrmHealthIndicator, HealthCheckError } from '@nestjs/terminus';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule } from '../src/health/health.module';
 import { StellarService } from '../src/stellar/stellar.service';
@@ -18,8 +15,7 @@ describe('Health (e2e)', () => {
       })
         .overrideProvider(TypeOrmHealthIndicator)
         .useValue({
-          pingCheck: () =>
-            Promise.resolve({ database: { status: 'up' } }),
+          pingCheck: () => Promise.resolve({ database: { status: 'up' } }),
         })
         .overrideProvider(StellarService)
         .useValue({
@@ -30,9 +26,7 @@ describe('Health (e2e)', () => {
       const app: INestApplication<App> = moduleFixture.createNestApplication();
       await app.init();
 
-      const res = await request(app.getHttpServer())
-        .get('/health')
-        .expect(200);
+      const res = await request(app.getHttpServer()).get('/health').expect(200);
 
       expect(res.body.status).toBe('ok');
       expect(res.body.info).toBeDefined();

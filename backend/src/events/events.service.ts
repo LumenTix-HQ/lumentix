@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException, // ← add
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, FindOptionsWhere } from 'typeorm';
 import { Event } from './entities/event.entity';
@@ -33,10 +37,18 @@ export class EventsService {
     return this.eventRepository.save(event);
   }
 
-  async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
+  async updateEvent(
+    id: string,
+    dto: UpdateEventDto,
+    callerId: string, // ← add
+  ): Promise<Event> {
     const event = await this.getEventById(id);
 
-    // Validate state transition before applying any updates
+    // ── Ownership check ────────────────────────────────────────────────────
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
     if (dto.status !== undefined && dto.status !== event.status) {
       this.eventStateService.validateTransition(event.status, dto.status);
     }
@@ -58,8 +70,15 @@ export class EventsService {
     return this.eventRepository.save(event);
   }
 
-  async deleteEvent(id: string): Promise<void> {
+  async deleteEvent(id: string, callerId: string): Promise<void> {
+    // ← add callerId
     const event = await this.getEventById(id);
+
+    // ── Ownership check ────────────────────────────────────────────────────
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
     await this.eventRepository.remove(event);
   }
 

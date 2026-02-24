@@ -1,17 +1,19 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Payment, PaymentStatus } from './entities/payment.entity';
-import { EventsService } from '../events/events.service';
-import { StellarService } from '../stellar/stellar.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { EventStatus } from '../events/entities/event.entity';
+import { EventsService } from '../events/events.service';
+import { StellarService } from '../stellar/stellar.service';
+import { Payment, PaymentStatus } from './entities/payment.entity';
 
 /** Supported on-chain asset codes */
 const SUPPORTED_ASSETS = ['XLM', 'USDC'] as const;
@@ -59,7 +61,7 @@ export class PaymentsService {
     // 1. Validate event exists
     const event = await this.eventsService.getEventById(eventId);
 
-    // 2. Validate event is published — covers suspended (CANCELLED) events too
+    // 2. Validate event status
     if (event.status === EventStatus.CANCELLED) {
       throw new BadRequestException(
         `Event "${event.title}" has been suspended and is no longer available for purchase.`,
@@ -80,7 +82,45 @@ export class PaymentsService {
       );
     }
 
-    // 4. Persist a pending payment record
+    // 4. ── Capacity check ────────────────────────────────────────────────────
+    //    Count PENDING + CONFIRMED payments to prevent overselling.
+    //    NOTE: For events with very high concurrency (flash sales etc.) consider
+    //    wrapping this block and the payment INSERT in a serializable transaction
+    //    with a pessimistic write-lock on the event row:
+    //      await this.paymentsRepository.manager.transaction(
+    //        'SERIALIZABLE', async (em) => { ... }
+    //      );
+    if (event.maxAttendees !== null) {
+      const soldCount = await this.paymentsRepository.count({
+        where: {
+          eventId,
+          status: In([PaymentStatus.PENDING, PaymentStatus.CONFIRMED]),
+        },
+      });
+
+      if (soldCount >= event.maxAttendees) {
+        throw new BadRequestException(
+          `This event has reached its maximum capacity of ${event.maxAttendees} attendees.`,
+        );
+      }
+    }
+
+    // 5. Check for existing payment for this user and event
+    const existing = await this.paymentsRepository.findOne({
+      where: {
+        userId,
+        eventId,
+        status: In([PaymentStatus.PENDING, PaymentStatus.CONFIRMED]),
+      },
+    });
+
+    if (existing) {
+      throw new ConflictException(
+        `You already have an active or confirmed payment for this event.`,
+      );
+    }
+
+    // 6. Persist a pending payment record
     const payment = this.paymentsRepository.create({
       eventId,
       userId,
@@ -114,7 +154,11 @@ export class PaymentsService {
   // STEP 2 — Confirm payment
   // ─────────────────────────────────────────────────────────────────────────
 
-  async confirmPayment(transactionHash: string): Promise<Payment> {
+  async confirmPayment(
+    transactionHash: string,
+    callerId: string,
+  ): Promise<Payment> {
+    // ← add callerId
     let txRecord: Awaited<ReturnType<StellarService['getTransaction']>>;
     try {
       txRecord = await this.stellarService.getTransaction(transactionHash);
@@ -140,6 +184,13 @@ export class PaymentsService {
     if (!payment) {
       throw new NotFoundException(
         `No pending payment found for memo "${memoValue}".`,
+      );
+    }
+
+    // ── Ownership check ──────────────────────────────────────────────────────
+    if (payment.userId !== callerId) {
+      throw new ForbiddenException(
+        'You are not authorised to confirm this payment.',
       );
     }
 
@@ -222,7 +273,6 @@ export class PaymentsService {
     return confirmed;
   }
 
-
   // ─────────────────────────────────────────────────────────────────────────
   // Tickets dependency helper
   // ─────────────────────────────────────────────────────────────────────────
@@ -238,7 +288,6 @@ export class PaymentsService {
 
     return payment;
   }
-
 
   // ─────────────────────────────────────────────────────────────────────────
   // Helpers
@@ -281,7 +330,6 @@ export class PaymentsService {
     );
   }
 }
-
 
 // ─── Internal type helpers ────────────────────────────────────────────────────
 
