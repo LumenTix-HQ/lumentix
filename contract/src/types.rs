@@ -1,12 +1,13 @@
 use soroban_sdk::{contracttype, Address, String};
 
-/// Event status enum
+/// Event status enum mirroring backend statuses
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EventStatus {
-    Active,
-    Cancelled,
+    Draft,
+    Published,
     Completed,
+    Cancelled,
 }
 
 /// Event structure
