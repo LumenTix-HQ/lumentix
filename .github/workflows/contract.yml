@@ -21,7 +21,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -46,7 +46,7 @@ jobs:
           soroban contract optimize contract/target/wasm32-unknown-unknown/release/lumentix_contract.wasm
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: contract-wasm
           path: |
