@@ -391,3 +391,192 @@ fn test_get_event_not_found() {
     let result = client.try_get_event(&999u64);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_get_availability_initial() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32, // max_tickets = 50
+    );
+    
+    // Initially, all 50 tickets should be available
+    let availability = client.get_availability(&event_id);
+    assert_eq!(availability, 50);
+}
+
+#[test]
+fn test_get_availability_after_purchase() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32, // max_tickets = 50
+    );
+    
+    // Purchase 1 ticket
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    
+    // Should have 49 tickets remaining
+    let availability = client.get_availability(&event_id);
+    assert_eq!(availability, 49);
+}
+
+#[test]
+fn test_get_availability_sold_out() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &1u32, // Only 1 ticket available
+    );
+    
+    let buyer = Address::generate(&env);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    
+    // Should have 0 tickets remaining
+    let availability = client.get_availability(&event_id);
+    assert_eq!(availability, 0);
+}
+
+#[test]
+fn test_get_availability_after_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32, // max_tickets = 50
+    );
+    
+    // Purchase 1 ticket
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    
+    // Check availability after purchase (should be 49)
+    let availability_before = client.get_availability(&event_id);
+    assert_eq!(availability_before, 49);
+    
+    // Cancel event and refund
+    let _ = client.cancel_event(&organizer, &event_id);
+    let _ = client.refund_ticket(&ticket_id, &buyer);
+    
+    // Should have 50 tickets available again (capacity freed up)
+    let availability_after = client.get_availability(&event_id);
+    assert_eq!(availability_after, 50);
+}
+
+#[test]
+fn test_tickets_sold_decremented_after_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    
+    // Purchase ticket
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    
+    // Verify event shows 1 ticket sold
+    let event_before = client.get_event(&event_id);
+    assert_eq!(event_before.tickets_sold, 1);
+    
+    // Cancel event and refund
+    let _ = client.cancel_event(&organizer, &event_id);
+    let _ = client.refund_ticket(&ticket_id, &buyer);
+    
+    // Verify event shows 0 tickets sold (decremented)
+    let event_after = client.get_event(&event_id);
+    assert_eq!(event_after.tickets_sold, 0);
+}
+
+#[test]
+fn test_refund_frees_capacity_for_new_purchase() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer1 = Address::generate(&env);
+    let buyer2 = Address::generate(&env);
+    
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &1u32, // Only 1 ticket available
+    );
+    
+    // First buyer purchases the only ticket
+    let ticket_id = client.purchase_ticket(&buyer1, &event_id, &100i128);
+    
+    // Second buyer should fail (sold out)
+    let result = client.try_purchase_ticket(&buyer2, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
+    
+    // Cancel event and refund first ticket
+    let _ = client.cancel_event(&organizer, &event_id);
+    let _ = client.refund_ticket(&ticket_id, &buyer1);
+    
+    // Now second buyer should succeed, but event is cancelled so we can't buy.
+    // However, we can assert that the capacity is freed up correctly.
+    let availability = client.get_availability(&event_id);
+    assert_eq!(availability, 1);
+}
