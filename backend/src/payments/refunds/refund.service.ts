@@ -98,7 +98,11 @@ export class RefundService {
     const results: RefundResultDto[] = [];
 
     for (const payment of confirmedPayments) {
-      const result = await this.processSingleRefund(payment, event, escrowSecret);
+      const result = await this.processSingleRefund(
+        payment,
+        event,
+        escrowSecret,
+      );
       results.push(result);
     }
 
@@ -125,7 +129,10 @@ export class RefundService {
     event: Event,
     escrowSecret: string,
   ): Promise<RefundResultDto> {
-    const base: Pick<RefundResultDto, 'paymentId' | 'userId' | 'amount' | 'currency'> = {
+    const base: Pick<
+      RefundResultDto,
+      'paymentId' | 'userId' | 'amount' | 'currency'
+    > = {
       paymentId: payment.id,
       userId: payment.userId,
       amount: Number(payment.amount),

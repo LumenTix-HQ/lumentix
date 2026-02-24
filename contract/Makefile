@@ -1,87 +1,77 @@
-.PHONY: help build test optimize clean deploy setup
-
-# Default target
-help:
-	@echo "Available targets:"
-	@echo "  setup     - Install Rust and Soroban CLI"
-	@echo "  build     - Build the Soroban contract"
-	@echo "  test      - Run contract tests"
-	@echo "  optimize  - Optimize the contract WASM"
-	@echo "  clean     - Clean build artifacts"
-	@echo "  deploy    - Deploy contract to testnet"
-	@echo "  help      - Show this help message"
-
-# Install dependencies
-setup:
-	@echo "Setting up development environment..."
-	@curl --location --proto '=https' --tlsv1.2 --silent --show-error https://github.com/soroban-example/soroban-cli/releases/latest/download/soroban-cli-install.sh | sh
-	@rustup target add wasm32-unknown-unknown
-	@cargo install cargo-dylint dylint-link
-	@echo "Setup complete! Please restart your terminal or run: source ~/.bashrc"
+.PHONY: build test clean install deploy-testnet optimize
 
 # Build the contract
 build:
-	@echo "Building contract..."
 	cargo build --target wasm32-unknown-unknown --release
-	@echo "Build complete. WASM file: target/wasm32-unknown-unknown/release/lumentix_contract.wasm"
 
 # Run tests
 test:
-	@echo "Running contract tests..."
 	cargo test
 
-# Optimize the contract WASM
-optimize:
-	@echo "Optimizing contract..."
-	cargo run --bin optimize -- target/wasm32-unknown-unknown/release/lumentix_contract.wasm
-	@echo "Optimization complete. Optimized WASM file: target/wasm32-unknown-unknown/release/lumentix_contract.optimized.wasm"
+# Run tests with output
+test-verbose:
+	cargo test -- --nocapture
 
 # Clean build artifacts
 clean:
-	@echo "Cleaning build artifacts..."
 	cargo clean
-	rm -f *.wasm *.wasm.gz
 
-# Deploy to testnet (requires environment variables)
-deploy: optimize
-	@echo "Deploying to testnet..."
-	@if [ -z "$(CONTRACT_ID)" ]; then \
-		echo "Error: CONTRACT_ID environment variable not set"; \
-		echo "Usage: CONTRACT_ID=your_contract_id make deploy"; \
+# Install required tools
+install:
+	rustup target add wasm32-unknown-unknown
+	cargo install soroban-cli
+
+# Optimize the WASM binary
+optimize: build
+	soroban contract optimize \
+		--wasm target/wasm32-unknown-unknown/release/lumentix_contract.wasm
+
+# Build and run tests
+all: build test
+
+# Check code without building
+check:
+	cargo check
+
+# Format code
+fmt:
+	cargo fmt
+
+# Run clippy linter
+lint:
+	cargo clippy -- -D warnings
+
+# Generate documentation
+docs:
+	cargo doc --no-deps --open
+
+# Deploy to testnet (requires SOROBAN_SECRET_KEY environment variable)
+deploy-testnet: optimize
+	@if [ -z "$(SOROBAN_SECRET_KEY)" ]; then \
+		echo "Error: SOROBAN_SECRET_KEY environment variable not set"; \
 		exit 1; \
 	fi
 	soroban contract deploy \
-		--wasm target/wasm32-unknown-unknown/release/lumentix_contract.optimized.wasm \
-		--source $(ADMIN_SECRET) \
-		--network testnet
-	@echo "Deployment complete!"
+		--wasm target/wasm32-unknown-unknown/release/lumentix_contract.wasm \
+		--source $(SOROBAN_SECRET_KEY) \
+		--rpc-url https://soroban-testnet.stellar.org \
+		--network-passphrase "Test SDF Network ; September 2015"
 
-# Initialize contract
-init:
-	@echo "Initializing contract..."
-	@if [ -z "$(CONTRACT_ID)" ]; then \
-		echo "Error: CONTRACT_ID environment variable not set"; \
-		echo "Usage: CONTRACT_ID=your_contract_id ADMIN_SECRET=your_secret make init"; \
+# Initialize contract (requires CONTRACT_ID and ADMIN_ADDRESS)
+initialize:
+	@if [ -z "$(CONTRACT_ID)" ] || [ -z "$(ADMIN_ADDRESS)" ]; then \
+		echo "Error: CONTRACT_ID and ADMIN_ADDRESS must be set"; \
 		exit 1; \
 	fi
 	soroban contract invoke \
 		--id $(CONTRACT_ID) \
-		--source $(ADMIN_SECRET) \
-		--network testnet \
-		initialize \
-		--admin $(ADMIN_PUBLIC)
-	@echo "Contract initialized with admin: $(ADMIN_PUBLIC)"
+		--source $(SOROBAN_SECRET_KEY) \
+		--rpc-url https://soroban-testnet.stellar.org \
+		--network-passphrase "Test SDF Network ; September 2015" \
+		-- initialize \
+		--admin $(ADMIN_ADDRESS)
 
-# Get contract info
-info:
-	@echo "Getting contract information..."
-	@if [ -z "$(CONTRACT_ID)" ]; then \
-		echo "Error: CONTRACT_ID environment variable not set"; \
-		echo "Usage: CONTRACT_ID=your_contract_id make info"; \
-		exit 1; \
-	fi
-	soroban contract info --id $(CONTRACT_ID) --network testnet
-
-# List all targets
-list:
-	@$(MAKE) -pRrq -f $(firstword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
+# Full deployment workflow
+deploy-full: optimize deploy-testnet
+	@echo "Contract deployed! Save the contract ID and run:"
+	@echo "make initialize CONTRACT_ID=<id> ADMIN_ADDRESS=<address>"
