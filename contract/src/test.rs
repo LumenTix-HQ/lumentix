@@ -1,12 +1,9 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env, String,
-};
+use soroban_sdk::{testutils::Address as _, token, Address, Env, String};
 
-fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
+fn create_test_contract(env: &Env) -> (Address, Address, LumentixContractClient<'_>) {
     let contract_id = env.register_contract(None, LumentixContract);
     let client = LumentixContractClient::new(env, &contract_id);
     let admin = Address::generate(env);
@@ -59,7 +56,7 @@ fn test_initialize_already_initialized() {
     let (admin, client) = create_test_contract(&env);
 
     // Try to initialize again
-    let result = client.try_initialize(&admin);
+    let result = client.try_initialize(&admin, &token_id);
     assert_eq!(result, Err(Ok(LumentixError::AlreadyInitialized)));
 }
 
@@ -229,9 +226,11 @@ fn test_purchase_ticket_sold_out() {
     client.update_event_status(&event_id, &EventStatus::Published, &organizer);
 
     let buyer1 = Address::generate(&env);
+    token_client.mint(&buyer1, &1000);
     client.purchase_ticket(&buyer1, &event_id, &100i128);
 
     let buyer2 = Address::generate(&env);
+    token_client.mint(&buyer2, &1000);
     let result = client.try_purchase_ticket(&buyer2, &event_id, &100i128);
     assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
 }
@@ -362,6 +361,57 @@ fn test_update_status_draft_to_published() {
 
     let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.use_ticket(&ticket_id, &organizer);
+
+    let result = client.try_use_ticket(&ticket_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
+}
+
+#[test]
+fn test_cancel_event_and_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let _ = client.cancel_event(&organizer, &event_id);
+
+    let result = client.try_refund_ticket(&ticket_id, &buyer);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_refund_event_not_cancelled() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_refund_ticket(&ticket_id, &buyer);
+    assert_eq!(result, Err(Ok(LumentixError::EventNotCancelled)));
+}
+
+#[test]
+fn test_get_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
 
     let event_id = client.create_event(
         &organizer,
@@ -383,6 +433,24 @@ fn test_update_status_draft_to_published() {
 
 #[test]
 fn test_update_status_published_to_cancelled() {
+    let event = client.get_event(&event_id);
+    assert_eq!(event.id, event_id);
+    assert_eq!(event.organizer, organizer);
+}
+
+#[test]
+fn test_get_event_not_found() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+
+    let result = client.try_get_event(&999u64);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_update_status_draft_to_published() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -424,12 +492,38 @@ fn test_update_status_invalid_transition() {
 
 #[test]
 fn test_update_status_unauthorized() {
+    let result = client.try_update_event_status(&event_id, &EventStatus::Published, &organizer);
+    assert!(result.is_ok());
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.status, EventStatus::Published);
+}
+
+#[test]
+fn test_update_status_published_to_cancelled() {
     let env = Env::default();
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let unauthorized = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_update_event_status(&event_id, &EventStatus::Cancelled, &organizer);
+    assert!(result.is_ok());
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.status, EventStatus::Cancelled);
+}
+
+#[test]
+fn test_update_status_invalid_transition() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
 
     let event_id = client.create_event(
         &organizer,
@@ -448,12 +542,20 @@ fn test_update_status_unauthorized() {
 
 #[test]
 fn test_purchase_ticket_draft_status_fails() {
+    // Try to go directly from Draft to Completed
+    let result = client.try_update_event_status(&event_id, &EventStatus::Completed, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_update_status_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
 
     let event_id = client.create_event(
         &organizer,
@@ -488,6 +590,12 @@ fn test_set_platform_fee_success() {
 
 #[test]
 fn test_set_platform_fee_unauthorized() {
+    let result = client.try_update_event_status(&event_id, &EventStatus::Published, &unauthorized);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_purchase_ticket_draft_status_fails() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -913,6 +1021,9 @@ fn test_status_transition_draft_to_completed_fails() {
     let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
 
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
     let event_id = client.create_event(
         &organizer,
         &String::from_str(&env, "Test Event"),
@@ -1315,4 +1426,7 @@ fn test_event_with_platform_fee_end_to_end() {
     // Admin withdraws platform fees
     let fees = client.withdraw_platform_fees(&admin);
     assert_eq!(fees, 20);
+    // Try to purchase ticket for draft event
+    let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
 }
