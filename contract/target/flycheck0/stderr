@@ -10,3 +10,4 @@
    0.618392026s  INFO prepare_target{force=false package_id=lumentix-contract v0.1.0 (/home/vahalla/Desktop/lumentix/contract) target="lumentix_contract"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/home/vahalla/Desktop/lumentix/contract/target/debug/.fingerprint/lumentix-contract-56617fe0042fd2f4/dep-test-lib-lumentix_contract", reference_mtime: FileTime { seconds: 1771933969, nanos: 904734249 }, stale: "/home/vahalla/Desktop/lumentix/contract/src/storage.rs", stale_mtime: FileTime { seconds: 1771934312, nanos: 911696477 } }))
     Checking lumentix-contract v0.1.0 (/home/vahalla/Desktop/lumentix/contract)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.20s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s

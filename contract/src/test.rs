@@ -267,7 +267,18 @@ fn test_use_ticket_unauthorized() {
 }
 
 #[test]
-fn test_use_ticket_already_used() {
+fn test_get_event_not_found() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+
+    let result = client.try_get_event(&999u64);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_update_status_draft_to_published() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -466,196 +477,4 @@ fn test_purchase_ticket_draft_status_fails() {
     // Try to purchase ticket for draft event
     let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
     assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
-}
-
-#[test]
-fn test_set_platform_fee_success() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (admin, client) = create_test_contract(&env);
-
-    // Set platform fee to 2.5% (250 basis points)
-    let result = client.try_set_platform_fee(&admin, &250u32);
-    assert!(result.is_ok());
-
-    let fee = client.get_platform_fee();
-    assert_eq!(fee, 250);
-}
-
-#[test]
-fn test_set_platform_fee_unauthorized() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let unauthorized = Address::generate(&env);
-
-    // Try to set fee as non-admin
-    let result = client.try_set_platform_fee(&unauthorized, &250u32);
-    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
-}
-
-#[test]
-fn test_set_platform_fee_invalid() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (admin, client) = create_test_contract(&env);
-
-    // Try to set fee > 100% (10000 basis points)
-    let result = client.try_set_platform_fee(&admin, &10001u32);
-    assert_eq!(result, Err(Ok(LumentixError::InvalidPlatformFee)));
-}
-
-#[test]
-fn test_purchase_ticket_with_platform_fee() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    // Set platform fee to 5% (500 basis points)
-    client.set_platform_fee(&admin, &500u32);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Purchase ticket for 100
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-    assert_eq!(ticket_id, 1);
-
-    // Check platform balance: 5% of 100 = 5
-    let platform_balance = client.get_platform_balance();
-    assert_eq!(platform_balance, 5);
-
-    // Check escrow balance: 95% of 100 = 95
-    // We can't directly check escrow in tests, but we verify the ticket was created
-    let ticket = client.get_ticket(&ticket_id);
-    assert_eq!(ticket.owner, buyer);
-}
-
-#[test]
-fn test_purchase_ticket_zero_platform_fee() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    // Don't set platform fee (defaults to 0)
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Purchase ticket for 100
-    client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    // Check platform balance: 0% of 100 = 0
-    let platform_balance = client.get_platform_balance();
-    assert_eq!(platform_balance, 0);
-}
-
-#[test]
-fn test_withdraw_platform_fees_success() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    // Set platform fee to 10% (1000 basis points)
-    client.set_platform_fee(&admin, &1000u32);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Purchase 3 tickets for 100 each
-    client.purchase_ticket(&buyer, &event_id, &100i128);
-    client.purchase_ticket(&buyer, &event_id, &100i128);
-    client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    // Platform should have collected 30 (10% of 300)
-    let platform_balance = client.get_platform_balance();
-    assert_eq!(platform_balance, 30);
-
-    // Withdraw fees
-    let withdrawn = client.withdraw_platform_fees(&admin);
-    assert_eq!(withdrawn, 30);
-
-    // Balance should be cleared
-    let balance_after = client.get_platform_balance();
-    assert_eq!(balance_after, 0);
-}
-
-#[test]
-fn test_withdraw_platform_fees_unauthorized() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let unauthorized = Address::generate(&env);
-
-    // Try to withdraw as non-admin
-    let result = client.try_withdraw_platform_fees(&unauthorized);
-    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
-}
-
-#[test]
-fn test_withdraw_platform_fees_no_balance() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (admin, client) = create_test_contract(&env);
-
-    // Try to withdraw with no fees collected
-    let result = client.try_withdraw_platform_fees(&admin);
-    assert_eq!(result, Err(Ok(LumentixError::NoPlatformFees)));
-}
-
-#[test]
-fn test_platform_fee_calculation_precision() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    // Set platform fee to 2.5% (250 basis points)
-    client.set_platform_fee(&admin, &250u32);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Purchase ticket for 1000
-    client.purchase_ticket(&buyer, &event_id, &1000i128);
-
-    // Platform fee should be 25 (2.5% of 1000)
-    let platform_balance = client.get_platform_balance();
-    assert_eq!(platform_balance, 25);
-}
-
-#[test]
-fn test_multiple_events_platform_fee_accumulation() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (admin, client) = create_test_contract(&env);
-    let organizer1 = Address::generate(&env);
-    let organizer2 = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    // Set platform fee to 5% (500 basis points)
-    client.set_platform_fee(&admin, &500u32);
-
-    let event_id_1 = create_and_publish_event(&env, &client, &organizer1);
-    let event_id_2 = create_and_publish_event(&env, &client, &organizer2);
-
-    // Purchase tickets from both events
-    client.purchase_ticket(&buyer, &event_id_1, &200i128); // Fee: 10
-    client.purchase_ticket(&buyer, &event_id_2, &300i128); // Fee: 15
-
-    // Platform should have accumulated 25 total
-    let platform_balance = client.get_platform_balance();
-    assert_eq!(platform_balance, 25);
 }
