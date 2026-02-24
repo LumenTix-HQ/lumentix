@@ -1,103 +1,3 @@
-use std::collections::HashMap;
-use std::cell::RefCell;
-use serde::{Serialize, Deserialize};
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Address(pub String);
-
-impl Address {
-    pub fn from_str(s: &str) -> Self {
-        Address(s.to_string())
-    }
-    // stub for auth check; in real contract this would verify signature
-    pub fn require_auth(&self) {}
-}
-
-#[derive(Clone)]
-pub struct Env {
-    pub ledger_timestamp: i128,
-    pub instance: RefCell<HashMap<String, Address>>,
-    pub storage: RefCell<HashMap<String, i128>>,
-}
-
-impl Default for Env {
-    fn default() -> Self {
-        Env {
-            ledger_timestamp: 1_700_000_000, // arbitrary default
-            instance: RefCell::new(HashMap::new()),
-            storage: RefCell::new(HashMap::new()),
-        }
-    }
-}
-
-pub struct AdminContract;
-
-const ORGANIZER_TTL_SECS: i128 = 60 * 60 * 24 * 365; // 1 year
-
-impl AdminContract {
-    pub fn initialize(env: &Env, admin: Address) {
-        if env.instance.borrow().contains_key("admin") {
-            panic!("contract already initialized");
-        }
-        admin.require_auth();
-        env.instance.borrow_mut().insert("admin".into(), admin);
-    }
-
-    pub fn set_admin(env: &Env, new_admin: Address) {
-        let current = env.instance.borrow().get("admin").cloned().expect("admin not set");
-        current.require_auth();
-        env.instance.borrow_mut().insert("admin".into(), new_admin);
-    }
-
-    pub fn get_admin(env: &Env) -> Address {
-        env.instance.borrow().get("admin").cloned().expect("admin not set")
-    }
-
-    pub fn add_organizer(env: &Env, organizer: Address) {
-        let admin = env.instance.borrow().get("admin").cloned().expect("admin not set");
-        admin.require_auth();
-        let expiry = env.ledger_timestamp + ORGANIZER_TTL_SECS;
-        env.storage.borrow_mut().insert(organizer.0.clone(), expiry);
-    }
-
-    pub fn is_organizer(env: &Env, addr: Address) -> bool {
-        if let Some(expiry) = env.storage.borrow().get(&addr.0) {
-            return *expiry > env.ledger_timestamp;
-        }
-        false
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn is_organizer_false_when_none() {
-        let env = Env::default();
-        let addr = Address::from_str("org1");
-        assert_eq!(AdminContract::is_organizer(&env, addr), false);
-    }
-
-    #[test]
-    fn is_organizer_true_when_expiry_future() {
-        let mut env = Env::default();
-        env.ledger_timestamp = 1_000;
-        let addr = Address::from_str("org2");
-        let expiry = env.ledger_timestamp + ORGANIZER_TTL_SECS;
-        env.storage.borrow_mut().insert(addr.0.clone(), expiry);
-        assert_eq!(AdminContract::is_organizer(&env, addr), true);
-    }
-
-    #[test]
-    fn get_admin_returns_set_admin() {
-        let env = Env::default();
-        let admin = Address::from_str("admin1");
-        env.instance.borrow_mut().insert("admin".into(), admin.clone());
-        let got = AdminContract::get_admin(&env);
-        assert_eq!(got, admin);
-    }
-}
 #![no_std]
 
 mod error;
@@ -108,29 +8,27 @@ mod validation;
 #[cfg(test)]
 mod test;
 
-pub use contract::TicketContract;
-pub use events::TransferEvent;
-pub use models::Ticket;
-=======
 pub use error::LumentixError;
 pub use types::*;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
 
 #[contract]
 pub struct LumentixContract;
 
 #[contractimpl]
 impl LumentixContract {
-    /// Initialize the contract with admin address
-    pub fn initialize(env: Env, admin: Address) -> Result<(), LumentixError> {
+    /// Initialize the contract with admin address and token
+    pub fn initialize(env: Env, admin: Address, token: Address) -> Result<(), LumentixError> {
         validation::validate_address(&admin)?;
+        validation::validate_address(&token)?;
         
         if storage::is_initialized(&env) {
             return Err(LumentixError::AlreadyInitialized);
         }
         
         storage::set_admin(&env, &admin);
+        storage::set_token(&env, &token);
         storage::set_initialized(&env);
         
         Ok(())
@@ -233,6 +131,10 @@ impl LumentixContract {
         // Update event
         event.tickets_sold += 1;
         storage::set_event(&env, event_id, &event);
+        
+        // Transfer tokens from buyer to contract
+        let token_client = token::Client::new(&env, &storage::get_token(&env));
+        token_client.transfer(&buyer, &env.current_contract_address(), &payment_amount);
         
         // Store payment in escrow
         storage::add_escrow(&env, event_id, payment_amount);
@@ -341,13 +243,40 @@ impl LumentixContract {
             return Err(LumentixError::EventNotCancelled);
         }
         
+        // Mark ticket as refunded first (reentrancy protection)
         ticket.refunded = true;
         storage::set_ticket(&env, ticket_id, &ticket);
         
-        // Deduct from escrow
+        // Deduct from escrow accounting
         storage::deduct_escrow(&env, event.id, event.ticket_price)?;
         
+        // Transfer tokens from contract back to buyer
+        let token_client = token::Client::new(&env, &storage::get_token(&env));
+        token_client.transfer(&env.current_contract_address(), &buyer, &event.ticket_price);
+        
+        // Emit refund event
+        env.events().publish(
+            (soroban_sdk::symbol_short!("refund"),),
+            (ticket_id, event.id, buyer.clone(), event.ticket_price)
+        );
+        
         Ok(())
+    }
+
+    /// Alias for refund_ticket - process refund for cancelled event
+    pub fn process_refund(
+        env: Env,
+        event_id: u64,
+        ticket_id: u64,
+        buyer: Address,
+    ) -> Result<(), LumentixError> {
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        
+        if ticket.event_id != event_id {
+            return Err(LumentixError::TicketNotFound);
+        }
+        
+        Self::refund_ticket(env, ticket_id, buyer)
     }
 
     /// Release escrow funds to organizer (after event completion)
@@ -380,7 +309,12 @@ impl LumentixContract {
             return Err(LumentixError::EscrowAlreadyReleased);
         }
         
+        // Clear escrow first (reentrancy protection)
         storage::clear_escrow(&env, event_id);
+        
+        // Transfer tokens from contract to organizer
+        let token_client = token::Client::new(&env, &storage::get_token(&env));
+        token_client.transfer(&env.current_contract_address(), &organizer, &escrow_amount);
         
         Ok(escrow_amount)
     }
@@ -447,4 +381,3 @@ impl LumentixContract {
         Ok(storage::get_admin(&env))
     }
 }
->>>>>>

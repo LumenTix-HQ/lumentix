@@ -5,6 +5,7 @@ use crate::types::{Event, Ticket};
 // Storage keys
 const INITIALIZED: &str = "INIT";
 const ADMIN: &str = "ADMIN";
+const TOKEN: &str = "TOKEN";
 const EVENT_ID_COUNTER: &str = "EVENT_CTR";
 const TICKET_ID_COUNTER: &str = "TICKET_CTR";
 const EVENT_PREFIX: &str = "EVENT_";
@@ -29,6 +30,16 @@ pub fn set_admin(env: &Env, admin: &Address) {
 /// Get admin address
 pub fn get_admin(env: &Env) -> Address {
     env.storage().instance().get(&ADMIN).unwrap()
+}
+
+/// Set token address
+pub fn set_token(env: &Env, token: &Address) {
+    env.storage().instance().set(&TOKEN, token);
+}
+
+/// Get token address
+pub fn get_token(env: &Env) -> Address {
+    env.storage().instance().get(&TOKEN).unwrap()
 }
 
 /// Get next event ID

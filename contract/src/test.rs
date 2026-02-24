@@ -1,16 +1,20 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use soroban_sdk::{testutils::Address as _, token, Address, Env, String};
 
-fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
+fn create_test_contract(env: &Env) -> (Address, Address, LumentixContractClient<'_>) {
     let contract_id = env.register_contract(None, LumentixContract);
     let client = LumentixContractClient::new(env, &contract_id);
     let admin = Address::generate(env);
     
-    let _ = client.initialize(&admin);
+    // Create and register a test token
+    let token_admin = Address::generate(env);
+    let token_id = env.register_stellar_asset_contract(token_admin.clone());
     
-    (admin, client)
+    let _ = client.initialize(&admin, &token_id);
+    
+    (admin, token_id, client)
 }
 
 #[test]
@@ -21,8 +25,10 @@ fn test_initialize_success() {
     let contract_id = env.register_contract(None, LumentixContract);
     let client = LumentixContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract(token_admin);
     
-    let result = client.try_initialize(&admin);
+    let result = client.try_initialize(&admin, &token_id);
     assert!(result.is_ok());
 }
 
@@ -31,10 +37,10 @@ fn test_initialize_already_initialized() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (admin, client) = create_test_contract(&env);
+    let (admin, token_id, client) = create_test_contract(&env);
     
     // Try to initialize again
-    let result = client.try_initialize(&admin);
+    let result = client.try_initialize(&admin, &token_id);
     assert_eq!(result, Err(Ok(LumentixError::AlreadyInitialized)));
 }
 
@@ -43,7 +49,7 @@ fn test_create_event_success() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, _token, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     
     let event_id = client.create_event(
@@ -65,7 +71,7 @@ fn test_create_event_invalid_price() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, _token, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     
     let result = client.try_create_event(
@@ -87,7 +93,7 @@ fn test_create_event_invalid_capacity() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, _token, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     
     let result = client.try_create_event(
@@ -109,7 +115,7 @@ fn test_create_event_invalid_time_range() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, _token, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     
     let result = client.try_create_event(
@@ -131,7 +137,7 @@ fn test_create_event_empty_name() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, _token, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     
     let result = client.try_create_event(
@@ -153,9 +159,12 @@ fn test_purchase_ticket_success() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&buyer, &1000);
     
     let event_id = client.create_event(
         &organizer,
@@ -177,9 +186,12 @@ fn test_purchase_ticket_insufficient_funds() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&buyer, &1000);
     
     let event_id = client.create_event(
         &organizer,
@@ -201,8 +213,10 @@ fn test_purchase_ticket_sold_out() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
     
     let event_id = client.create_event(
         &organizer,
@@ -216,9 +230,11 @@ fn test_purchase_ticket_sold_out() {
     );
     
     let buyer1 = Address::generate(&env);
+    token_client.mint(&buyer1, &1000);
     client.purchase_ticket(&buyer1, &event_id, &100i128);
     
     let buyer2 = Address::generate(&env);
+    token_client.mint(&buyer2, &1000);
     let result = client.try_purchase_ticket(&buyer2, &event_id, &100i128);
     assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
 }
@@ -228,9 +244,12 @@ fn test_use_ticket_success() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&buyer, &1000);
     
     let event_id = client.create_event(
         &organizer,
@@ -254,10 +273,13 @@ fn test_use_ticket_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
     let unauthorized = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&buyer, &1000);
     
     let event_id = client.create_event(
         &organizer,
@@ -281,9 +303,12 @@ fn test_use_ticket_already_used() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&buyer, &1000);
     
     let event_id = client.create_event(
         &organizer,
@@ -308,9 +333,12 @@ fn test_cancel_event_and_refund() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&buyer, &1000);
     
     let event_id = client.create_event(
         &organizer,
@@ -336,9 +364,12 @@ fn test_refund_event_not_cancelled() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, token_id, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
+    
+    let token_client = token::StellarAssetClient::new(&env, &token_id);
+    token_client.mint(&buyer, &1000);
     
     let event_id = client.create_event(
         &organizer,
@@ -362,7 +393,7 @@ fn test_get_event() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, _token, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
     
     let event_id = client.create_event(
@@ -386,7 +417,7 @@ fn test_get_event_not_found() {
     let env = Env::default();
     env.mock_all_auths();
     
-    let (_admin, client) = create_test_contract(&env);
+    let (_admin, _token, client) = create_test_contract(&env);
     
     let result = client.try_get_event(&999u64);
     assert!(result.is_err());

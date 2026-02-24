@@ -6,8 +6,9 @@ A comprehensive ticketing and event management smart contract built on Stellar's
 
 - **Event Management**: Create, cancel, and complete events
 - **Ticket Sales**: Purchase and validate tickets with escrow protection
-- **Refund System**: Automatic refunds for cancelled events
-- **Escrow Protection**: Funds held in escrow until event completion
+- **Token Integration**: Full SAC token support for payments and refunds
+- **Refund System**: Automatic token refunds for cancelled events
+- **Escrow Protection**: Funds held in contract until event completion
 - **Comprehensive Error Handling**: Clear error types for debugging
 - **Input Validation**: All inputs validated before processing
 
@@ -51,10 +52,10 @@ All contract functions validate inputs before processing:
 ### Initialization
 
 ```rust
-initialize(admin: Address) -> Result<(), LumentixError>
+initialize(admin: Address, token: Address) -> Result<(), LumentixError>
 ```
 
-Initialize the contract with an admin address. Can only be called once.
+Initialize the contract with an admin address and payment token. Can only be called once.
 
 ### Event Management
 
@@ -101,7 +102,7 @@ purchase_ticket(
 ) -> Result<u64, LumentixError>
 ```
 
-Purchase a ticket for an event. Returns the ticket ID.
+Purchase a ticket for an event. Transfers tokens from buyer to contract. Returns the ticket ID.
 
 **Validations**:
 - Event must be active
@@ -118,9 +119,15 @@ Mark a ticket as used. Only the event organizer can validate tickets.
 refund_ticket(ticket_id: u64, buyer: Address) -> Result<(), LumentixError>
 ```
 
-Request a refund for a ticket. Only available if event is cancelled.
+Request a refund for a ticket. Only available if event is cancelled. Transfers tokens back to buyer.
 
-### Escrow Management
+```rust
+process_refund(env: Env, event_id: u64, ticket_id: u64, buyer: Address) -> Result<(), LumentixError>
+```
+
+Alias for refund_ticket that verifies event association.
+
+### Escrow ManagementTransfers tokens from contract to organizer. 
 
 ```rust
 release_escrow(organizer: Address, event_id: u64) -> Result<i128, LumentixError>
