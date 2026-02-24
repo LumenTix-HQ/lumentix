@@ -478,4 +478,3 @@ impl LumentixContract {
         storage::get_platform_balance(&env)
     }
 }
-
