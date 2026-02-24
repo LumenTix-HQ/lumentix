@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::{Address as _, Ledger}, Address, Env, String};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    Address, Env, String,
+};
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
     let contract_id = env.register_contract(None, LumentixContract);
