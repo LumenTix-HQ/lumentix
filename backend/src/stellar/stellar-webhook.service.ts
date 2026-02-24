@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { Horizon } from '@stellar/stellar-sdk';
 import { StellarService } from '../stellar.service';
 import { PaymentsService } from '../../payments/payments.service';

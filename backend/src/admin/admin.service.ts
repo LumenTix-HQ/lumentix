@@ -7,11 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { Event, EventStatus } from '../events/entities/event.entity';
-
-export enum UserStatus {
-  ACTIVE = 'active',
-  BLOCKED = 'blocked',
-}
+import { UserStatus } from '../users/enums/user-status.enum';
 
 @Injectable()
 export class AdminService {
@@ -57,11 +53,11 @@ export class AdminService {
   async blockUser(userId: string): Promise<User> {
     const user = await this.findUserOrFail(userId);
 
-    if ((user as any).status === UserStatus.BLOCKED) {
+    if (user.status === UserStatus.BLOCKED) {
       throw new BadRequestException('User is already blocked.');
     }
 
-    (user as any).status = UserStatus.BLOCKED;
+    user.status = UserStatus.BLOCKED;
     return this.userRepository.save(user);
   }
 

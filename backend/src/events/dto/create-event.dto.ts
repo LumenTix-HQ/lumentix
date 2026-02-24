@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsNumber,
   IsEnum,
+  IsInt,
   Min,
 } from 'class-validator';
 import { EventStatus } from '../entities/event.entity';
@@ -40,4 +41,13 @@ export class CreateEventDto {
   @IsEnum(EventStatus)
   @IsOptional()
   status?: EventStatus;
+
+  /**
+   * Maximum number of tickets that can be sold for this event.
+   * Omit or set to null for unlimited capacity.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  maxAttendees?: number;
 }

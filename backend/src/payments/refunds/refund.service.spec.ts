@@ -122,7 +122,7 @@ describe('RefundService', () => {
     });
 
     it('returns empty array when there are no confirmed payments', async () => {
-      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT as Event);
+      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT);
       paymentsRepo.find.mockResolvedValue([]);
       escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
 
@@ -135,11 +135,13 @@ describe('RefundService', () => {
 
   describe('refundEvent() — successful refund', () => {
     beforeEach(() => {
-      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT as Event);
-      paymentsRepo.find.mockResolvedValue([CONFIRMED_PAYMENT as Payment]);
+      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT);
+      paymentsRepo.find.mockResolvedValue([CONFIRMED_PAYMENT]);
       escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
-      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY as User);
-      stellarService.sendPayment.mockResolvedValue({ hash: 'tx-hash-abc' } as any);
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+      stellarService.sendPayment.mockResolvedValue({
+        hash: 'tx-hash-abc',
+      } as any);
       paymentsRepo.save.mockResolvedValue({
         ...CONFIRMED_PAYMENT,
         status: PaymentStatus.REFUNDED,
@@ -197,12 +199,12 @@ describe('RefundService', () => {
 
   describe('refundEvent() — partial refund rejected', () => {
     it('returns failure result when payment amount is 0', async () => {
-      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT as Event);
+      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT);
       paymentsRepo.find.mockResolvedValue([
         { ...CONFIRMED_PAYMENT, amount: 0 } as Payment,
       ]);
       escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
-      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY as User);
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
 
       const results = await service.refundEvent('event-1');
 
@@ -212,12 +214,12 @@ describe('RefundService', () => {
     });
 
     it('returns failure result when payment amount is negative', async () => {
-      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT as Event);
+      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT);
       paymentsRepo.find.mockResolvedValue([
         { ...CONFIRMED_PAYMENT, amount: -5 } as Payment,
       ]);
       escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
-      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY as User);
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
 
       const results = await service.refundEvent('event-1');
 
@@ -230,8 +232,8 @@ describe('RefundService', () => {
 
   describe('refundEvent() — user missing Stellar key', () => {
     it('returns failure result and does not call sendPayment', async () => {
-      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT as Event);
-      paymentsRepo.find.mockResolvedValue([CONFIRMED_PAYMENT as Payment]);
+      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT);
+      paymentsRepo.find.mockResolvedValue([CONFIRMED_PAYMENT]);
       escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
       usersRepo.findOne.mockResolvedValue({
         ...USER_WITH_KEY,
@@ -260,22 +262,19 @@ describe('RefundService', () => {
         stellarPublicKey: 'GUSER2_PUB_KEY',
       };
 
-      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT as Event);
-      paymentsRepo.find.mockResolvedValue([
-        CONFIRMED_PAYMENT as Payment,
-        payment2 as Payment,
-      ]);
+      eventsRepo.findOne.mockResolvedValue(CANCELLED_EVENT);
+      paymentsRepo.find.mockResolvedValue([CONFIRMED_PAYMENT, payment2]);
       escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
 
       usersRepo.findOne
-        .mockResolvedValueOnce(USER_WITH_KEY as User)   // pay-1 user found
-        .mockResolvedValueOnce(user2 as User);           // pay-2 user found
+        .mockResolvedValueOnce(USER_WITH_KEY) // pay-1 user found
+        .mockResolvedValueOnce(user2); // pay-2 user found
 
       stellarService.sendPayment
-        .mockRejectedValueOnce(new Error('Horizon timeout'))  // pay-1 fails
+        .mockRejectedValueOnce(new Error('Horizon timeout')) // pay-1 fails
         .mockResolvedValueOnce({ hash: 'tx-success' } as any); // pay-2 succeeds
 
-      paymentsRepo.save.mockResolvedValue(CONFIRMED_PAYMENT as Payment);
+      paymentsRepo.save.mockResolvedValue(CONFIRMED_PAYMENT);
       ticketsRepo.update.mockResolvedValue({ affected: 1 } as any);
 
       const results = await service.refundEvent('event-1');

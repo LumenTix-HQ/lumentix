@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  HealthCheckService,
-  TypeOrmHealthIndicator,
-} from '@nestjs/terminus';
+import { HealthCheckService, TypeOrmHealthIndicator } from '@nestjs/terminus';
 import { StellarService } from '../stellar/stellar.service';
 import { HealthController } from './health.controller';
 
@@ -17,7 +14,9 @@ describe('HealthController', () => {
         {
           provide: TypeOrmHealthIndicator,
           useValue: {
-            pingCheck: jest.fn().mockResolvedValue({ database: { status: 'up' } }),
+            pingCheck: jest
+              .fn()
+              .mockResolvedValue({ database: { status: 'up' } }),
           },
         },
         {

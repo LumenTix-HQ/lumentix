@@ -139,19 +139,17 @@ export class StellarService implements OnModuleDestroy {
     return this.server.submitTransaction(tx);
   }
 
-/**
- * Send an exact amount of XLM or a custom asset from the escrow account
- * to a destination address.
- *
- * Use this for refunds — unlike releaseEscrowFunds(), this does NOT
- * merge the escrow account and sends only the specified amount.
- *
- * @param escrowSecret   Decrypted secret of the escrow account
- * @param destination    Recipient's Stellar public key
- * @param amount         Exact amount to send (as a string, e.g. "10.0000000")
- * @param assetCode      Asset code: 'XLM' or a custom asset code (e.g. 'USDC')
- * @param assetIssuer    Required when assetCode !== 'XLM'
- */
+  /**
+   * Release all funds held in an escrow account to the destination wallet
+   * and close the escrow account.
+   *
+   * Transfers every non-native asset balance (e.g. USDC) via individual
+   * `payment` operations first, then merges the account to sweep the
+   * remaining native XLM balance to the destination.
+   *
+   * @param escrowSecret  Decrypted secret key of the escrow account
+   * @param destination   Recipient's Stellar public key (e.g. organizer wallet)
+   */
   async releaseEscrowFunds(
     escrowSecret: string,
     destination: string,
@@ -163,14 +161,65 @@ export class StellarService implements OnModuleDestroy {
       escrowKeypair.publicKey(),
     );
 
-    // Merge account sends entire remaining balance (after fee) to destination
+    const txBuilder = new TransactionBuilder(escrowAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    });
+
+    // Send each non-native asset balance before merging
+    for (const balance of escrowAccount.balances) {
+      if (balance.asset_type !== 'native' && parseFloat(balance.balance) > 0) {
+        const bal = balance as Horizon.HorizonApi.BalanceLine<
+          'credit_alphanum4' | 'credit_alphanum12'
+        >;
+        txBuilder.addOperation(
+          Operation.payment({
+            destination,
+            asset: new Asset(bal.asset_code, bal.asset_issuer),
+            amount: bal.balance,
+          }),
+        );
+      }
+    }
+
+    // Merge account to send remaining XLM and close the escrow
+    txBuilder.addOperation(Operation.accountMerge({ destination }));
+
+    const tx = txBuilder.setTimeout(30).build();
+    tx.sign(escrowKeypair);
+    return this.server.submitTransaction(tx);
+  }
+
+  async sendPayment(
+    escrowSecret: string,
+    destination: string,
+    amount: string,
+    assetCode: string = 'XLM',
+    assetIssuer?: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    this.logger.debug(
+      `sendPayment: destination=${destination} amount=${amount} asset=${assetCode}`,
+    );
+
+    const escrowKeypair = Keypair.fromSecret(escrowSecret);
+    const escrowAccount = await this.server.loadAccount(
+      escrowKeypair.publicKey(),
+    );
+
+    const asset =
+      assetCode.toUpperCase() === 'XLM'
+        ? Asset.native()
+        : new Asset(assetCode, assetIssuer);
+
     const tx = new TransactionBuilder(escrowAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
     })
       .addOperation(
-        Operation.accountMerge({
+        Operation.payment({
           destination,
+          asset,
+          amount,
         }),
       )
       .setTimeout(30)
@@ -179,43 +228,6 @@ export class StellarService implements OnModuleDestroy {
     tx.sign(escrowKeypair);
     return this.server.submitTransaction(tx);
   }
-
-  async sendPayment(
-  escrowSecret: string,
-  destination: string,
-  amount: string,
-  assetCode: string = 'XLM',
-  assetIssuer?: string,
-): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
-  this.logger.debug(
-    `sendPayment: destination=${destination} amount=${amount} asset=${assetCode}`,
-  );
-
-  const escrowKeypair = Keypair.fromSecret(escrowSecret);
-  const escrowAccount = await this.server.loadAccount(escrowKeypair.publicKey());
-
-  const asset =
-    assetCode.toUpperCase() === 'XLM'
-      ? Asset.native()
-      : new Asset(assetCode, assetIssuer!);
-
-  const tx = new TransactionBuilder(escrowAccount, {
-    fee: BASE_FEE,
-    networkPassphrase: this.networkPassphrase,
-  })
-    .addOperation(
-      Operation.payment({
-        destination,
-        asset,
-        amount,
-      }),
-    )
-    .setTimeout(30)
-    .build();
-
-  tx.sign(escrowKeypair);
-  return this.server.submitTransaction(tx);
-}
 
   /**
    * Get the XLM balance of an account.
