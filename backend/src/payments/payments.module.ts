@@ -16,7 +16,7 @@ import { RefundModule } from './refunds/refund.module';
     StellarModule,
     AuditModule,
     EscrowModule,
-    RefundModule, 
+    RefundModule,
   ],
   providers: [PaymentsService],
   controllers: [PaymentsController],

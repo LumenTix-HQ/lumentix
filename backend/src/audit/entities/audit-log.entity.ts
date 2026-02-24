@@ -18,6 +18,7 @@ export enum AuditAction {
   REFUND_REJECTED = 'REFUND_REJECTED',
 
   // Escrow
+  ESCROW_CREATED = 'ESCROW_CREATED',
   ESCROW_RELEASED = 'ESCROW_RELEASED',
 
   // Events

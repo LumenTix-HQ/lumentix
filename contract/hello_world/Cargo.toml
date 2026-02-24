@@ -1,0 +1,18 @@
+[package]
+name = "hello-world"
+version = "0.0.0"
+authors = ["Lumentix Team"]
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = "21.0.1"
+
+[dev-dependencies]
+soroban-sdk = { version = "21.0.1", features = ["testutils"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("testutils"))'] }

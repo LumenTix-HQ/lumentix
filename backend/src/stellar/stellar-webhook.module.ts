@@ -6,9 +6,9 @@ import { SponsorsModule } from '../../sponsors/sponsors.module';
 
 @Module({
   imports: [
-    StellarModule,   // provides StellarService
-    PaymentsModule,  // provides PaymentsService
-    SponsorsModule,  // provides SponsorsService
+    StellarModule, // provides StellarService
+    PaymentsModule, // provides PaymentsService
+    SponsorsModule, // provides SponsorsService
   ],
   providers: [StellarWebhookService],
 })
