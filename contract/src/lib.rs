@@ -10,6 +10,7 @@ mod test;
 
 pub use error::LumentixError;
 pub use types::*;
+use soroban_sdk::{ contract, contractimpl, symbol_short, Address, Env, Symbol, Vec };
 
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
@@ -149,8 +150,8 @@ impl LumentixContract {
 
         let mut event = storage::get_event(&env, event_id)?;
 
-        // Validate event status - only published events can sell tickets
-        if event.status != EventStatus::Published {
+        // Validate event status
+        if event.status != EventStatus::Active {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
@@ -239,14 +240,12 @@ impl LumentixContract {
 
         // Can only cancel published events
         if event.status != EventStatus::Published {
+        if event.status != EventStatus::Active {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
         event.status = EventStatus::Cancelled;
         storage::set_event(&env, event_id, &event);
-
-        env.events()
-            .publish((soroban_sdk::symbol_short!("cancelled"),), (event_id,));
 
         Ok(())
     }
@@ -346,7 +345,7 @@ impl LumentixContract {
         }
 
         // Can only complete published events
-        if event.status != EventStatus::Published {
+        if event.status != EventStatus::Active {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
@@ -357,9 +356,6 @@ impl LumentixContract {
 
         event.status = EventStatus::Completed;
         storage::set_event(&env, event_id, &event);
-
-        env.events()
-            .publish((soroban_sdk::symbol_short!("completed"),), (event_id,));
 
         Ok(())
     }
@@ -391,3 +387,14 @@ impl LumentixContract {
         Ok(storage::get_admin(&env))
     }
 }
+
+mod contract;
+mod events;
+mod models;
+
+#[cfg(test)]
+mod tests;
+
+pub use contract::TicketContract;
+pub use events::TransferEvent;
+pub use models::Ticket;

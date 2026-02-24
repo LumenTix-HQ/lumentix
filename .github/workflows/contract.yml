@@ -1,0 +1,54 @@
+name: Contract CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ["contract/**"]
+  pull_request:
+    branches: [main, develop]
+    paths: ["contract/**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contract/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contract/Cargo.lock') }}
+
+      - name: Install Soroban CLI
+        run: |
+          curl --location --proto '=https' --tlsv1.2 --silent --show-error https://github.com/soroban-example/soroban-cli/releases/latest/download/soroban-cli-install.sh | sh
+
+      - name: Run tests
+        working-directory: ./contract
+        run: cargo test
+
+      - name: Build contract
+        working-directory: ./contract
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Optimize contract
+        run: |
+          soroban contract optimize contract/target/wasm32-unknown-unknown/release/lumentix_contract.wasm
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: contract-wasm
+          path: |
+            contract/target/wasm32-unknown-unknown/release/lumentix_contract.wasm
+            contract/target/wasm32-unknown-unknown/release/lumentix_contract.optimized.wasm
