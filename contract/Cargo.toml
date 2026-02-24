@@ -1,4 +1,5 @@
 [package]
+name = "lumentix-ticket-contract"
 name = "lumentix-contract"
 version = "0.1.0"
 edition = "2021"
@@ -17,9 +18,6 @@ soroban-sdk = { version = "21.5.0", features = ["alloc", "testutils"] }
 [profile.release]
 opt-level = "z"
 overflow-checks = true
-lto = true
-codegen-units = 1
-strip = "symbols"
 debug = 0
 debug-assertions = false
 panic = "abort"
@@ -27,3 +25,4 @@ panic = "abort"
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
+overflow-checks = true
