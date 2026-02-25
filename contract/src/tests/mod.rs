@@ -3,10 +3,9 @@ use soroban_sdk::{symbol_short, testutils, Address, Env, Vec};
 
 fn setup() -> (Env, Address) {
     let env = Env::default();
-    let contract_id = <Address as testutils::Address>::generate(&env);
     env.mock_all_auths();
 
-    env.register(&contract_id, TicketContract);
+    let contract_id = env.register(TicketContract, ());
 
     (env, contract_id)
 }
