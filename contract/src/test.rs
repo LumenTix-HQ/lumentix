@@ -1,4 +1,3 @@
-
 use crate::error::LumentixError;
 use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
 use crate::types::EventStatus;
