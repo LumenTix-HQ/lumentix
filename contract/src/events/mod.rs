@@ -1,6 +1,8 @@
+#![allow(deprecated)]
+
 use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
-//a type for tranfer of event
+/// A type for transfer of event
 pub struct TransferEvent;
 
 impl TransferEvent {
@@ -15,8 +17,9 @@ pub struct CheckInEvent;
 
 impl CheckInEvent {
     pub fn emit(env: &Env, ticket_id: Symbol, validator: Address, event_id: Symbol) {
-        env.events()
-            .publish((symbol_short!("checkin"),), (ticket_id, validator, event_id));
+        env.events().publish(
+            (symbol_short!("checkin"),),
+            (ticket_id, validator, event_id),
+        );
     }
-}
 }

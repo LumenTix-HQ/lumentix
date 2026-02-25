@@ -1,5 +1,7 @@
-use soroban_sdk::{Address, String};
+#![allow(clippy::len_zero)]
+
 use crate::error::LumentixError;
+use soroban_sdk::{Address, String};
 
 /// Validate that an address is not invalid
 /// In Soroban, addresses are validated by the SDK, but we keep this for consistency
@@ -89,7 +91,7 @@ mod tests {
         let env = Env::default();
         let valid_string = String::from_str(&env, "test");
         let empty_string = String::from_str(&env, "");
-        
+
         assert!(validate_string_not_empty(&valid_string).is_ok());
         assert_eq!(
             validate_string_not_empty(&empty_string),

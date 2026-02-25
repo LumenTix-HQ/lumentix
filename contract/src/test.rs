@@ -1,10 +1,12 @@
 #![cfg(test)]
 
-use super::*;
-use soroban_sdk::{testutils::Address as _, token, Address, Env, String};
+use crate::error::LumentixError;
+use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
+use crate::types::EventStatus;
+use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Env, String};
 
-fn create_test_contract(env: &Env) -> (Address, Address, LumentixContractClient<'_>) {
-    let contract_id = env.register_contract(None, LumentixContract);
+fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
+    let contract_id = env.register(LumentixContract, ());
     let client = LumentixContractClient::new(env, &contract_id);
     let admin = Address::generate(env);
 
@@ -35,12 +37,16 @@ fn create_and_publish_event(
     event_id
 }
 
+// ============================================================================
+// INITIALIZATION TESTS
+// ============================================================================
+
 #[test]
 fn test_initialize_success() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, LumentixContract);
+    let contract_id = env.register(LumentixContract, ());
     let client = LumentixContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
 
@@ -56,9 +62,13 @@ fn test_initialize_already_initialized() {
     let (admin, client) = create_test_contract(&env);
 
     // Try to initialize again
-    let result = client.try_initialize(&admin, &token_id);
+    let result = client.try_initialize(&admin);
     assert_eq!(result, Err(Ok(LumentixError::AlreadyInitialized)));
 }
+
+// ============================================================================
+// EVENT CREATION TESTS
+// ============================================================================
 
 #[test]
 fn test_create_event_success() {
@@ -174,6 +184,10 @@ fn test_create_event_empty_name() {
     assert_eq!(result, Err(Ok(LumentixError::EmptyString)));
 }
 
+// ============================================================================
+// TICKET PURCHASE & CAPACITY ENFORCEMENT TESTS
+// ============================================================================
+
 #[test]
 fn test_purchase_ticket_success() {
     let env = Env::default();
@@ -226,14 +240,41 @@ fn test_purchase_ticket_sold_out() {
     client.update_event_status(&event_id, &EventStatus::Published, &organizer);
 
     let buyer1 = Address::generate(&env);
-    token_client.mint(&buyer1, &1000);
     client.purchase_ticket(&buyer1, &event_id, &100i128);
 
     let buyer2 = Address::generate(&env);
-    token_client.mint(&buyer2, &1000);
     let result = client.try_purchase_ticket(&buyer2, &event_id, &100i128);
     assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
 }
+
+#[test]
+fn test_purchase_ticket_draft_status_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Try to purchase ticket for draft event
+    let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+// ============================================================================
+// TICKET USAGE TESTS
+// ============================================================================
 
 #[test]
 fn test_use_ticket_success() {
@@ -285,6 +326,10 @@ fn test_use_ticket_already_used() {
     assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
 }
 
+// ============================================================================
+// REFUND TESTS
+// ============================================================================
+
 #[test]
 fn test_cancel_event_and_refund() {
     let env = Env::default();
@@ -318,6 +363,105 @@ fn test_refund_event_not_cancelled() {
     let result = client.try_refund_ticket(&ticket_id, &buyer);
     assert_eq!(result, Err(Ok(LumentixError::EventNotCancelled)));
 }
+
+#[test]
+fn test_refund_multiple_tickets() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer1 = Address::generate(&env);
+    let buyer2 = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id_1 = client.purchase_ticket(&buyer1, &event_id, &100i128);
+    let ticket_id_2 = client.purchase_ticket(&buyer2, &event_id, &100i128);
+
+    // Cancel event
+    client.cancel_event(&organizer, &event_id);
+
+    // Both buyers can get refund
+    let result1 = client.try_refund_ticket(&ticket_id_1, &buyer1);
+    assert!(result1.is_ok());
+
+    let result2 = client.try_refund_ticket(&ticket_id_2, &buyer2);
+    assert!(result2.is_ok());
+
+    // Verify tickets are marked as refunded
+    let ticket1 = client.get_ticket_info(&ticket_id_1);
+    assert!(ticket1.refunded);
+
+    let ticket2 = client.get_ticket_info(&ticket_id_2);
+    assert!(ticket2.refunded);
+}
+
+#[test]
+fn test_refund_used_ticket_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Use ticket first
+    client.use_ticket(&ticket_id, &organizer);
+
+    // Cancel event
+    client.cancel_event(&organizer, &event_id);
+
+    // Try to refund used ticket
+    let result = client.try_refund_ticket(&ticket_id, &buyer);
+    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
+}
+
+#[test]
+fn test_refund_twice_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    client.cancel_event(&organizer, &event_id);
+    client.refund_ticket(&ticket_id, &buyer);
+
+    // Try to refund again
+    let result = client.try_refund_ticket(&ticket_id, &buyer);
+    assert_eq!(result, Err(Ok(LumentixError::RefundNotAllowed)));
+}
+
+#[test]
+fn test_refund_wrong_owner_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let wrong_buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    client.cancel_event(&organizer, &event_id);
+
+    // Try to refund with wrong owner
+    let result = client.try_refund_ticket(&ticket_id, &wrong_buyer);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+// ============================================================================
+// EVENT STATUS TESTS
+// ============================================================================
 
 #[test]
 fn test_get_event() {
@@ -356,57 +500,6 @@ fn test_get_event_not_found() {
 
 #[test]
 fn test_update_status_draft_to_published() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-    client.use_ticket(&ticket_id, &organizer);
-
-    let result = client.try_use_ticket(&ticket_id, &organizer);
-    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
-}
-
-#[test]
-fn test_cancel_event_and_refund() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    let _ = client.cancel_event(&organizer, &event_id);
-
-    let result = client.try_refund_ticket(&ticket_id, &buyer);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_refund_event_not_cancelled() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    let result = client.try_refund_ticket(&ticket_id, &buyer);
-    assert_eq!(result, Err(Ok(LumentixError::EventNotCancelled)));
-}
-
-#[test]
-fn test_get_event() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -433,24 +526,6 @@ fn test_get_event() {
 
 #[test]
 fn test_update_status_published_to_cancelled() {
-    let event = client.get_event(&event_id);
-    assert_eq!(event.id, event_id);
-    assert_eq!(event.organizer, organizer);
-}
-
-#[test]
-fn test_get_event_not_found() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-
-    let result = client.try_get_event(&999u64);
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_update_status_draft_to_published() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -492,15 +567,6 @@ fn test_update_status_invalid_transition() {
 
 #[test]
 fn test_update_status_unauthorized() {
-    let result = client.try_update_event_status(&event_id, &EventStatus::Published, &organizer);
-    assert!(result.is_ok());
-
-    let event = client.get_event(&event_id);
-    assert_eq!(event.status, EventStatus::Published);
-}
-
-#[test]
-fn test_update_status_published_to_cancelled() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -509,69 +575,14 @@ fn test_update_status_published_to_cancelled() {
     let unauthorized = Address::generate(&env);
 
     let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    let result = client.try_update_event_status(&event_id, &EventStatus::Cancelled, &organizer);
-    assert!(result.is_ok());
-
-    let event = client.get_event(&event_id);
-    assert_eq!(event.status, EventStatus::Cancelled);
-}
-
-#[test]
-fn test_update_status_invalid_transition() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-
-    let event_id = client.create_event(
-        &organizer,
-        &String::from_str(&env, "Test Event"),
-        &String::from_str(&env, "Description"),
-        &String::from_str(&env, "Location"),
-        &1000u64,
-        &2000u64,
-        &100i128,
-        &50u32,
-    );
 
     let result = client.try_update_event_status(&event_id, &EventStatus::Published, &unauthorized);
     assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
 }
 
-#[test]
-fn test_purchase_ticket_draft_status_fails() {
-    // Try to go directly from Draft to Completed
-    let result = client.try_update_event_status(&event_id, &EventStatus::Completed, &organizer);
-    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
-}
-
-#[test]
-fn test_update_status_unauthorized() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-    let unauthorized = Address::generate(&env);
-
-    let event_id = client.create_event(
-        &organizer,
-        &String::from_str(&env, "Test Event"),
-        &String::from_str(&env, "Description"),
-        &String::from_str(&env, "Location"),
-        &1000u64,
-        &2000u64,
-        &100i128,
-        &50u32,
-    );
-
-    // Try to purchase ticket for draft event
-    let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
-    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
-}
+// ============================================================================
+// PLATFORM FEE TESTS
+// ============================================================================
 
 #[test]
 fn test_set_platform_fee_success() {
@@ -590,12 +601,6 @@ fn test_set_platform_fee_success() {
 
 #[test]
 fn test_set_platform_fee_unauthorized() {
-    let result = client.try_update_event_status(&event_id, &EventStatus::Published, &unauthorized);
-    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
-}
-
-#[test]
-fn test_purchase_ticket_draft_status_fails() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -641,9 +646,8 @@ fn test_purchase_ticket_with_platform_fee() {
     let platform_balance = client.get_platform_balance();
     assert_eq!(platform_balance, 5);
 
-    // Check escrow balance: 95% of 100 = 95
-    // We can't directly check escrow in tests, but we verify the ticket was created
-    let ticket = client.get_ticket(&ticket_id);
+    // Verify ticket was created
+    let ticket = client.get_ticket_info(&ticket_id);
     assert_eq!(ticket.owner, buyer);
 }
 
@@ -772,10 +776,8 @@ fn test_multiple_events_platform_fee_accumulation() {
 }
 
 // ============================================================================
-// COMPREHENSIVE TEST SUITE FOR ALL CONTRACT FEATURES
+// EVENT COMPLETION AND ESCROW RELEASE TESTS
 // ============================================================================
-
-// --- Event Completion and Escrow Release Tests ---
 
 #[test]
 fn test_complete_event_after_end_time() {
@@ -785,7 +787,6 @@ fn test_complete_event_after_end_time() {
     let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
 
-    // Create event with end time at 2000
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
     // Set ledger timestamp to after end time
@@ -914,104 +915,9 @@ fn test_release_escrow_twice_fails() {
     assert_eq!(result, Err(Ok(LumentixError::EscrowAlreadyReleased)));
 }
 
-// --- Comprehensive Refund Tests ---
-
-#[test]
-fn test_refund_multiple_tickets() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer1 = Address::generate(&env);
-    let buyer2 = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id_1 = client.purchase_ticket(&buyer1, &event_id, &100i128);
-    let ticket_id_2 = client.purchase_ticket(&buyer2, &event_id, &100i128);
-
-    // Cancel event
-    client.cancel_event(&organizer, &event_id);
-
-    // Both buyers can get refund
-    let result1 = client.try_refund_ticket(&ticket_id_1, &buyer1);
-    assert!(result1.is_ok());
-
-    let result2 = client.try_refund_ticket(&ticket_id_2, &buyer2);
-    assert!(result2.is_ok());
-
-    // Verify tickets are marked as refunded
-    let ticket1 = client.get_ticket(&ticket_id_1);
-    assert!(ticket1.refunded);
-
-    let ticket2 = client.get_ticket(&ticket_id_2);
-    assert!(ticket2.refunded);
-}
-
-#[test]
-fn test_refund_used_ticket_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    // Use ticket first
-    client.use_ticket(&ticket_id, &organizer);
-
-    // Cancel event
-    client.cancel_event(&organizer, &event_id);
-
-    // Try to refund used ticket
-    let result = client.try_refund_ticket(&ticket_id, &buyer);
-    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
-}
-
-#[test]
-fn test_refund_twice_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    client.cancel_event(&organizer, &event_id);
-    client.refund_ticket(&ticket_id, &buyer);
-
-    // Try to refund again
-    let result = client.try_refund_ticket(&ticket_id, &buyer);
-    assert_eq!(result, Err(Ok(LumentixError::RefundNotAllowed)));
-}
-
-#[test]
-fn test_refund_wrong_owner_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-    let wrong_buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    client.cancel_event(&organizer, &event_id);
-
-    // Try to refund with wrong owner
-    let result = client.try_refund_ticket(&ticket_id, &wrong_buyer);
-    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
-}
-
-// --- Event Status Transition Tests (Comprehensive) ---
+// ============================================================================
+// STATUS TRANSITION TESTS (COMPREHENSIVE)
+// ============================================================================
 
 #[test]
 fn test_status_transition_draft_to_completed_fails() {
@@ -1020,9 +926,6 @@ fn test_status_transition_draft_to_completed_fails() {
 
     let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
-
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
 
     let event_id = client.create_event(
         &organizer,
@@ -1059,7 +962,7 @@ fn test_status_transition_draft_to_cancelled_fails() {
         &50u32,
     );
 
-    // Try to cancel draft event (should use cancel_event function instead)
+    // Try to cancel draft event via update_event_status
     let result = client.try_update_event_status(&event_id, &EventStatus::Cancelled, &organizer);
     assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
 }
@@ -1125,79 +1028,9 @@ fn test_status_transition_cancelled_is_final() {
     assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
 }
 
-// --- Ticket Ownership and Validation Tests ---
-
-#[test]
-fn test_ticket_ownership_verification() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    // Verify ticket ownership
-    let ticket = client.get_ticket(&ticket_id);
-    assert_eq!(ticket.owner, buyer);
-    assert_eq!(ticket.event_id, event_id);
-    assert_eq!(ticket.id, ticket_id);
-    assert!(!ticket.used);
-    assert!(!ticket.refunded);
-}
-
-#[test]
-fn test_ticket_double_check_in_prevention() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    // First check-in succeeds
-    client.use_ticket(&ticket_id, &organizer);
-    let ticket = client.get_ticket(&ticket_id);
-    assert!(ticket.used);
-
-    // Second check-in fails
-    let result = client.try_use_ticket(&ticket_id, &organizer);
-    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
-}
-
-#[test]
-fn test_multiple_tickets_same_buyer() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Buy 3 tickets
-    let ticket_id_1 = client.purchase_ticket(&buyer, &event_id, &100i128);
-    let ticket_id_2 = client.purchase_ticket(&buyer, &event_id, &100i128);
-    let ticket_id_3 = client.purchase_ticket(&buyer, &event_id, &100i128);
-
-    // Verify all tickets are owned by same buyer
-    assert_eq!(client.get_ticket(&ticket_id_1).owner, buyer);
-    assert_eq!(client.get_ticket(&ticket_id_2).owner, buyer);
-    assert_eq!(client.get_ticket(&ticket_id_3).owner, buyer);
-
-    // Verify they have different IDs
-    assert_ne!(ticket_id_1, ticket_id_2);
-    assert_ne!(ticket_id_2, ticket_id_3);
-    assert_ne!(ticket_id_1, ticket_id_3);
-}
-
-// --- Event Storage State Tests ---
+// ============================================================================
+// TICKET CAPACITY & AVAILABILITY TESTS
+// ============================================================================
 
 #[test]
 fn test_event_tickets_sold_counter() {
@@ -1261,6 +1094,84 @@ fn test_event_capacity_enforcement() {
 }
 
 #[test]
+fn test_get_availability() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Create event with capacity of 5
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &5u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    // Initially 5 available
+    assert_eq!(client.get_availability(&event_id), 5);
+
+    // Purchase 2 tickets -> 3 remaining
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(client.get_availability(&event_id), 3);
+
+    // Purchase 3 more -> 0 remaining
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(client.get_availability(&event_id), 0);
+}
+
+#[test]
+fn test_refund_frees_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Create event with capacity of 2
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &2u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    // Buy 2 tickets (sold out)
+    let ticket_id_1 = client.purchase_ticket(&buyer, &event_id, &100i128);
+    let _ticket_id_2 = client.purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(client.get_availability(&event_id), 0);
+
+    // Cancel and refund 1 ticket -> 1 available
+    client.cancel_event(&organizer, &event_id);
+    client.refund_ticket(&ticket_id_1, &buyer);
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.tickets_sold, 1);
+    // Note: availability still works even for cancelled events
+    assert_eq!(client.get_availability(&event_id), 1);
+}
+
+// ============================================================================
+// ID INCREMENT TESTS
+// ============================================================================
+
+#[test]
 fn test_event_id_increments() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1314,7 +1225,83 @@ fn test_ticket_id_increments() {
     assert_eq!(ticket_id_3, 3);
 }
 
-// --- Full Lifecycle Integration Tests ---
+// ============================================================================
+// TICKET OWNERSHIP TESTS
+// ============================================================================
+
+#[test]
+fn test_ticket_ownership_verification() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Verify ticket ownership
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket.owner, buyer);
+    assert_eq!(ticket.event_id, event_id);
+    assert_eq!(ticket.id, ticket_id);
+    assert!(!ticket.used);
+    assert!(!ticket.refunded);
+}
+
+#[test]
+fn test_ticket_double_check_in_prevention() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // First check-in succeeds
+    client.use_ticket(&ticket_id, &organizer);
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert!(ticket.used);
+
+    // Second check-in fails
+    let result = client.try_use_ticket(&ticket_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
+}
+
+#[test]
+fn test_multiple_tickets_same_buyer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Buy 3 tickets
+    let ticket_id_1 = client.purchase_ticket(&buyer, &event_id, &100i128);
+    let ticket_id_2 = client.purchase_ticket(&buyer, &event_id, &100i128);
+    let ticket_id_3 = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Verify all tickets are owned by same buyer
+    assert_eq!(client.get_ticket_info(&ticket_id_1).owner, buyer);
+    assert_eq!(client.get_ticket_info(&ticket_id_2).owner, buyer);
+    assert_eq!(client.get_ticket_info(&ticket_id_3).owner, buyer);
+
+    // Verify they have different IDs
+    assert_ne!(ticket_id_1, ticket_id_2);
+    assert_ne!(ticket_id_2, ticket_id_3);
+    assert_ne!(ticket_id_1, ticket_id_3);
+}
+
+// ============================================================================
+// FULL LIFECYCLE INTEGRATION TESTS
+// ============================================================================
 
 #[test]
 fn test_full_event_lifecycle_happy_path() {
@@ -1351,8 +1338,8 @@ fn test_full_event_lifecycle_happy_path() {
     // 4. Validate tickets at event
     client.use_ticket(&ticket1, &organizer);
     client.use_ticket(&ticket2, &organizer);
-    assert!(client.get_ticket(&ticket1).used);
-    assert!(client.get_ticket(&ticket2).used);
+    assert!(client.get_ticket_info(&ticket1).used);
+    assert!(client.get_ticket_info(&ticket2).used);
 
     // 5. Complete event after end time
     env.ledger().with_mut(|li| li.timestamp = 2001);
@@ -1389,8 +1376,8 @@ fn test_full_event_cancellation_with_refunds() {
     client.refund_ticket(&ticket1, &buyer1);
     client.refund_ticket(&ticket2, &buyer2);
 
-    assert!(client.get_ticket(&ticket1).refunded);
-    assert!(client.get_ticket(&ticket2).refunded);
+    assert!(client.get_ticket_info(&ticket1).refunded);
+    assert!(client.get_ticket_info(&ticket2).refunded);
 }
 
 #[test]
@@ -1426,7 +1413,4 @@ fn test_event_with_platform_fee_end_to_end() {
     // Admin withdraws platform fees
     let fees = client.withdraw_platform_fees(&admin);
     assert_eq!(fees, 20);
-    // Try to purchase ticket for draft event
-    let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
-    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
 }
