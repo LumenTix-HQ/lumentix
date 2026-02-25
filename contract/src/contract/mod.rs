@@ -1,15 +1,15 @@
 use crate::events::{CheckInEvent, TransferEvent};
-use crate::models::{EventAuth, Ticket, ValidatorKey};
-use soroban_sdk::{contract, contractimpl, log, Address, Env, Symbol};
+use crate::models::{DataKey, EscrowConfig, EventAuth, Ticket, ValidatorKey};
+use soroban_sdk::{contract, contractimpl, log, Address, Env, Symbol, Vec};
 
 #[contract]
 pub struct TicketContract;
 
-/// contract implementation to issue ticket, get ticket, transfer ticket and also mark ticket as used
+/// Contract implementation to issue ticket, get ticket, transfer ticket and also mark ticket as used.
 #[contractimpl]
 impl TicketContract {
-    /// Initialize an event with its organizer
-    /// The organizer is automatically authorized to validate tickets
+    /// Initialize an event with its organizer.
+    /// The organizer is automatically authorized to validate tickets.
     pub fn init_event(env: Env, event_id: Symbol, organizer: Address) {
         organizer.require_auth();
 
@@ -28,8 +28,8 @@ impl TicketContract {
         );
     }
 
-    /// Add an authorized validator (gate agent) for an event
-    /// Only the event organizer can add validators
+    /// Add an authorized validator (gate agent) for an event.
+    /// Only the event organizer can add validators.
     pub fn add_validator(env: Env, event_id: Symbol, validator: Address) {
         let event_auth: EventAuth = env
             .storage()
@@ -54,8 +54,8 @@ impl TicketContract {
         );
     }
 
-    /// Remove an authorized validator for an event
-    /// Only the event organizer can remove validators
+    /// Remove an authorized validator for an event.
+    /// Only the event organizer can remove validators.
     pub fn remove_validator(env: Env, event_id: Symbol, validator: Address) {
         let event_auth: EventAuth = env
             .storage()
@@ -80,7 +80,7 @@ impl TicketContract {
         );
     }
 
-    /// Check if an address is authorized to validate tickets for an event
+    /// Check if an address is authorized to validate tickets for an event.
     pub fn is_authorized_validator(env: Env, event_id: Symbol, validator: Address) -> bool {
         // Check if this is the organizer
         if let Some(event_auth) = env.storage().persistent().get::<Symbol, EventAuth>(&event_id) {
@@ -116,6 +116,12 @@ impl TicketContract {
 
         ticket
     }
+
+    /// Retrieve a ticket by its ID. Returns None if not found.
+    pub fn get_ticket(env: Env, ticket_id: Symbol) -> Option<Ticket> {
+        env.storage().persistent().get::<Symbol, Ticket>(&ticket_id)
+    }
+
     /// Returns true if the given address is the current owner of the ticket.
     pub fn is_ticket_owner(env: Env, ticket_id: Symbol, address: Address) -> bool {
         let ticket = env
@@ -136,6 +142,40 @@ impl TicketContract {
             .expect("Ticket not found");
 
         (ticket.owner, ticket.is_used)
+    }
+
+    /// Mark a ticket as used.
+    pub fn mark_ticket_used(env: Env, ticket_id: Symbol) {
+        let mut ticket: Ticket = env
+            .storage()
+            .persistent()
+            .get(&ticket_id)
+            .expect("Ticket not found");
+
+        ticket.is_used = true;
+        env.storage().persistent().set(&ticket_id, &ticket);
+    }
+
+    /// Transfer a ticket from the current owner to a new owner.
+    pub fn transfer_ticket(env: Env, ticket_id: Symbol, from: Address, to: Address) {
+        from.require_auth();
+
+        let mut ticket: Ticket = env
+            .storage()
+            .persistent()
+            .get(&ticket_id)
+            .expect("Ticket not found");
+
+        if ticket.owner != from {
+            panic!("Unauthorized: not the ticket owner");
+        }
+
+        ticket.owner = to.clone();
+        env.storage().persistent().set(&ticket_id, &ticket);
+
+        TransferEvent::emit(&env, ticket_id.clone(), from, to);
+
+        log!(&env, "Ticket transferred: id={:?}", ticket_id);
     }
 
     /// Configure the multi-sig escrow signers and threshold for an event.
@@ -183,22 +223,6 @@ impl TicketContract {
         log!(&env, "Release approved: event={:?}, signer={:?}", event_id, signer);
     }
 
-    /// Validate a ticket at event check-in (MAIN FEATURE)
-    ///
-    /// This function:
-    /// 1. Verifies the validator is an authorized address for the event
-    /// 2. Checks the ticket exists and is_used == false
-    /// 3. Sets is_used = true in contract storage
-    /// 4. Emits a CheckInEvent
-    ///
-    /// This replaces backend verification with a trustless on-chain solution.
-    /// Note: In production, validator authentication should be handled by the calling context.
-    pub fn validate_ticket(env: Env, ticket_id: Symbol, validator: Address) -> Ticket {
-        // 1. Get the ticket - must exist
-    /// Returns true if the given address is the current owner of the ticket.
-    pub fn is_ticket_owner(env: Env, ticket_id: Symbol, address: Address) -> bool {
-        let ticket = env
-            .storage()
     /// Revoke a previously given approval.
     pub fn revoke_approval(env: Env, event_id: Symbol, signer: Address) {
         signer.require_auth();
@@ -206,6 +230,24 @@ impl TicketContract {
         env.storage()
             .persistent()
             .remove(&DataKey::EscrowApproval(event_id.clone(), signer.clone()));
+
+        log!(&env, "Approval revoked: event={:?}, signer={:?}", event_id, signer);
+    }
+
+    /// Validate a ticket at event check-in.
+    ///
+    /// This function:
+    /// 1. Verifies the validator is an authorized address for the event
+    /// 2. Checks the ticket exists and is_used == false
+    /// 3. Sets is_used = true in contract storage
+    /// 4. Emits a CheckInEvent
+    pub fn validate_ticket(env: Env, ticket_id: Symbol, validator: Address) -> Ticket {
+        // 1. Get the ticket - must exist
+        let ticket: Ticket = env
+            .storage()
+            .persistent()
+            .get(&ticket_id)
+            .expect("Ticket not found");
 
         // 2. Check if ticket is already used (prevent double check-in)
         if ticket.is_used {
@@ -253,10 +295,6 @@ impl TicketContract {
 
         validated_ticket
     }
-}
-        ticket.owner == address
-        log!(&env, "Approval revoked: event={:?}, signer={:?}", event_id, signer);
-    }
 
     /// Check if the threshold is met and execute fund distribution.
     pub fn distribute_escrow(env: Env, event_id: Symbol, destination: Address) {
@@ -277,10 +315,6 @@ impl TicketContract {
             }
         }
 
-        (ticket.owner, ticket.is_used)
-    }
-    
-}
         if approval_count < config.threshold {
             panic!("Threshold not met for escrow release");
         }
@@ -299,3 +333,4 @@ impl TicketContract {
                 .remove(&DataKey::EscrowApproval(event_id.clone(), signer.clone()));
         }
     }
+}

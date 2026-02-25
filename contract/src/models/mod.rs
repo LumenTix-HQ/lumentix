@@ -24,7 +24,7 @@ pub struct ValidatorKey {
     pub event_id: Symbol,
     pub validator: Address,
 }
-}
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {

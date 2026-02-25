@@ -82,7 +82,7 @@ impl SponsorsContract {
 }
 
 #[cfg(test)]
-mod tests {
+mod sponsor_tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env};
 
@@ -169,12 +169,23 @@ mod tests {
 }
 
 mod contract;
+mod error;
 mod events;
+pub mod lumentix_contract;
 mod models;
+pub mod storage;
+pub mod types;
+pub mod validation;
+
+#[cfg(test)]
+mod test;
 
 #[cfg(test)]
 mod tests;
 
 pub use contract::TicketContract;
+pub use error::LumentixError;
 pub use events::{CheckInEvent, TransferEvent};
-pub use models::{EventAuth, Ticket, ValidatorKey};
+pub use lumentix_contract::LumentixContract;
+pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
+pub use types::{Event, EventStatus, Ticket as LumentixTicket};
