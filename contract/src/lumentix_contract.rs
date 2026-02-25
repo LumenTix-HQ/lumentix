@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use crate::error::LumentixError;
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
@@ -195,11 +197,7 @@ impl LumentixContract {
     /// Refund a ticket for a cancelled event.
     /// Decrements tickets_sold to free up capacity.
     /// The ticket must not be used or already refunded.
-    pub fn refund_ticket(
-        env: Env,
-        ticket_id: u64,
-        buyer: Address,
-    ) -> Result<(), LumentixError> {
+    pub fn refund_ticket(env: Env, ticket_id: u64, buyer: Address) -> Result<(), LumentixError> {
         buyer.require_auth();
 
         let mut ticket = storage::get_ticket(&env, ticket_id)?;
@@ -241,11 +239,7 @@ impl LumentixContract {
     }
 
     /// Cancel a published event. Only the organizer can cancel.
-    pub fn cancel_event(
-        env: Env,
-        organizer: Address,
-        event_id: u64,
-    ) -> Result<(), LumentixError> {
+    pub fn cancel_event(env: Env, organizer: Address, event_id: u64) -> Result<(), LumentixError> {
         organizer.require_auth();
 
         let mut event = storage::get_event(&env, event_id)?;
@@ -328,7 +322,7 @@ impl LumentixContract {
     }
 
     /// Get ticket data by ID.
-    pub fn get_ticket(env: Env, ticket_id: u64) -> Result<Ticket, LumentixError> {
+    pub fn get_ticket_info(env: Env, ticket_id: u64) -> Result<Ticket, LumentixError> {
         storage::get_ticket(&env, ticket_id)
     }
 
@@ -341,11 +335,7 @@ impl LumentixContract {
 
     /// Set the platform fee in basis points (e.g., 250 = 2.5%).
     /// Only the admin can set the platform fee. Must be between 0 and 10000.
-    pub fn set_platform_fee(
-        env: Env,
-        admin: Address,
-        fee_bps: u32,
-    ) -> Result<(), LumentixError> {
+    pub fn set_platform_fee(env: Env, admin: Address, fee_bps: u32) -> Result<(), LumentixError> {
         admin.require_auth();
 
         let stored_admin = storage::get_admin(&env);

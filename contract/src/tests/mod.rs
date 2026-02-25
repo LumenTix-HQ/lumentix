@@ -190,7 +190,8 @@ fn test_is_authorized_validator_unauthorized() {
     env.as_contract(&contract_id, || {
         TicketContract::init_event(env.clone(), event_id.clone(), organizer);
 
-        let is_auth = TicketContract::is_authorized_validator(env.clone(), event_id, random_address);
+        let is_auth =
+            TicketContract::is_authorized_validator(env.clone(), event_id, random_address);
         assert!(!is_auth);
     });
 }
@@ -208,8 +209,7 @@ fn test_validate_ticket_success() {
         TicketContract::init_event(env.clone(), event_id.clone(), organizer.clone());
         TicketContract::issue_ticket(env.clone(), ticket_id.clone(), event_id, owner);
 
-        let validated =
-            TicketContract::validate_ticket(env.clone(), ticket_id.clone(), organizer);
+        let validated = TicketContract::validate_ticket(env.clone(), ticket_id.clone(), organizer);
 
         assert!(validated.is_used);
         assert_eq!(validated.id, ticket_id);
@@ -312,7 +312,8 @@ fn test_validate_ticket_emits_event() {
         TicketContract::issue_ticket(env.clone(), ticket_id.clone(), event_id.clone(), owner);
 
         // Validate ticket - this emits a CheckInEvent internally
-        let validated = TicketContract::validate_ticket(env.clone(), ticket_id.clone(), organizer.clone());
+        let validated =
+            TicketContract::validate_ticket(env.clone(), ticket_id.clone(), organizer.clone());
 
         // Verify validation succeeded (event emission is a side-effect)
         assert!(validated.is_used);

@@ -5,7 +5,7 @@ on:
 
 jobs:
   test-with-install-script:
-    name: Test with Install Script (Debug)
+    name: Test with Stellar CLI
     runs-on: ubuntu-latest
 
     steps:
@@ -13,38 +13,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
+          targets: wasm32-unknown-unknown
 
-      - name: Add WASM target
-        run: rustup target add wasm32-unknown-unknown
-
-      # Fixed installation method as per your error message
-      - name: Download Soroban CLI installer
+      - name: Install Stellar CLI
         run: |
-          curl --location --proto '=https' --tlsv1.2 --silent --show-error \
-            -o soroban-cli-install.sh \
-            https://github.com/stellar/soroban-cli/releases/latest/download/soroban-cli-install.sh
-
-      - name: Show installer contents (Debug)
-        run: |
-          echo "=== Installer Script Contents ==="
-          cat soroban-cli-install.sh
-          echo "=== End of Installer Script ==="
-
-      - name: Make installer executable
-        run: chmod +x soroban-cli-install.sh
-
-      - name: Install Soroban CLI
-        run: bash soroban-cli-install.sh
-
-      - name: Verify Soroban installation
-        run: |
-          export PATH="$HOME/.soroban/bin:$PATH"
-          soroban --version
+          cargo install --locked stellar-cli
+          stellar --version
 
       - name: Run tests
         working-directory: ./contract

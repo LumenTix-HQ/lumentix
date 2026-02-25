@@ -29,9 +29,10 @@ jobs:
             contract/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('contract/Cargo.lock') }}
 
-      - name: Install Soroban CLI
+      - name: Install Stellar CLI
         run: |
-          curl --location --proto '=https' --tlsv1.2 --silent --show-error https://github.com/soroban-example/soroban-cli/releases/latest/download/soroban-cli-install.sh | sh
+          cargo install --locked stellar-cli
+          stellar --version
 
       - name: Run tests
         working-directory: ./contract
@@ -42,13 +43,14 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown --release
 
       - name: Optimize contract
+        working-directory: ./contract
         run: |
-          soroban contract optimize contract/target/wasm32-unknown-unknown/release/lumentix_contract.wasm
+          stellar contract optimize --wasm target/wasm32-unknown-unknown/release/lumentix_sponsors.wasm
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: contract-wasm
           path: |
-            contract/target/wasm32-unknown-unknown/release/lumentix_contract.wasm
-            contract/target/wasm32-unknown-unknown/release/lumentix_contract.optimized.wasm
+            contract/target/wasm32-unknown-unknown/release/lumentix_sponsors.wasm
+            contract/target/wasm32-unknown-unknown/release/lumentix_sponsors.optimized.wasm

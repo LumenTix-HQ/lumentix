@@ -1,8 +1,8 @@
 #![cfg(test)]
 
+use crate::error::LumentixError;
 use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
 use crate::types::EventStatus;
-use crate::error::LumentixError;
 use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Env, String};
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
@@ -389,10 +389,10 @@ fn test_refund_multiple_tickets() {
     assert!(result2.is_ok());
 
     // Verify tickets are marked as refunded
-    let ticket1 = client.get_ticket(&ticket_id_1);
+    let ticket1 = client.get_ticket_info(&ticket_id_1);
     assert!(ticket1.refunded);
 
-    let ticket2 = client.get_ticket(&ticket_id_2);
+    let ticket2 = client.get_ticket_info(&ticket_id_2);
     assert!(ticket2.refunded);
 }
 
@@ -647,7 +647,7 @@ fn test_purchase_ticket_with_platform_fee() {
     assert_eq!(platform_balance, 5);
 
     // Verify ticket was created
-    let ticket = client.get_ticket(&ticket_id);
+    let ticket = client.get_ticket_info(&ticket_id);
     assert_eq!(ticket.owner, buyer);
 }
 
@@ -1242,7 +1242,7 @@ fn test_ticket_ownership_verification() {
     let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Verify ticket ownership
-    let ticket = client.get_ticket(&ticket_id);
+    let ticket = client.get_ticket_info(&ticket_id);
     assert_eq!(ticket.owner, buyer);
     assert_eq!(ticket.event_id, event_id);
     assert_eq!(ticket.id, ticket_id);
@@ -1264,7 +1264,7 @@ fn test_ticket_double_check_in_prevention() {
 
     // First check-in succeeds
     client.use_ticket(&ticket_id, &organizer);
-    let ticket = client.get_ticket(&ticket_id);
+    let ticket = client.get_ticket_info(&ticket_id);
     assert!(ticket.used);
 
     // Second check-in fails
@@ -1289,9 +1289,9 @@ fn test_multiple_tickets_same_buyer() {
     let ticket_id_3 = client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Verify all tickets are owned by same buyer
-    assert_eq!(client.get_ticket(&ticket_id_1).owner, buyer);
-    assert_eq!(client.get_ticket(&ticket_id_2).owner, buyer);
-    assert_eq!(client.get_ticket(&ticket_id_3).owner, buyer);
+    assert_eq!(client.get_ticket_info(&ticket_id_1).owner, buyer);
+    assert_eq!(client.get_ticket_info(&ticket_id_2).owner, buyer);
+    assert_eq!(client.get_ticket_info(&ticket_id_3).owner, buyer);
 
     // Verify they have different IDs
     assert_ne!(ticket_id_1, ticket_id_2);
@@ -1338,8 +1338,8 @@ fn test_full_event_lifecycle_happy_path() {
     // 4. Validate tickets at event
     client.use_ticket(&ticket1, &organizer);
     client.use_ticket(&ticket2, &organizer);
-    assert!(client.get_ticket(&ticket1).used);
-    assert!(client.get_ticket(&ticket2).used);
+    assert!(client.get_ticket_info(&ticket1).used);
+    assert!(client.get_ticket_info(&ticket2).used);
 
     // 5. Complete event after end time
     env.ledger().with_mut(|li| li.timestamp = 2001);
@@ -1376,8 +1376,8 @@ fn test_full_event_cancellation_with_refunds() {
     client.refund_ticket(&ticket1, &buyer1);
     client.refund_ticket(&ticket2, &buyer2);
 
-    assert!(client.get_ticket(&ticket1).refunded);
-    assert!(client.get_ticket(&ticket2).refunded);
+    assert!(client.get_ticket_info(&ticket1).refunded);
+    assert!(client.get_ticket_info(&ticket2).refunded);
 }
 
 #[test]

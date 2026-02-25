@@ -83,7 +83,11 @@ impl TicketContract {
     /// Check if an address is authorized to validate tickets for an event.
     pub fn is_authorized_validator(env: Env, event_id: Symbol, validator: Address) -> bool {
         // Check if this is the organizer
-        if let Some(event_auth) = env.storage().persistent().get::<Symbol, EventAuth>(&event_id) {
+        if let Some(event_auth) = env
+            .storage()
+            .persistent()
+            .get::<Symbol, EventAuth>(&event_id)
+        {
             if event_auth.organizer == validator {
                 return true;
             }
@@ -179,12 +183,7 @@ impl TicketContract {
     }
 
     /// Configure the multi-sig escrow signers and threshold for an event.
-    pub fn set_escrow_signers(
-        env: Env,
-        event_id: Symbol,
-        signers: Vec<Address>,
-        threshold: u32,
-    ) {
+    pub fn set_escrow_signers(env: Env, event_id: Symbol, signers: Vec<Address>, threshold: u32) {
         if threshold == 0 || threshold > signers.len() {
             panic!("Invalid threshold: must be > 0 and <= number of signers");
         }
@@ -216,11 +215,17 @@ impl TicketContract {
             panic!("Unauthorized: signer not in escrow group");
         }
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::EscrowApproval(event_id.clone(), signer.clone()), &true);
+        env.storage().persistent().set(
+            &DataKey::EscrowApproval(event_id.clone(), signer.clone()),
+            &true,
+        );
 
-        log!(&env, "Release approved: event={:?}, signer={:?}", event_id, signer);
+        log!(
+            &env,
+            "Release approved: event={:?}, signer={:?}",
+            event_id,
+            signer
+        );
     }
 
     /// Revoke a previously given approval.
@@ -231,7 +236,12 @@ impl TicketContract {
             .persistent()
             .remove(&DataKey::EscrowApproval(event_id.clone(), signer.clone()));
 
-        log!(&env, "Approval revoked: event={:?}, signer={:?}", event_id, signer);
+        log!(
+            &env,
+            "Approval revoked: event={:?}, signer={:?}",
+            event_id,
+            signer
+        );
     }
 
     /// Validate a ticket at event check-in.
@@ -255,11 +265,8 @@ impl TicketContract {
         }
 
         // 3. Verify validator is authorized for this event
-        let is_authorized = Self::is_authorized_validator(
-            env.clone(),
-            ticket.event_id.clone(),
-            validator.clone(),
-        );
+        let is_authorized =
+            Self::is_authorized_validator(env.clone(), ticket.event_id.clone(), validator.clone());
 
         if !is_authorized {
             panic!("Unauthorized: validator is not authorized for this event");

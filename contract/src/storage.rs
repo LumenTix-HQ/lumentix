@@ -144,7 +144,9 @@ pub fn get_platform_fee_bps(env: &Env) -> u32 {
 /// Add amount to platform balance
 pub fn add_platform_balance(env: &Env, amount: i128) {
     let current: i128 = env.storage().instance().get(&PLATFORM_BALANCE).unwrap_or(0);
-    env.storage().instance().set(&PLATFORM_BALANCE, &(current + amount));
+    env.storage()
+        .instance()
+        .set(&PLATFORM_BALANCE, &(current + amount));
 }
 
 /// Get platform balance
