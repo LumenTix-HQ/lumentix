@@ -18,13 +18,17 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+import { Roles } from 'src/admin/roles.decorator';
+import { UserRole } from './enums/user-role.enum';
 
 @ApiTags('Users')
+@UseGuards(JwtAuthGuard)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
+  @Roles(UserRole.ADMIN)
   async create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.createUser(createUserDto);
   }
@@ -37,7 +41,6 @@ export class UsersController {
   // ── Wallet ─────────────────────────────────────────────────────────────────
 
   @Get('wallet/balances')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get all wallet balances for the authenticated user',
@@ -47,7 +50,6 @@ export class UsersController {
   }
 
   @Get('wallet/portfolio')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get total portfolio value converted to a base currency',
