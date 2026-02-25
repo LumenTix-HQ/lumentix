@@ -1,5 +1,9 @@
 use soroban_sdk::{contracttype, Address, String};
 
+pub const INSTANCE_LIFETIME: u32 = 535_680; // ~30 days
+pub const PERSISTENT_LIFETIME: u32 = 535_680; // ~30 days
+pub const TEMPORARY_LIFETIME: u32 = 17_280; // ~1 day
+
 /// Event status enum mirroring backend statuses
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
