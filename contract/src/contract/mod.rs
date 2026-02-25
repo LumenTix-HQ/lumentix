@@ -1,5 +1,6 @@
 use crate::events::{CheckInEvent, TransferEvent};
 use crate::models::{DataKey, EscrowConfig, EventAuth, Ticket, ValidatorKey};
+use crate::types::TEMPORARY_LIFETIME;
 use soroban_sdk::{contract, contractimpl, log, Address, Env, Symbol, Vec};
 
 #[contract]
@@ -215,10 +216,11 @@ impl TicketContract {
             panic!("Unauthorized: signer not in escrow group");
         }
 
-        env.storage().persistent().set(
-            &DataKey::EscrowApproval(event_id.clone(), signer.clone()),
-            &true,
-        );
+        let key = DataKey::EscrowApproval(event_id.clone(), signer.clone());
+        env.storage().temporary().set(&key, &true);
+        env.storage()
+            .temporary()
+            .extend_ttl(&key, TEMPORARY_LIFETIME, TEMPORARY_LIFETIME);
 
         log!(
             &env,
@@ -232,9 +234,8 @@ impl TicketContract {
     pub fn revoke_approval(env: Env, event_id: Symbol, signer: Address) {
         signer.require_auth();
 
-        env.storage()
-            .persistent()
-            .remove(&DataKey::EscrowApproval(event_id.clone(), signer.clone()));
+        let key = DataKey::EscrowApproval(event_id.clone(), signer.clone());
+        env.storage().temporary().remove(&key);
 
         log!(
             &env,
@@ -313,12 +314,12 @@ impl TicketContract {
 
         let mut approval_count = 0;
         for signer in config.signers.iter() {
-            if env
-                .storage()
-                .persistent()
-                .has(&DataKey::EscrowApproval(event_id.clone(), signer.clone()))
-            {
+            let key = DataKey::EscrowApproval(event_id.clone(), signer.clone());
+            if env.storage().temporary().has(&key) {
                 approval_count += 1;
+                env.storage()
+                    .temporary()
+                    .extend_ttl(&key, TEMPORARY_LIFETIME, TEMPORARY_LIFETIME);
             }
         }
 
@@ -335,9 +336,8 @@ impl TicketContract {
 
         // Clear approvals after successful distribution
         for signer in config.signers.iter() {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::EscrowApproval(event_id.clone(), signer.clone()));
+            let key = DataKey::EscrowApproval(event_id.clone(), signer.clone());
+            env.storage().temporary().remove(&key);
         }
     }
 }

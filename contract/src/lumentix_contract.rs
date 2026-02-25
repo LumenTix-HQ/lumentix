@@ -326,6 +326,17 @@ impl LumentixContract {
         storage::get_ticket(&env, ticket_id)
     }
 
+    /// Extend the TTL of an event. Only the organizer can call this.
+    pub fn bump_event_ttl(env: Env, event_id: u64) -> Result<(), LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+
+        // Require authorization from the organizer
+        event.organizer.require_auth();
+
+        // Accessing storage via `get_event` automatically extends TTL based on storage.rs logic.
+        Ok(())
+    }
+
     /// Get the number of remaining tickets available for an event.
     /// Returns max_tickets - tickets_sold.
     pub fn get_availability(env: Env, event_id: u64) -> Result<u32, LumentixError> {
