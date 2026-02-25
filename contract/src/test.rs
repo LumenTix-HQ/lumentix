@@ -1,4 +1,3 @@
-#![cfg(test)]
 
 use crate::error::LumentixError;
 use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
@@ -10,7 +9,7 @@ fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
     let client = LumentixContractClient::new(env, &contract_id);
     let admin = Address::generate(env);
 
-    let _ = client.initialize(&admin);
+    client.initialize(&admin);
 
     (admin, client)
 }
@@ -342,7 +341,7 @@ fn test_cancel_event_and_refund() {
     let event_id = create_and_publish_event(&env, &client, &organizer);
     let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
 
-    let _ = client.cancel_event(&organizer, &event_id);
+    client.cancel_event(&organizer, &event_id);
 
     let result = client.try_refund_ticket(&ticket_id, &buyer);
     assert!(result.is_ok());

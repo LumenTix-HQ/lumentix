@@ -1,4 +1,3 @@
-#![cfg(test)]
 
 use crate::contract::{TicketContract, TicketContractClient};
 use soroban_sdk::{symbol_short, testutils, Address, Env, Vec};
@@ -8,7 +7,7 @@ fn setup() -> (Env, Address) {
     let contract_id = <Address as testutils::Address>::generate(&env);
     env.mock_all_auths();
 
-    env.register_contract(&contract_id, TicketContract);
+    env.register(&contract_id, TicketContract);
 
     (env, contract_id)
 }
