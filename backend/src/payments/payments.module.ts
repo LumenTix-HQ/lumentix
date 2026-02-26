@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Payment } from './entities/payment.entity';
 import { PaymentsService } from './payments.service';
+import { PaymentExpiryService } from './payment-expiry.service';
 import { PaymentsController } from './payments.controller';
 import { AuditModule } from '../audit/audit.module';
 import { EventsModule } from '../events/events.module';
@@ -18,7 +19,7 @@ import { RefundModule } from './refunds/refund.module';
     EscrowModule,
     RefundModule,
   ],
-  providers: [PaymentsService],
+  providers: [PaymentsService, PaymentExpiryService],
   controllers: [PaymentsController],
   exports: [PaymentsService],
 })
