@@ -22,14 +22,20 @@ async function bootstrap() {
     }),
   );
 
-  const config = new DocumentBuilder()
-    .setTitle('API')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
+  // ── Swagger security: only expose in non-production environments ────────
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Lumentix API')
+      .setDescription('Internal development documentation')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api', app, document);
+
+    console.log('🔍 Swagger available at /api (development only)');
+  }
 
   await app.listen(process.env.PORT ?? 3000);
 }
