@@ -3,6 +3,8 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum PaymentStatus {
@@ -38,6 +40,13 @@ export class Payment {
     default: PaymentStatus.PENDING,
   })
   status: PaymentStatus;
+
+  @Index()
+  @Column({ type: 'timestamptz', nullable: true })
+  expiresAt: Date | null;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 
   @CreateDateColumn()
   createdAt: Date;

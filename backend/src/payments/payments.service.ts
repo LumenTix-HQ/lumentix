@@ -105,19 +105,37 @@ export class PaymentsService {
       }
     }
 
-    // 5. Check for existing payment for this user and event
+    // 5. Check for existing non-expired PENDING payment for this user and event
     const existing = await this.paymentsRepository.findOne({
       where: {
         userId,
         eventId,
-        status: In([PaymentStatus.PENDING, PaymentStatus.CONFIRMED]),
+        status: PaymentStatus.PENDING,
       },
     });
 
+    const now = new Date();
+    // TTL config
+    const ttlMinutes = this.configService.get<number>('PAYMENT_INTENT_TTL_MINUTES') ?? 30;
+    const expiresAt = new Date(now.getTime() + ttlMinutes * 60_000);
+
     if (existing) {
-      throw new ConflictException(
-        `You already have an active or confirmed payment for this event.`,
-      );
+      if (existing.expiresAt && existing.expiresAt > now) {
+        this.logger.log(`Returning existing payment intent: paymentId=${existing.id}`);
+        return {
+          paymentId: existing.id,
+          escrowWallet: this.escrowWallet,
+          amount: event.ticketPrice,
+          currency,
+          memo: existing.id,
+          expiresAt: existing.expiresAt.toISOString(),
+        };
+      } else {
+        // Expired intent, mark as failed
+        existing.status = PaymentStatus.FAILED;
+        await this.paymentsRepository.save(existing);
+        this.logger.log(`Expired payment intent marked as FAILED: paymentId=${existing.id}`);
+      }
     }
 
     // 6. Persist a pending payment record
@@ -127,6 +145,7 @@ export class PaymentsService {
       amount: event.ticketPrice,
       currency,
       status: PaymentStatus.PENDING,
+      expiresAt,
     });
     const saved = await this.paymentsRepository.save(payment);
 
@@ -134,11 +153,11 @@ export class PaymentsService {
       action: 'PAYMENT_INTENT_CREATED',
       userId,
       resourceId: saved.id,
-      meta: { eventId, amount: saved.amount, currency: saved.currency },
+      meta: { eventId, amount: saved.amount, currency: saved.currency, expiresAt: saved.expiresAt },
     });
 
     this.logger.log(
-      `Payment intent created: paymentId=${saved.id} event=${eventId} user=${userId}`,
+      `Payment intent created: paymentId=${saved.id} event=${eventId} user=${userId} expiresAt=${saved.expiresAt.toISOString()}`,
     );
 
     return {
@@ -147,6 +166,7 @@ export class PaymentsService {
       amount: event.ticketPrice,
       currency,
       memo: saved.id,
+      expiresAt: saved.expiresAt.toISOString(),
     };
   }
 
@@ -177,6 +197,7 @@ export class PaymentsService {
       );
     }
 
+
     const payment = await this.paymentsRepository.findOne({
       where: { id: memoValue, status: PaymentStatus.PENDING },
     });
@@ -185,6 +206,19 @@ export class PaymentsService {
       throw new NotFoundException(
         `No pending payment found for memo "${memoValue}".`,
       );
+    }
+
+    // Enforce expiry
+    if (payment.expiresAt !== null && payment.expiresAt < new Date()) {
+      payment.status = PaymentStatus.FAILED;
+      await this.paymentsRepository.save(payment);
+      await this.auditService.log({
+        action: 'PAYMENT_EXPIRED',
+        userId: payment.userId,
+        resourceId: payment.id,
+        meta: { eventId: payment.eventId, expiresAt: payment.expiresAt },
+      });
+      throw new BadRequestException('Payment intent has expired. Please create a new payment intent.');
     }
 
     // ── Ownership check ──────────────────────────────────────────────────────

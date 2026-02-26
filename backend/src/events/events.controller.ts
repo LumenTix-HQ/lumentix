@@ -62,4 +62,30 @@ export class EventsController {
   ) {
     return this.eventsService.deleteEvent(id, req.user.id); // ← pass callerId
   }
+  /**
+   * GET /events/:eventId/tickets
+   * Organizer can list tickets for their event.
+   */
+  @Get(':eventId/tickets')
+  @Roles(Role.ORGANIZER)
+  async getEventTickets(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Query() paginationDto: any,
+  ) {
+    return this.ticketsService.findByEvent(eventId, req.user.id, paginationDto);
+  }
+
+  /**
+   * GET /events/:eventId/tickets/summary
+   * Organizer can get ticket stats for their event.
+   */
+  @Get(':eventId/tickets/summary')
+  @Roles(Role.ORGANIZER)
+  async getTicketSummary(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.getEventTicketSummary(eventId, req.user.id);
+  }
 }

@@ -1,3 +1,59 @@
+      async findByEvent(eventId: string, requesterId: string, paginationDto: any) {
+        // Ownership check
+        const event = await this.eventRepo.findOne({ where: { id: eventId } });
+        if (!event) throw new NotFoundException('Event not found');
+        if (event.organizerId !== requesterId) {
+          throw new ForbiddenException('You are not the organizer of this event.');
+        }
+        const queryBuilder = this.ticketRepo.createQueryBuilder('ticket')
+          .where('ticket.eventId = :eventId', { eventId });
+        // Optional status filter
+        if (paginationDto.status) {
+          queryBuilder.andWhere('ticket.status = :status', { status: paginationDto.status });
+        }
+        const { paginate } = await import('../common/pagination/pagination.helper');
+        return paginate(queryBuilder, paginationDto, 'ticket');
+      }
+
+      async getEventTicketSummary(eventId: string, requesterId: string) {
+        // Ownership check
+        const event = await this.eventRepo.findOne({ where: { id: eventId } });
+        if (!event) throw new NotFoundException('Event not found');
+        if (event.organizerId !== requesterId) {
+          throw new ForbiddenException('You are not the organizer of this event.');
+        }
+        const stats = await this.ticketRepo.createQueryBuilder('t')
+          .select('t.status', 'status')
+          .addSelect('COUNT(*)', 'count')
+          .where('t.eventId = :eventId', { eventId })
+          .groupBy('t.status')
+          .getRawMany();
+        const summary = { total: 0, valid: 0, used: 0, refunded: 0 };
+        for (const row of stats) {
+          summary[row.status] = Number(row.count);
+          summary.total += Number(row.count);
+        }
+        return summary;
+      }
+    async findOne(id: string, requesterId: string): Promise<TicketEntity> {
+      const ticket = await this.ticketRepo.findOne({ where: { id } });
+      if (!ticket) throw new NotFoundException('Ticket not found');
+      // Role check: Only owner, admin, or organizer of event can access
+      // For now, only owner allowed; extend as needed
+      if (ticket.ownerId !== requesterId) {
+        throw new ForbiddenException('You do not own this ticket.');
+      }
+      return ticket;
+    }
+  async findByOwner(ownerId: string, paginationDto: any) {
+    const queryBuilder = this.ticketRepo.createQueryBuilder('ticket')
+      .where('ticket.ownerId = :ownerId', { ownerId })
+      .orderBy('ticket.createdAt', 'DESC');
+    // Use paginate helper
+    // If you have a PaginationDto type, replace 'any' above
+    const { paginate } = await import('../common/pagination/pagination.helper');
+    return paginate(queryBuilder, paginationDto, 'ticket');
+  }
 import * as qrcode from 'qrcode';
 import { TicketSigningService } from './ticket-signing.service';
 import { IssueTicketResponseDto } from './dto/issue-ticket-response.dto';
