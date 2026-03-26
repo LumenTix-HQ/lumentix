@@ -1,8 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { NotificationService } from './notification.service';
 import { NotificationProcessor } from './notification.processor';
 import { MailerModule } from '../mailer/mailer.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -10,6 +11,7 @@ import { MailerModule } from '../mailer/mailer.module';
       name: 'notifications', // Must match the string in @Processor
     }),
     MailerModule,
+    forwardRef(() => UsersModule),
   ],
   providers: [NotificationService, NotificationProcessor],
   exports: [NotificationService], // Allow Payments/Sponsors to import this

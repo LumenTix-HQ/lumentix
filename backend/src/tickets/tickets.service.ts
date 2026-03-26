@@ -154,6 +154,7 @@ export class TicketsService {
     });
     if (user && event) {
       await this.notificationService.queueTicketEmail({
+        userId: user.id,
         email: user.email,
         ticketId: saved.id,
         eventName: event.title,

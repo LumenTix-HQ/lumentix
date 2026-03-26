@@ -20,6 +20,7 @@ import {
   PortfolioEntryDto,
   PortfolioResponseDto,
 } from './dto/portfolio-response.dto';
+import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -165,6 +166,22 @@ export class UsersService {
       totalValue: parseFloat(totalValue.toFixed(2)),
       breakdown,
     };
+  }
+
+  async updateNotificationPreferences(
+    userId: string,
+    prefs: UpdateNotificationPreferencesDto,
+  ): Promise<Omit<User, 'passwordHash'>> {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`User with id ${userId} not found`);
+    }
+    user.notificationPreferences = {
+      ...(user.notificationPreferences || {}),
+      ...prefs,
+    };
+    const saved = await this.usersRepository.save(user);
+    return this.sanitize(saved);
   }
 
   private sanitize(user: User): Omit<User, 'passwordHash'> {

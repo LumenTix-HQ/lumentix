@@ -54,6 +54,18 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   balancesUpdatedAt: Date | null;
 
+  @Column({
+    type: 'jsonb',
+    default: {
+      ticketIssued: true,
+      paymentFailed: true,
+      eventCancelled: true,
+      sponsorConfirmed: true,
+      eventCompleted: true,
+    },
+  })
+  notificationPreferences: Record<string, boolean>;
+
   @CreateDateColumn()
   createdAt: Date;
 

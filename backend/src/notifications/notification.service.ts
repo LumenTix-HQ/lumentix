@@ -9,6 +9,7 @@ export class NotificationService {
   ) {}
 
   async queueTicketEmail(data: {
+    userId: string;
     email: string;
     ticketId: string;
     eventName: string;
@@ -24,6 +25,7 @@ export class NotificationService {
   }
 
   async queueRefundEmail(data: {
+    userId: string;
     email: string;
     amount: number;
     refundId: string;
@@ -31,7 +33,11 @@ export class NotificationService {
     await this.notificationQueue.add('sendRefundEmail', data, { attempts: 3 });
   }
 
-  async queueSponsorEmail(data: { email: string; sponsorName: string }) {
+  async queueSponsorEmail(data: {
+    userId: string;
+    email: string;
+    sponsorName: string;
+  }) {
     await this.notificationQueue.add('sendSponsorEmail', data, { attempts: 3 });
   }
 }
