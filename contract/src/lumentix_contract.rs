@@ -6,6 +6,7 @@ use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
 use crate::validation;
 use crate::events::EventCreated;
+use crate::events::PlatformFeeUpdated;
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
@@ -415,7 +416,13 @@ impl LumentixContract {
             return Err(LumentixError::InvalidPlatformFee);
         }
 
+        // Read current fee before updating for event emission
+        let old_fee_bps = storage::get_platform_fee_bps(&env);
+
         storage::set_platform_fee_bps(&env, fee_bps);
+
+        // Emit PlatformFeeUpdated event
+        PlatformFeeUpdated::emit(&env, admin, old_fee_bps, fee_bps);
 
         Ok(())
     }
