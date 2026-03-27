@@ -1,10 +1,11 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::error::LumentixError;
+use crate::events::EventCancelled;
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
 use crate::validation;
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 #[contract]
 pub struct LumentixContract;
@@ -254,6 +255,7 @@ impl LumentixContract {
 
         event.status = EventStatus::Cancelled;
         storage::set_event(&env, event_id, &event);
+        EventCancelled::emit(&env, event_id, organizer, event.tickets_sold);
 
         Ok(())
     }
@@ -321,9 +323,50 @@ impl LumentixContract {
         storage::get_event(&env, event_id)
     }
 
+    /// Get all events created by a specific organizer.
+    /// Returns an empty vector if no events are found for the organizer.
+    pub fn get_events_by_organizer(env: Env, organizer: Address) -> Vec<Event> {
+        let mut events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.organizer == organizer {
+                    events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        events
+    }
+
     /// Get ticket data by ID.
     pub fn get_ticket_info(env: Env, ticket_id: u64) -> Result<Ticket, LumentixError> {
         storage::get_ticket(&env, ticket_id)
+    }
+
+    /// Get all tickets sold for a given event.
+    /// Returns EventNotFound if the event does not exist.
+    pub fn get_tickets_by_event(env: Env, event_id: u64) -> Result<Vec<Ticket>, LumentixError> {
+        // Ensure the event exists.
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut tickets = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id {
+                    tickets.push_back(ticket);
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(tickets)
     }
 
     /// Extend the TTL of an event. Only the organizer can call this.
