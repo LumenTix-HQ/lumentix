@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
@@ -15,6 +15,12 @@ export class PaymentsController {
 
   @Post('intent')
   @ApiOperation({ summary: 'Create payment intent', description: 'Initiates an escrow payment for an event ticket.' })
+  @ApiBody({
+    type: CreatePaymentIntentDto,
+    examples: {
+      example1: { summary: 'Standard Intent', value: { eventId: '123e4567-e89b-12d3-a456-426614174000' } }
+    }
+  })
   @ApiResponse({ status: 201, description: 'Payment intent created.' })
   @ApiResponse({ status: 400, description: 'Invalid event or sold out.' })
   createIntent(

@@ -16,6 +16,7 @@ import {
 import { AuditService } from './audit.service';
 import { AuditLog } from './entities/audit-log.entity';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
+import { ListAuditLogsDto } from './dto/list-audit-logs.dto';
 import { paginate } from '../common/pagination/pagination.helper';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../admin/roles.guard';
@@ -32,26 +33,43 @@ export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Get audit logs', description: 'Admin-only. Returns paginated list of system audit logs.' })
+  @ApiOperation({ summary: 'Get audit logs', description: 'Admin-only. Returns paginated list of system audit logs with optional filters.' })
   @ApiResponse({ status: 200, description: 'List of logs' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
-  async getAuditLogs(@Query() paginationDto: PaginationDto) {
-    const queryBuilder =
-      this.auditService.auditLogRepository.createQueryBuilder('audit');
-    return await paginate(queryBuilder, paginationDto, 'audit');
+  async getAuditLogs(@Query() dto: ListAuditLogsDto) {
+    const qb = this.auditService.getQueryBuilder();
+
+    if (dto.action) {
+      qb.andWhere('audit.action = :action', { action: dto.action });
+    }
+
+    if (dto.userId) {
+      qb.andWhere('audit.userId = :userId', { userId: dto.userId });
+    }
+
+    if (dto.from) {
+      qb.andWhere('audit.createdAt >= :from', { from: new Date(dto.from) });
+    }
+
+    if (dto.to) {
+      qb.andWhere('audit.createdAt <= :to', { to: new Date(dto.to) });
+    }
+
+    return paginate(qb, dto, 'audit');
   }
 
-
-  @Get(':id')
-  @ApiOperation({ summary: 'Get audit log by ID', description: 'Admin-only. Retrieves details for a specific log entry.' })
-  @ApiResponse({ status: 200, description: 'Log found', type: AuditLog })
-  @ApiResponse({ status: 404, description: 'Log not found' })
-  async getAuditLogById(@Param('id') id: string): Promise<AuditLog> {
-    const log = await this.auditService.auditLogRepository.findOneBy({ id });
-    if (!log) {
-      throw new NotFoundException('Audit log not found');
-    }
-    return log;
+  @Get('user/:userId')
+  @ApiOperation({ summary: 'Get audit logs for a specific user', description: 'Admin-only. Returns paginated audit logs scoped to a single user.' })
+  @ApiResponse({ status: 200, description: 'List of logs for user' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async getAuditLogsForUser(
+    @Param('userId') userId: string,
+    @Query() paginationDto: PaginationDto,
+  ) {
+    const qb = this.auditService.getQueryBuilder()
+      .where('audit.userId = :userId', { userId })
+      .orderBy('audit.createdAt', 'DESC');
+    return paginate(qb, paginationDto, 'audit');
   }
 
   @Get('export')
@@ -61,9 +79,8 @@ export class AuditController {
     @Query() paginationDto: PaginationDto,
     @Res() res: Response,
   ) {
-    const queryBuilder =
-      this.auditService.auditLogRepository.createQueryBuilder('audit');
-    const paginated = await paginate(queryBuilder, paginationDto, 'audit');
+    const qb = this.auditService.getQueryBuilder();
+    const paginated = await paginate(qb, paginationDto, 'audit');
     const logs = paginated.data;
 
     const header = [
@@ -96,5 +113,17 @@ export class AuditController {
       'attachment; filename="audit_logs.csv"',
     );
     res.send(csv);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get audit log by ID', description: 'Admin-only. Retrieves details for a specific log entry.' })
+  @ApiResponse({ status: 200, description: 'Log found', type: AuditLog })
+  @ApiResponse({ status: 404, description: 'Log not found' })
+  async getAuditLogById(@Param('id') id: string): Promise<AuditLog> {
+    const log = await this.auditService.auditLogRepository.findOneBy({ id });
+    if (!log) {
+      throw new NotFoundException('Audit log not found');
+    }
+    return log;
   }
 }

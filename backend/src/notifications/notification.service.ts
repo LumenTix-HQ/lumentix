@@ -40,4 +40,47 @@ export class NotificationService {
   }) {
     await this.notificationQueue.add('sendSponsorEmail', data, { attempts: 3 });
   }
+
+  async queueSponsorConfirmedEmail(data: {
+    email: string;
+    sponsorName: string;
+    eventTitle: string;
+    amount: number;
+    currency: string;
+    transactionHash: string;
+  }) {
+    await this.notificationQueue.add('sendSponsorConfirmedEmail', data, { attempts: 3 });
+  }
+
+  async queuePaymentFailedEmail(data: {
+    email: string;
+    eventTitle: string;
+    amount: number;
+    currency: string;
+    reason: string;
+  }) {
+    await this.notificationQueue.add('sendPaymentFailedEmail', data, { attempts: 3 });
+  }
+
+  async queueEventCancelledEmail(data: {
+    emails: string[];
+    eventTitle: string;
+    refundInfo: string;
+  }) {
+    await this.notificationQueue.add('sendEventCancelledEmail', data, { attempts: 3 });
+  }
+
+  async queueEventPublishedEmail(data: {
+    email: string;
+    eventTitle: string;
+  }) {
+    await this.notificationQueue.add('sendEventPublishedEmail', data, { attempts: 3 });
+  }
+
+  async queueEventCompletedEmail(data: {
+    email: string;
+    eventTitle: string;
+  }) {
+    await this.notificationQueue.add('sendEventCompletedEmail', data, { attempts: 3 });
+  }
 }

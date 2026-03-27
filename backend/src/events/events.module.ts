@@ -5,9 +5,16 @@ import { EventsService } from './events.service';
 import { EventsController } from './events.controller';
 import { EventStateService } from './state/event-state.service';
 import { TicketsModule } from '../tickets/tickets.module';
+import { NotificationModule } from '../notifications/notification.module';
+import { User } from '../users/entities/user.entity';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Event]), forwardRef(() => TicketsModule)],
+  imports: [
+    TypeOrmModule.forFeature([Event, User, TicketEntity]),
+    forwardRef(() => TicketsModule),
+    NotificationModule,
+  ],
   controllers: [EventsController],
   providers: [EventsService, EventStateService],
   exports: [EventsService],

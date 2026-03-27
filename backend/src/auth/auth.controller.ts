@@ -1,5 +1,5 @@
 import { Body, Controller, Post, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -11,6 +11,13 @@ export class AuthController {
 
   @Post('register')
   @ApiOperation({ summary: 'Register a new user', description: 'Creates a new user account.' })
+  @ApiBody({ 
+    type: RegisterDto, 
+    examples: {
+      standard: { summary: 'Standard user', value: { email: 'user@example.com', password: 'password123' } },
+      admin: { summary: 'Admin user', value: { email: 'admin@example.com', password: 'password123', role: 'ADMIN' } }
+    }
+  })
   @ApiResponse({ status: 201, description: 'User successfully registered.' })
   @ApiResponse({ status: 400, description: 'Bad Request / Email already exists.' })
   register(@Body() dto: RegisterDto) {

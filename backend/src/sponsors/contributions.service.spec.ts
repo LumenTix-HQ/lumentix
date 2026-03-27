@@ -7,6 +7,9 @@ import { StellarService } from 'src/stellar';
 import { AuditService } from 'src/audit/audit.service';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { User } from 'src/users/entities/user.entity';
+import { Event } from 'src/events/entities/event.entity';
+import { NotificationService } from 'src/notifications/notification.service';
 
 describe('ContributionsService', () => {
   let service: ContributionsService;
@@ -33,6 +36,14 @@ describe('ContributionsService', () => {
           useValue: { findOne: jest.fn() },
         },
         {
+          provide: getRepositoryToken(User),
+          useValue: { findOne: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(Event),
+          useValue: { findOne: jest.fn() },
+        },
+        {
           provide: StellarService,
           useValue: { getTransaction: jest.fn() },
         },
@@ -43,6 +54,10 @@ describe('ContributionsService', () => {
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('ESCROW_WALLET') },
+        },
+        {
+          provide: NotificationService,
+          useValue: { queueSponsorConfirmedEmail: jest.fn() },
         },
       ],
     }).compile();

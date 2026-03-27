@@ -10,7 +10,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as qrcode from 'qrcode';
 
 import { TicketEntity } from './entities/ticket.entity';
 import { TicketSigningService } from './ticket-signing.service';
@@ -50,6 +49,8 @@ export class TicketsService {
       .where('ticket.eventId = :eventId', { eventId });
 
     if (paginationDto?.status) {
+    // Optional status filter
+    if (paginationDto && paginationDto.status) {
       queryBuilder.andWhere('ticket.status = :status', {
         status: paginationDto.status,
       });
@@ -130,6 +131,7 @@ export class TicketsService {
         assetCode: existing.assetCode,
         status: existing.status,
         transactionHash: existing.transactionHash as string,
+        transactionHash: existing.transactionHash,
       };
     }
 
@@ -188,6 +190,7 @@ export class TicketsService {
       assetCode: saved.assetCode,
       status: saved.status,
       transactionHash: saved.transactionHash as string,
+      transactionHash: saved.transactionHash,
     };
   }
 

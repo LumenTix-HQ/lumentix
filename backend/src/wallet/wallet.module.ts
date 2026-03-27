@@ -6,11 +6,12 @@ import { WalletController } from './wallet.controller';
 import { UsersModule } from '../users/users.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { User } from '../users/entities/user.entity';
+import { UserWallet } from './entities/user-wallet.entity';
 import { RedisProvider } from '../common/redis/redis.provider';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, UserWallet]),
     ConfigModule,
     UsersModule,
     StellarModule,

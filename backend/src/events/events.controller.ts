@@ -20,6 +20,7 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
+  ApiBody,
 } from '@nestjs/swagger';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -46,6 +47,22 @@ export class EventsController {
   @Post()
   @Roles(Role.ORGANIZER)
   @ApiOperation({ summary: 'Create a new event', description: 'Organizer-only. Creates a DRAFT event.' })
+  @ApiBody({ 
+    type: CreateEventDto, 
+    examples: {
+      conference: { 
+        summary: 'Conference', 
+        value: { 
+          title: 'Stellar Summit', 
+          startDate: '2025-09-01T09:00:00Z',
+          endDate: '2025-09-02T18:00:00Z',
+          ticketPrice: 50,
+          currency: 'XLM',
+          maxAttendees: 500
+        }
+      }
+    }
+  })
   @ApiResponse({ status: 201, description: 'Event created', type: Event })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 403, description: 'Not an organizer' })

@@ -19,6 +19,10 @@ export class AuditService {
     public readonly auditLogRepository: Repository<AuditLog>,
   ) {}
 
+  getQueryBuilder() {
+    return this.auditLogRepository.createQueryBuilder('audit');
+  }
+
   async log(entry: AuditLogEntry): Promise<AuditLog> {
     const record = this.auditLogRepository.create({
       action: entry.action,

@@ -19,6 +19,7 @@ const makeMockUser = (): User => ({
   status: UserStatus.ACTIVE,
   balances: {},
   balancesUpdatedAt: null,
+  notificationPreferences: {},
   createdAt: new Date(),
   updatedAt: new Date(),
 });

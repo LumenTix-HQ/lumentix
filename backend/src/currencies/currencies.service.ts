@@ -35,6 +35,21 @@ export class CurrenciesService {
       ]),
     );
   }
+
+  async findActiveCodes(): Promise<string[]> {
+    const records = await this.currencyRepository.find({
+      where: { isActive: true },
+      select: ['code'],
+    });
+    return records.map((c) => c.code);
+  }
+
+  async toggleActive(id: string): Promise<Currency | undefined> {
+    const currency = await this.findOne(id);
+    if (!currency) return undefined;
+    currency.isActive = !currency.isActive;
+    return await this.currencyRepository.save(currency);
+  }
   async create(createCurrencyDto: Partial<Currency>): Promise<Currency> {
     const currency = this.currencyRepository.create(createCurrencyDto);
     return await this.currencyRepository.save(currency);

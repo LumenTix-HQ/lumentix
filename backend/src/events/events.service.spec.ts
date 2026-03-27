@@ -8,6 +8,9 @@ import { Event, EventStatus } from './entities/event.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
 import { EventStateService } from './state/event-state.service';
+import { User } from '../users/entities/user.entity';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { NotificationService } from '../notifications/notification.service';
 
 const mockEvent: Event = {
   id: 'uuid-1',
@@ -44,7 +47,10 @@ describe('EventsService', () => {
       providers: [
         EventsService,
         { provide: getRepositoryToken(Event), useValue: mockRepo },
+        { provide: getRepositoryToken(User), useValue: mockRepo },
+        { provide: getRepositoryToken(TicketEntity), useValue: mockRepo },
         { provide: EventStateService, useValue: { validateTransition: jest.fn() } },
+        { provide: NotificationService, useValue: { queueEventCancelledEmail: jest.fn(), queueEventPublishedEmail: jest.fn(), queueEventCompletedEmail: jest.fn() } },
       ],
     }).compile();
 

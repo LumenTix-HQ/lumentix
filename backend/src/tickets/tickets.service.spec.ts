@@ -18,8 +18,15 @@ describe('TicketsService', () => {
 
   const repo = {
     findOne: jest.fn(),
-    create: jest.fn((x) => x),
-    save: jest.fn(async (x) => ({ id: 't1', createdAt: new Date(), ...x })),
+    create: jest.fn((x: TicketEntity) => x),
+    save: jest.fn(
+      (x: TicketEntity) =>
+        ({
+          ...x,
+          id: 't1',
+          createdAt: new Date(),
+        }) as TicketEntity,
+    ),
   };
 
   const paymentsServiceMock = {
@@ -40,8 +47,14 @@ describe('TicketsService', () => {
     { provide: PaymentsService, useValue: paymentsServiceMock },
     { provide: StellarService, useValue: stellarServiceMock },
     { provide: ConfigService, useValue: configServiceMock },
-    { provide: TicketSigningService, useValue: { sign: jest.fn(), verify: jest.fn() } },
-    { provide: NotificationService, useValue: { queueTicketEmail: jest.fn() } },
+    {
+      provide: TicketSigningService,
+      useValue: { sign: jest.fn(), verify: jest.fn() },
+    },
+    {
+      provide: NotificationService,
+      useValue: { queueTicketEmail: jest.fn() },
+    },
     { provide: getRepositoryToken(Event), useValue: { findOne: jest.fn() } },
     { provide: getRepositoryToken(User), useValue: { findOne: jest.fn() } },
   ];
@@ -120,6 +133,7 @@ describe('TicketsService', () => {
       'Not ticket owner',
     );
   });
+
   describe('verifyTicket', () => {
     // Generate a real throwaway keypair so tests are self-contained
     const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
@@ -152,10 +166,22 @@ describe('TicketsService', () => {
           { provide: PaymentsService, useValue: paymentsServiceMock },
           { provide: StellarService, useValue: stellarServiceMock },
           { provide: ConfigService, useValue: myConfigServiceMock },
-          { provide: TicketSigningService, useValue: { sign: jest.fn(), verify: jest.fn() } },
-          { provide: NotificationService, useValue: { queueTicketEmail: jest.fn() } },
-          { provide: getRepositoryToken(Event), useValue: { findOne: jest.fn() } },
-          { provide: getRepositoryToken(User), useValue: { findOne: jest.fn() } },
+          {
+            provide: TicketSigningService,
+            useValue: { sign: jest.fn(), verify: jest.fn() },
+          },
+          {
+            provide: NotificationService,
+            useValue: { queueTicketEmail: jest.fn() },
+          },
+          {
+            provide: getRepositoryToken(Event),
+            useValue: { findOne: jest.fn() },
+          },
+          {
+            provide: getRepositoryToken(User),
+            useValue: { findOne: jest.fn() },
+          },
         ],
       }).compile();
 
@@ -175,7 +201,12 @@ describe('TicketsService', () => {
 
       repo.findOne.mockResolvedValue({ id: ticketId, status: 'valid' });
       // override verify
-      jest.spyOn(service['ticketSigningService'] as any, 'verify').mockReturnValue(true);
+      jest
+        .spyOn(
+          service['ticketSigningService'] as unknown as TicketSigningService,
+          'verify',
+        )
+        .mockReturnValue(true);
 
       const result = await service.verifyTicket(ticketId, signature);
       expect(result.status).toBe('used');
@@ -183,14 +214,24 @@ describe('TicketsService', () => {
     });
 
     it('rejects an arbitrary truthy string as signature', async () => {
-      jest.spyOn(service['ticketSigningService'] as any, 'verify').mockReturnValue(false);
+      jest
+        .spyOn(
+          service['ticketSigningService'] as unknown as TicketSigningService,
+          'verify',
+        )
+        .mockReturnValue(false);
       await expect(
         service.verifyTicket('ticket-uuid-1234', 'not-a-real-signature'),
       ).rejects.toThrow('Invalid ticket signature');
     });
 
     it('rejects a valid signature for a different ticketId', async () => {
-      jest.spyOn(service['ticketSigningService'] as any, 'verify').mockReturnValue(false);
+      jest
+        .spyOn(
+          service['ticketSigningService'] as unknown as TicketSigningService,
+          'verify',
+        )
+        .mockReturnValue(false);
       const signature = makeSignature('other-ticket-id');
       await expect(
         service.verifyTicket('ticket-uuid-1234', signature),
@@ -202,7 +243,12 @@ describe('TicketsService', () => {
       const signature = makeSignature(ticketId);
 
       repo.findOne.mockResolvedValue({ id: ticketId, status: 'used' });
-      jest.spyOn(service['ticketSigningService'] as any, 'verify').mockReturnValue(true);
+      jest
+        .spyOn(
+          service['ticketSigningService'] as unknown as TicketSigningService,
+          'verify',
+        )
+        .mockReturnValue(true);
 
       await expect(service.verifyTicket(ticketId, signature)).rejects.toThrow(
         'Ticket has already been used',

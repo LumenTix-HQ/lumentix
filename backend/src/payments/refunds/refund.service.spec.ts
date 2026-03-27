@@ -10,6 +10,7 @@ import { User } from '../../users/entities/user.entity';
 import { StellarService } from '../../stellar/stellar.service';
 import { AuditService } from '../../audit/audit.service';
 import { EscrowService } from '../services/escrow.service';
+import { NotificationService } from '../../notifications/notification.service';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,10 @@ describe('RefundService', () => {
         {
           provide: EscrowService,
           useValue: { decryptEscrowSecret: jest.fn() },
+        },
+        {
+          provide: NotificationService,
+          useValue: { queueRefundEmail: jest.fn() },
         },
       ],
     }).compile();

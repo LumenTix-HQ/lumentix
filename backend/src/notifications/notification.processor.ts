@@ -98,6 +98,94 @@ export class NotificationProcessor {
     await this.mailerService.send(email, subject, html);
   }
 
+  @Process('sendSponsorConfirmedEmail')
+  async handleSponsorConfirmedEmail(job: Job) {
+    this.logger.log(`Sending sponsor confirmed email for job ${job.id}...`);
+    const { email, sponsorName, eventTitle, amount, currency, transactionHash } = job.data;
+    const subject = `Sponsorship Confirmed: ${eventTitle}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2>Your Sponsorship Has Been Confirmed</h2>
+        <p>Thank you, <strong>${sponsorName}</strong>, for sponsoring <strong>${eventTitle}</strong>!</p>
+        <p>Amount: <strong>${amount} ${currency}</strong></p>
+        <p>Transaction: <strong>${transactionHash}</strong></p>
+      </div>
+    `;
+    await this.mailerService.send(email, subject, html);
+    return { sent: true };
+  }
+
+  @Process('sendPaymentFailedEmail')
+  async handlePaymentFailedEmail(job: Job) {
+    // Payment failure is critical, no skip check
+    this.logger.log(`Sending payment failed email for job ${job.id}...`);
+    const { email, eventTitle, amount, currency, reason } = job.data;
+    const subject = `Payment Failed: ${eventTitle}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2>Payment Could Not Be Processed</h2>
+        <p>Your payment of <strong>${amount} ${currency}</strong> for <strong>${eventTitle}</strong> could not be confirmed.</p>
+        <p>Reason: <strong>${reason}</strong></p>
+        <p>Please try again or contact support if the issue persists.</p>
+      </div>
+    `;
+    await this.mailerService.send(email, subject, html);
+    return { sent: true };
+  }
+
+  @Process('sendEventCancelledEmail')
+  async handleEventCancelledEmail(job: Job<{ emails: string[]; eventTitle: string; refundInfo: string }>) {
+    // Cancellation is critical, no skip check
+    this.logger.log(`Sending event cancelled emails for job ${job.id}...`);
+    const { emails, eventTitle, refundInfo } = job.data;
+    const subject = `Event Cancelled: ${eventTitle}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2>Event Cancelled: ${eventTitle}</h2>
+        <p>We regret to inform you that the event <strong>${eventTitle}</strong> has been cancelled.</p>
+        <p>${refundInfo}</p>
+      </div>
+    `;
+    for (const email of emails) {
+      await this.mailerService.send(email, subject, html);
+    }
+    return { sent: true, count: emails.length };
+  }
+
+  @Process('sendEventPublishedEmail')
+  async handleEventPublishedEmail(job: Job) {
+    if (await this.shouldSkip(job, 'eventPublished')) return;
+
+    this.logger.log(`Sending event published email for job ${job.id}...`);
+    const { email, eventTitle } = job.data;
+    const subject = `Your Event is Live: ${eventTitle}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2>Your Event is Now Live!</h2>
+        <p>Congratulations! Your event <strong>${eventTitle}</strong> has been published and is now accepting registrations.</p>
+      </div>
+    `;
+    await this.mailerService.send(email, subject, html);
+    return { sent: true };
+  }
+
+  @Process('sendEventCompletedEmail')
+  async handleEventCompletedEmail(job: Job) {
+    if (await this.shouldSkip(job, 'eventCompleted')) return;
+
+    this.logger.log(`Sending event completed email for job ${job.id}...`);
+    const { email, eventTitle } = job.data;
+    const subject = `Event Completed: ${eventTitle}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2>Event Completed: ${eventTitle}</h2>
+        <p>Your event <strong>${eventTitle}</strong> has been marked as completed. Thank you for hosting on Lumentix!</p>
+      </div>
+    `;
+    await this.mailerService.send(email, subject, html);
+    return { sent: true };
+  }
+
   // Monitor status
   @OnQueueActive()
   onActive(job: Job) {

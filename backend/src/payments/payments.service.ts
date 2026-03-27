@@ -16,6 +16,8 @@ import { EventStatus } from '../events/entities/event.entity';
 import { EventsService } from '../events/events.service';
 import { StellarService } from '../stellar/stellar.service';
 import { Payment, PaymentStatus } from './entities/payment.entity';
+import { NotificationService } from '../notifications/notification.service';
+import { User } from '../users/entities/user.entity';
 
 /** Supported on-chain asset codes */
 const SUPPORTED_ASSETS = ['XLM', 'USDC'] as const;
@@ -38,11 +40,14 @@ export class PaymentsService {
   constructor(
     @InjectRepository(Payment)
     private readonly paymentsRepository: Repository<Payment>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     @Inject(forwardRef(() => EventsService))
     private readonly eventsService: EventsService,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
+    private readonly notificationService: NotificationService,
   ) {
     this.escrowWallet =
       this.configService.get<string>('ESCROW_WALLET_PUBLIC_KEY') ?? '';
@@ -377,6 +382,29 @@ export class PaymentsService {
     this.logger.warn(
       `Payment failed: paymentId=${payment.id} reason=${reason}`,
     );
+
+    // Queue payment failed email (non-blocking)
+    this.queuePaymentFailedEmail(payment, reason).catch(() => undefined);
+  }
+
+  private async queuePaymentFailedEmail(
+    payment: Payment,
+    reason: string,
+  ): Promise<void> {
+    const [user, event] = await Promise.all([
+      this.userRepository.findOne({ where: { id: payment.userId } }),
+      this.eventsService.getEventById(payment.eventId),
+    ]);
+
+    if (!user) return;
+
+    await this.notificationService.queuePaymentFailedEmail({
+      email: user.email,
+      eventTitle: event.title,
+      amount: Number(payment.amount),
+      currency: payment.currency,
+      reason,
+    });
   }
 }
 

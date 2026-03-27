@@ -230,6 +230,32 @@ export class StellarService implements OnModuleDestroy {
   }
 
   /**
+   * Get paginated transaction history for a Stellar account.
+   * Returns an empty records array for new/unfunded accounts (Horizon 404).
+   */
+  async getAccountTransactions(
+    publicKey: string,
+    cursor?: string,
+    limit = 10,
+  ): Promise<{ records: Horizon.ServerApi.TransactionRecord[] }> {
+    try {
+      let query = this.server
+        .transactions()
+        .forAccount(publicKey)
+        .limit(limit)
+        .order('desc');
+      if (cursor) query = query.cursor(cursor);
+      return await query.call();
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        return { records: [] };
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Get the XLM balance of an account.
    */
   async getXlmBalance(publicKey: string): Promise<string> {
