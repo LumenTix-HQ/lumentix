@@ -391,4 +391,14 @@ impl LumentixContract {
 
         Ok(balance)
     }
+
+    /// Get the contract admin address.
+    /// Returns the admin address if the contract is initialized.
+    /// No auth required - provides transparency.
+    pub fn get_admin(env: Env) -> Result<Address, LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        Ok(storage::get_admin(&env))
+    }
 }
