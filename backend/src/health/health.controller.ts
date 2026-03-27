@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import {
   HealthCheckService,
   TypeOrmHealthIndicator,
@@ -21,6 +22,7 @@ export class HealthController {
 
   @Get()
   @HealthCheck()
+  @SkipThrottle()
   @ApiOperation({ summary: 'Liveness check', description: 'Public. Checks internal services status (DB, Stellar connectivity).' })
   @ApiResponse({ status: 200, description: 'All systems operational' })
   @ApiResponse({ status: 503, description: 'Service unavailable' })

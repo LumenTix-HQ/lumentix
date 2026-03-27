@@ -28,6 +28,7 @@ import { UpdateNotificationPreferencesDto } from './dto/update-notification-pref
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('users')
+@ApiResponse({ status: 429, description: 'Too Many Requests' })
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

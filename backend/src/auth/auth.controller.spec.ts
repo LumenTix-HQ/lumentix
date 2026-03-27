@@ -3,6 +3,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
+import { THROTTLER_LIMIT, THROTTLER_TTL } from '@nestjs/throttler';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -35,5 +36,19 @@ describe('AuthController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  it('should have throttler metadata applied to register', () => {
+    const throttle = Reflect.getMetadata('THROTTLER:METADATA', AuthController.prototype.register);
+    expect(throttle).toBeDefined();
+    expect(throttle[0].short.limit).toBe(5);
+    expect(throttle[0].short.ttl).toBe(60000);
+  });
+
+  it('should have throttler metadata applied to login', () => {
+    const throttle = Reflect.getMetadata('THROTTLER:METADATA', AuthController.prototype.login);
+    expect(throttle).toBeDefined();
+    expect(throttle[0].short.limit).toBe(5);
+    expect(throttle[0].short.ttl).toBe(60000);
   });
 });

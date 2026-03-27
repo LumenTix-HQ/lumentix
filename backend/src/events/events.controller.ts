@@ -37,6 +37,7 @@ import { Event } from './entities/event.entity';
 @ApiBearerAuth()
 @Controller('events')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiResponse({ status: 429, description: 'Too Many Requests' })
 export class EventsController {
   constructor(
     private readonly eventsService: EventsService,
