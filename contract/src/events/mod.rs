@@ -1,6 +1,6 @@
 #![allow(deprecated)]
 
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, String, Symbol};
 
 /// A type for transfer of event
 pub struct TransferEvent;
@@ -20,6 +20,18 @@ impl CheckInEvent {
         env.events().publish(
             (symbol_short!("checkin"),),
             (ticket_id, validator, event_id),
+        );
+    }
+}
+
+/// Event emitted when platform fee is updated
+pub struct PlatformFeeUpdated;
+
+impl PlatformFeeUpdated {
+    pub fn emit(env: &Env, admin: Address, old_fee_bps: u32, new_fee_bps: u32) {
+        env.events().publish(
+            (symbol_short!("feeupdate"),),
+            (admin, old_fee_bps, new_fee_bps),
         );
     }
 }
