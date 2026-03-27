@@ -33,6 +33,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User account is blocked.');
     }
     // This is attached to request.user on protected routes
-    return { userId: payload.sub, role: payload.role };
+    return { id: payload.sub, role: payload.role.toLowerCase() };
   }
 }

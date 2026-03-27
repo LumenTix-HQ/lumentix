@@ -26,11 +26,12 @@ import { ContributionIntentDto } from './dto/contribution-intent.dto';
 import { ConfirmContributionDto } from './dto/confirm-contribution.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 
 @ApiTags('Sponsors')
 @Controller('events/:eventId/tiers')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class SponsorsController {
   constructor(
     private readonly sponsorsService: SponsorsService,

@@ -1,4 +1,19 @@
-import { Body, Controller, Param, Post, Req, UseGuards, Get, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+  Get,
+  Query,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { TicketsService } from './tickets.service';
@@ -9,7 +24,7 @@ import { TicketEntity } from './entities/ticket.entity';
 @ApiTags('Tickets')
 @ApiBearerAuth()
 @Controller('tickets')
-@UseGuards(JwtAuthGuard) // Applies to every endpoint in this controller
+@UseGuards(JwtAuthGuard)
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
@@ -31,7 +46,11 @@ export class TicketsController {
     summary: 'Get a single ticket',
     description: 'Returns a single ticket if the user is authorized.',
   })
-  @ApiResponse({ status: 200, description: 'Ticket details', type: TicketEntity })
+  @ApiResponse({
+    status: 200,
+    description: 'Ticket details',
+    type: TicketEntity,
+  })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async getTicket(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.ticketsService.findOne(id, req.user.id);
@@ -62,32 +81,8 @@ export class TicketsController {
   ) {
     return this.ticketsService.transferTicket(
       ticketId,
-      req.user.id, // sourced from JWT, not request body
+      req.user.id,
       dto.newOwnerId,
     );
-  }
-
-  /**
-   * GET /tickets/my
-   * Returns paginated tickets owned by the authenticated user.
-   */
-  @Get('my')
-  async getMyTickets(
-    @Req() req: AuthenticatedRequest,
-    @Query() paginationDto: any,
-  ) {
-    return this.ticketsService.findByOwner(req.user.id, paginationDto);
-  }
-
-  /**
-   * GET /tickets/:id
-   * Returns a single ticket if the user is authorized.
-   */
-  @Get(':id')
-  async getTicket(
-    @Param('id') id: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    return this.ticketsService.findOne(id, req.user.id);
   }
 }

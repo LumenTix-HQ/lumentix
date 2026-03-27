@@ -208,6 +208,7 @@ export class RefundService {
 
       if (user.email) {
         await this.notificationService.queueRefundEmail({
+          userId: user.id,
           email: user.email,
           amount,
           refundId: payment.id,
