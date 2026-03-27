@@ -49,6 +49,14 @@ impl EventCreated {
                 start_time,
                 end_time,
             ),
+/// Event emitted when an organizer cancels a published event.
+pub struct EventCancelled;
+
+impl EventCancelled {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, tickets_sold: u32) {
+        env.events().publish(
+            (symbol_short!("evcncld"),),
+            (event_id, organizer, tickets_sold),
         );
     }
 }
