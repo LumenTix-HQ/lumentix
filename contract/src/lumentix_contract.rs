@@ -416,6 +416,16 @@ impl LumentixContract {
         storage::get_platform_balance(&env)
     }
 
+    /// Get event revenue (gross ticket sales).
+    /// Calculates revenue as tickets_sold * ticket_price.
+    /// Returns i128 representing total gross revenue.
+    /// No auth required.
+    pub fn get_event_revenue(env: Env, event_id: u64) -> Result<i128, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+        let revenue = event.tickets_sold as i128 * event.ticket_price;
+        Ok(revenue)
+    }
+
     /// Withdraw all accumulated platform fees. Only the admin can withdraw.
     pub fn withdraw_platform_fees(env: Env, admin: Address) -> Result<i128, LumentixError> {
         admin.require_auth();
