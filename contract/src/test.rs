@@ -1987,3 +1987,192 @@ fn test_event_status_changed_published_to_completed() {
     }
     assert!(found, "EventCompleted event not found for completion");
 }
+
+// ============================================================================
+// CHANGE ADMIN TESTS
+// ============================================================================
+
+#[test]
+fn test_change_admin_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let new_admin = Address::generate(&env);
+
+    // Change admin
+    let result = client.try_change_admin(&admin, &new_admin);
+    assert!(result.is_ok());
+
+    // Verify new admin can call admin functions
+    let set_fee_result = client.try_set_platform_fee(&new_admin, &250u32);
+    assert!(set_fee_result.is_ok());
+
+    // Verify old admin can no longer call admin functions
+    let old_admin_set_fee_result = client.try_set_platform_fee(&admin, &300u32);
+    assert_eq!(old_admin_set_fee_result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_change_admin_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let unauthorized = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    // Try to change admin as unauthorized user
+    let result = client.try_change_admin(&unauthorized, &new_admin);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+
+    // Verify admin is still the original
+    let current_admin = client.get_admin();
+    assert_eq!(current_admin, admin);
+}
+
+#[test]
+fn test_change_admin_to_same_address_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+
+    // Try to change admin to the same address
+    let result = client.try_change_admin(&admin, &admin);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAddress)));
+
+    // Verify admin is unchanged
+    let current_admin = client.get_admin();
+    assert_eq!(current_admin, admin);
+}
+
+#[test]
+fn test_change_admin_get_admin_returns_new_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let new_admin = Address::generate(&env);
+
+    // Change admin
+    client.change_admin(&admin, &new_admin);
+
+    // Verify get_admin returns the new admin
+    let current_admin = client.get_admin();
+    assert_eq!(current_admin, new_admin);
+}
+
+#[test]
+fn test_change_admin_set_platform_fee_with_new_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let new_admin = Address::generate(&env);
+
+    // Change admin
+    client.change_admin(&admin, &new_admin);
+
+    // New admin should be able to set platform fee
+    let result = client.try_set_platform_fee(&new_admin, &500u32);
+    assert!(result.is_ok());
+
+    // Verify fee was set
+    let fee = client.get_platform_fee();
+    assert_eq!(fee, 500);
+}
+
+#[test]
+fn test_change_admin_withdraw_platform_fees_with_new_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let new_admin = Address::generate(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Set platform fee and collect some fees
+    client.set_platform_fee(&admin, &1000u32);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Change admin
+    client.change_admin(&admin, &new_admin);
+
+    // New admin should be able to withdraw fees
+    let withdrawn = client.withdraw_platform_fees(&new_admin);
+    assert_eq!(withdrawn, 10i128);
+
+    // Old admin should not be able to withdraw
+    let old_admin_result = client.try_withdraw_platform_fees(&admin);
+    assert_eq!(old_admin_result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_change_admin_chain_a_to_b_to_c() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin_a, client) = create_test_contract(&env);
+    let admin_b = Address::generate(&env);
+    let admin_c = Address::generate(&env);
+
+    // A -> B
+    client.change_admin(&admin_a, &admin_b);
+
+    // Verify B is now admin
+    let current_admin = client.get_admin();
+    assert_eq!(current_admin, admin_b);
+
+    // B -> C
+    client.change_admin(&admin_b, &admin_c);
+
+    // Verify C is now admin
+    let current_admin = client.get_admin();
+    assert_eq!(current_admin, admin_c);
+
+    // Verify A is no longer admin
+    let a_set_fee_result = client.try_set_platform_fee(&admin_a, &250u32);
+    assert_eq!(a_set_fee_result, Err(Ok(LumentixError::Unauthorized)));
+
+    // Verify B is no longer admin
+    let b_set_fee_result = client.try_set_platform_fee(&admin_b, &250u32);
+    assert_eq!(b_set_fee_result, Err(Ok(LumentixError::Unauthorized)));
+
+    // Verify C is the only admin
+    let c_set_fee_result = client.try_set_platform_fee(&admin_c, &250u32);
+    assert!(c_set_fee_result.is_ok());
+}
+
+#[test]
+fn test_change_admin_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let new_admin = Address::generate(&env);
+
+    // Change admin
+    client.change_admin(&admin, &new_admin);
+
+    // Verify AdminChanged event was emitted
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"admchng" {
+                    found = true;
+                    // Verify event data structure: (caller, old_admin, new_admin)
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 3);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "AdminChanged event not found");
+}
