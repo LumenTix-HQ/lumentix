@@ -2,8 +2,9 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    EventCancelled, EventCompleted, EventCreated, EventStatusChanged, EventUpdated,
-    PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketTransferred,
+    EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
+    EventUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketRefunded,
+    TicketTransferred, TicketUsed,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
@@ -385,6 +386,9 @@ impl LumentixContract {
         ticket.used = true;
         storage::set_ticket(&env, ticket_id, &ticket);
 
+        // Emit TicketUsed event
+        TicketUsed::emit(&env, ticket_id, ticket.event_id, ticket.owner, caller);
+
         Ok(())
     }
 
@@ -475,6 +479,9 @@ impl LumentixContract {
         event.tickets_sold = event.tickets_sold.saturating_sub(1);
         storage::set_event(&env, ticket.event_id, &event);
 
+        // Emit TicketRefunded event
+        TicketRefunded::emit(&env, ticket_id, ticket.event_id, buyer, event.ticket_price);
+
         Ok(())
     }
 
@@ -557,7 +564,23 @@ impl LumentixContract {
 
         storage::clear_escrow(&env, event_id);
 
+        // Emit EscrowReleased event
+        EscrowReleased::emit(&env, event_id, organizer, escrow_balance);
+
         Ok(escrow_balance)
+    }
+
+    /// Get the escrow balance for an event.
+    /// Returns 0 if no escrow exists (no tickets sold yet).
+    /// No auth required for transparency.
+    pub fn get_escrow_balance(env: Env, event_id: u64) -> Result<i128, LumentixError> {
+        // Verify event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        // Get escrow balance (returns 0 if no escrow key exists)
+        let balance = storage::get_escrow(&env, event_id)?;
+
+        Ok(balance)
     }
 
     /// Get event data by ID.

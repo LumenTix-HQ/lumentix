@@ -189,3 +189,39 @@ impl TicketTransferred {
         );
     }
 }
+
+/// Event emitted when a ticket is marked as used (checked in)
+pub struct TicketUsed;
+
+impl TicketUsed {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, owner: Address, caller: Address) {
+        env.events().publish(
+            (symbol_short!("tktused"),),
+            (ticket_id, event_id, owner, caller),
+        );
+    }
+}
+
+/// Event emitted when a ticket is refunded
+pub struct TicketRefunded;
+
+impl TicketRefunded {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, buyer: Address, refund_amount: i128) {
+        env.events().publish(
+            (symbol_short!("tktrefnd"),),
+            (ticket_id, event_id, buyer, refund_amount),
+        );
+    }
+}
+
+/// Event emitted when escrow funds are released to an organizer
+pub struct EscrowReleased;
+
+impl EscrowReleased {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, amount: i128) {
+        env.events().publish(
+            (symbol_short!("escrwrel"),),
+            (event_id, organizer, amount),
+        );
+    }
+}
