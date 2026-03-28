@@ -2176,3 +2176,401 @@ fn test_change_admin_emits_event() {
     }
     assert!(found, "AdminChanged event not found");
 }
+
+// ============================================================================
+// UPDATE EVENT TESTS
+// ============================================================================
+
+#[test]
+fn test_update_event_draft_success_all_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Original Description"),
+        &String::from_str(&env, "Original Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Update all fields
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1500u64,
+        &2500u64,
+        &150i128,
+        &100u32,
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_update_event_published_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create and publish event
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Try to update published event
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_update_event_cancelled_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create, publish, and cancel event
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.cancel_event(&organizer, &event_id);
+
+    // Try to update cancelled event
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_update_event_completed_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create, publish, and complete event
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    env.ledger().with_mut(|li| li.timestamp = 2001);
+    client.complete_event(&organizer, &event_id);
+
+    // Try to update completed event
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_update_event_unauthorized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let unauthorized = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Try to update as unauthorized user
+    let result = client.try_update_event(
+        &unauthorized,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_update_event_invalid_time_range_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Try to update with invalid time range (start >= end)
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &2500u64, // start after end
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidTimeRange)));
+}
+
+#[test]
+fn test_update_event_empty_name_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Try to update with empty name
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, ""), // Empty name
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::EmptyString)));
+}
+
+#[test]
+fn test_update_event_zero_ticket_price_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Try to update with zero ticket price
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &0i128, // Zero price
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAmount)));
+}
+
+#[test]
+fn test_update_event_reduce_max_tickets_below_sold_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Create a draft event with capacity of 10
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Publish and sell 5 tickets
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Try to update the event - this should fail because event is Published
+    // (only Draft events can be updated)
+    // This demonstrates that the status check happens before capacity check
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &3u32, // Trying to reduce below tickets_sold (5)
+    );
+    // The error is InvalidStatusTransition because Published events can't be updated
+    // The capacity check (max_tickets < tickets_sold) would only apply to Draft events
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_update_event_increase_max_tickets_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event with capacity of 50
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Increase max_tickets to 200
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &200u32,
+    );
+    assert!(result.is_ok());
+
+    // Verify the change
+    let event = client.get_event(&event_id);
+    assert_eq!(event.max_tickets, 200);
+}
+
+#[test]
+fn test_update_event_get_event_returns_updated_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Original Description"),
+        &String::from_str(&env, "Original Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Update all fields
+    client.update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Event Name"),
+        &String::from_str(&env, "New Description"),
+        &String::from_str(&env, "New Location"),
+        &1500u64,
+        &2500u64,
+        &150i128,
+        &100u32,
+    );
+
+    // Verify get_event returns updated values
+    let event = client.get_event(&event_id);
+    assert_eq!(event.name, String::from_str(&env, "New Event Name"));
+    assert_eq!(event.description, String::from_str(&env, "New Description"));
+    assert_eq!(event.location, String::from_str(&env, "New Location"));
+    assert_eq!(event.start_time, 1500u64);
+    assert_eq!(event.end_time, 2500u64);
+    assert_eq!(event.ticket_price, 150i128);
+    assert_eq!(event.max_tickets, 100u32);
+    
+    // Verify unchanged fields
+    assert_eq!(event.id, event_id);
+    assert_eq!(event.organizer, organizer);
+    assert_eq!(event.status, EventStatus::Draft);
+    assert_eq!(event.tickets_sold, 0u32);
+}
