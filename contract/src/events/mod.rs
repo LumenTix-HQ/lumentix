@@ -118,6 +118,18 @@ impl PlatformFeesWithdrawn {
     }
 }
 
+/// Event emitted when admin address is changed
+pub struct AdminChanged;
+
+impl AdminChanged {
+    pub fn emit(env: &Env, caller: Address, old_admin: Address, new_admin: Address) {
+        env.events().publish(
+            (symbol_short!("admchng"),),
+            (caller, old_admin, new_admin),
+        );
+    }
+}
+
 /// Event emitted when an event is updated
 pub struct EventUpdated;
 

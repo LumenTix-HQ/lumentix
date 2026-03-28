@@ -2,9 +2,8 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
-    EventUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketRefunded,
-    TicketTransferred, TicketUsed,
+    AdminChanged, EventCancelled, EventCompleted, EventCreated, EventStatusChanged, EventUpdated,
+    PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketTransferred,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
@@ -781,6 +780,38 @@ impl LumentixContract {
             return Err(LumentixError::NotInitialized);
         }
         Ok(storage::get_admin(&env))
+    }
+
+    /// Change the admin address. Only the current admin can call this.
+    /// Emits AdminChanged event with old and new admin addresses.
+    /// Fails with Unauthorized if caller is not the current admin.
+    /// Fails with InvalidAddress if new_admin is the same as current admin.
+    pub fn change_admin(
+        env: Env,
+        admin: Address,
+        new_admin: Address,
+    ) -> Result<(), LumentixError> {
+        admin.require_auth();
+
+        let current_admin = storage::get_admin(&env);
+
+        // Verify caller is the current admin
+        if current_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Prevent changing to the same address
+        if current_admin == new_admin {
+            return Err(LumentixError::InvalidAddress);
+        }
+
+        let old_admin = current_admin;
+        storage::set_admin(&env, &new_admin);
+
+        // Emit AdminChanged event
+        AdminChanged::emit(&env, admin, old_admin, new_admin);
+
+        Ok(())
     }
 
     /// Check if the contract has been initialized.
