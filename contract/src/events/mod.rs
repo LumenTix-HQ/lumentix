@@ -76,3 +76,45 @@ impl EventCancelled {
         );
     }
 }
+
+/// Event emitted when an event status transitions
+pub struct EventStatusChanged;
+
+impl EventStatusChanged {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        caller: Address,
+        old_status: crate::types::EventStatus,
+        new_status: crate::types::EventStatus,
+    ) {
+        env.events().publish(
+            (symbol_short!("stschng"),),
+            (event_id, caller, old_status, new_status),
+        );
+    }
+}
+
+/// Event emitted when an event is completed
+pub struct EventCompleted;
+
+impl EventCompleted {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, tickets_sold: u32) {
+        env.events().publish(
+            (symbol_short!("evtcmpl"),),
+            (event_id, organizer, tickets_sold),
+        );
+    }
+}
+
+/// Event emitted when platform fees are withdrawn
+pub struct PlatformFeesWithdrawn;
+
+impl PlatformFeesWithdrawn {
+    pub fn emit(env: &Env, admin: Address, amount: i128) {
+        env.events().publish(
+            (symbol_short!("feewith"),),
+            (admin, amount),
+        );
+    }
+}

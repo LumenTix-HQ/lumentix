@@ -1,12 +1,10 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::error::LumentixError;
-use crate::events::EventCancelled;
+use crate::events::{EventCancelled, EventCreated, PlatformFeeUpdated, EventStatusChanged, EventCompleted, PlatformFeesWithdrawn};
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
 use crate::validation;
-use crate::events::EventCreated;
-use crate::events::PlatformFeeUpdated;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 #[contract]
@@ -117,8 +115,13 @@ impl LumentixContract {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
-        event.status = new_status;
+        // Store old status before updating
+        let old_status = event.status.clone();
+        event.status = new_status.clone();
         storage::set_event(&env, event_id, &event);
+
+        // Emit EventStatusChanged event
+        EventStatusChanged::emit(&env, event_id, caller, old_status, new_status);
 
         Ok(())
     }
@@ -300,6 +303,9 @@ impl LumentixContract {
         event.status = EventStatus::Completed;
         storage::set_event(&env, event_id, &event);
 
+        // Emit EventCompleted event
+        EventCompleted::emit(&env, event_id, organizer, event.tickets_sold);
+
         Ok(())
     }
 
@@ -335,6 +341,15 @@ impl LumentixContract {
     /// Get event data by ID.
     pub fn get_event(env: Env, event_id: u64) -> Result<Event, LumentixError> {
         storage::get_event(&env, event_id)
+    }
+
+    /// Get the status of an event by ID.
+    /// Returns only the EventStatus without fetching the entire Event struct.
+    /// Returns LumentixError::EventNotFound if the event doesn't exist.
+    /// No auth required.
+    pub fn get_event_status(env: Env, event_id: u64) -> Result<EventStatus, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+        Ok(event.status)
     }
 
     /// Get the total number of events created on the platform.
@@ -489,6 +504,9 @@ impl LumentixContract {
         }
 
         storage::clear_platform_balance(&env);
+
+        // Emit PlatformFeesWithdrawn event
+        PlatformFeesWithdrawn::emit(&env, admin, balance);
 
         Ok(balance)
     }
