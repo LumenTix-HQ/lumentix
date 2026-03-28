@@ -132,7 +132,14 @@ impl TicketPurchased {
     ) {
         env.events().publish(
             (symbol_short!("tktbuy"),),
-            (ticket_id, event_id, buyer, amount, platform_fee, organizer_amount),
+            (
+                ticket_id,
+                event_id,
+                buyer,
+                amount,
+                platform_fee,
+                organizer_amount,
+            ),
         );
     }
 }

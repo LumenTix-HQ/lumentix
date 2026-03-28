@@ -189,7 +189,15 @@ impl LumentixContract {
 
         storage::set_ticket(&env, ticket_id, &ticket);
 
-        TicketPurchased::emit(&env, ticket_id, event_id, ticket.owner, amount, platform_fee, escrow_amount);
+        TicketPurchased::emit(
+            &env,
+            ticket_id,
+            event_id,
+            ticket.owner,
+            amount,
+            platform_fee,
+            escrow_amount,
+        );
 
         Ok(ticket_id)
     }
