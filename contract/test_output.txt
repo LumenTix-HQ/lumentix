@@ -1,0 +1,58 @@
+﻿cargo :    Compiling 
+lumentix_sponsors v0.1.0 (
+C:\Users\EMMA\Desktop\lume
+ntix1\contract)
+At line:1 char:1
++ cargo test --lib 
+test_get_active_events 
+2>&1 | Out-File -FilePath 
+tes ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo        
+      : NotSpecified: (   
+    Compiling lu...ntix   
+ 1\contract):String) [    
+], RemoteException
+    + FullyQualifiedError 
+   Id : NativeCommandErr  
+  or
+ 
+error: this file contains 
+an unclosed delimiter
+  --> 
+src\events\mod.rs:70:3
+   |
+30 | impl EventCreated {
+   |                   - 
+unclosed delimiter
+...
+40 |     ) {
+   |       - unclosed 
+delimiter
+41 |         
+env.events().publish(
+   |                      
+       - unclosed 
+delimiter
+...
+55 | impl 
+PlatformFeeUpdated {
+   |                      
+   - unclosed delimiter
+56 |     pub fn emit(env: 
+&Env, admin: Address, 
+old_fee_bps: u32, 
+new_fee_bps: u32) {
+   |                      
+                          
+                          
+      - unclosed delimiter
+...
+70 | }
+   |  ^
+
+error: could not compile 
+`lumentix_sponsors` (lib 
+test) due to 1 previous 
+error

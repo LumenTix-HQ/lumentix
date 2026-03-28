@@ -49,6 +49,10 @@ impl EventCreated {
                 start_time,
                 end_time,
             ),
+        );
+    }
+}
+
 /// Event emitted when platform fee is updated
 pub struct PlatformFeeUpdated;
 
@@ -57,6 +61,10 @@ impl PlatformFeeUpdated {
         env.events().publish(
             (symbol_short!("feeupdate"),),
             (admin, old_fee_bps, new_fee_bps),
+        );
+    }
+}
+
 /// Event emitted when an organizer cancels a published event.
 pub struct EventCancelled;
 

@@ -1412,3 +1412,92 @@ fn test_event_with_platform_fee_end_to_end() {
     let fees = client.withdraw_platform_fees(&admin);
     assert_eq!(fees, 20);
 }
+
+// ============================================================================
+// EVENT FILTERING TESTS
+// ============================================================================
+
+#[test]
+fn test_get_active_events_only_published() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // 1. Create 3 events: 1 Published, 1 Draft, 1 Published
+    
+    // Event 1: Published
+    let event_id_1 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Published Event 1"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    client.update_event_status(&event_id_1, &EventStatus::Published, &organizer);
+
+    // Event 2: Draft
+    let _event_id_2 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Event 3: Published
+    let event_id_3 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Published Event 2"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    client.update_event_status(&event_id_3, &EventStatus::Published, &organizer);
+
+    // 2. Call get_active_events
+    let active_events = client.get_active_events();
+
+    // 3. Verify exactly 2 events returned and they are the correct ones
+    assert_eq!(active_events.len(), 2);
+    assert_eq!(active_events.get(0).unwrap().id, event_id_1);
+    assert_eq!(active_events.get(1).unwrap().id, event_id_3);
+    
+    for event in active_events.iter() {
+        assert_eq!(event.status, EventStatus::Published);
+    }
+}
+
+#[test]
+fn test_get_active_events_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create only draft events
+    client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let active_events = client.get_active_events();
+    assert_eq!(active_events.len(), 0);
+}

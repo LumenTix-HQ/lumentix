@@ -7,7 +7,6 @@ use crate::types::{Event, EventStatus, Ticket};
 use crate::validation;
 use crate::events::EventCreated;
 use crate::events::PlatformFeeUpdated;
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
 #[contract]
@@ -355,6 +354,27 @@ impl LumentixContract {
         }
 
         events
+    }
+
+    /// Get all active (published) events.
+    /// Iterates through all events and filters for status == Published.
+    /// Returns an empty vector if no published events exist.
+    /// No auth required.
+    pub fn get_active_events(env: Env) -> Vec<Event> {
+        let mut active_events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.status == EventStatus::Published {
+                    active_events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        active_events
     }
 
     /// Get ticket data by ID.
