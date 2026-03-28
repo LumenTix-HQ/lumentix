@@ -28,6 +28,7 @@ impl CheckInEvent {
 pub struct EventCreated;
 
 impl EventCreated {
+    #[allow(clippy::too_many_arguments)]
     pub fn emit(
         env: &Env,
         event_id: u64,
@@ -112,9 +113,7 @@ pub struct PlatformFeesWithdrawn;
 
 impl PlatformFeesWithdrawn {
     pub fn emit(env: &Env, admin: Address, amount: i128) {
-        env.events().publish(
-            (symbol_short!("feewith"),),
-            (admin, amount),
-        );
+        env.events()
+            .publish((symbol_short!("feewith"),), (admin, amount));
     }
 }

@@ -1,7 +1,10 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::error::LumentixError;
-use crate::events::{EventCancelled, EventCreated, PlatformFeeUpdated, EventStatusChanged, EventCompleted, PlatformFeesWithdrawn};
+use crate::events::{
+    EventCancelled, EventCompleted, EventCreated, EventStatusChanged, PlatformFeeUpdated,
+    PlatformFeesWithdrawn,
+};
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
 use crate::validation;
@@ -424,6 +427,23 @@ impl LumentixContract {
         }
 
         Ok(tickets)
+    }
+
+    pub fn get_tickets_by_buyer(env: Env, buyer: Address) -> Vec<Ticket> {
+        let mut tickets = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.owner == buyer {
+                    tickets.push_back(ticket);
+                }
+            }
+            ticket_id += 1;
+        }
+
+        tickets
     }
 
     /// Extend the TTL of an event. Only the organizer can call this.

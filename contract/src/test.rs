@@ -1466,7 +1466,7 @@ fn test_get_active_events_only_published() {
     let organizer = Address::generate(&env);
 
     // 1. Create 3 events: 1 Published, 1 Draft, 1 Published
-    
+
     // Event 1: Published
     let event_id_1 = client.create_event(
         &organizer,
@@ -1512,7 +1512,7 @@ fn test_get_active_events_only_published() {
     assert_eq!(active_events.len(), 2);
     assert_eq!(active_events.get(0).unwrap().id, event_id_1);
     assert_eq!(active_events.get(1).unwrap().id, event_id_3);
-    
+
     for event in active_events.iter() {
         assert_eq!(event.status, EventStatus::Published);
     }
