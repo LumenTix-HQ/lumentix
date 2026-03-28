@@ -338,6 +338,13 @@ impl LumentixContract {
         storage::get_event(&env, event_id)
     }
 
+    /// Get the total number of events created on the platform.
+    /// Returns 0 if no events have been created yet.
+    /// No auth required.
+    pub fn get_total_events(env: Env) -> u64 {
+        storage::get_next_event_id(&env).saturating_sub(1)
+    }
+
     /// Get all events created by a specific organizer.
     /// Returns an empty vector if no events are found for the organizer.
     pub fn get_events_by_organizer(env: Env, organizer: Address) -> Vec<Event> {

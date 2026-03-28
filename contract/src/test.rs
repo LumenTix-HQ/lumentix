@@ -486,6 +486,46 @@ fn test_get_event() {
 }
 
 #[test]
+fn test_get_total_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Initial total events should be 0
+    assert_eq!(client.get_total_events(), 0);
+
+    // Create first event
+    client.create_event(
+        &organizer,
+        &String::from_str(&env, "Event 1"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    assert_eq!(client.get_total_events(), 1);
+
+    // Create second event
+    client.create_event(
+        &organizer,
+        &String::from_str(&env, "Event 2"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &3000u64,
+        &4000u64,
+        &200i128,
+        &100u32,
+    );
+
+    assert_eq!(client.get_total_events(), 2);
+}
+
+#[test]
 fn test_get_event_not_found() {
     let env = Env::default();
     env.mock_all_auths();
