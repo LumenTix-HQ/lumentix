@@ -117,3 +117,22 @@ impl PlatformFeesWithdrawn {
             .publish((symbol_short!("feewith"),), (admin, amount));
     }
 }
+
+pub struct TicketPurchased;
+
+impl TicketPurchased {
+    pub fn emit(
+        env: &Env,
+        ticket_id: u64,
+        event_id: u64,
+        buyer: Address,
+        amount: i128,
+        platform_fee: i128,
+        organizer_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("tktbuy"),),
+            (ticket_id, event_id, buyer, amount, platform_fee, organizer_amount),
+        );
+    }
+}

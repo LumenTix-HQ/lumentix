@@ -3,7 +3,7 @@
 use crate::error::LumentixError;
 use crate::events::{
     EventCancelled, EventCompleted, EventCreated, EventStatusChanged, PlatformFeeUpdated,
-    PlatformFeesWithdrawn,
+    PlatformFeesWithdrawn, TicketPurchased,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
@@ -188,6 +188,8 @@ impl LumentixContract {
         };
 
         storage::set_ticket(&env, ticket_id, &ticket);
+
+        TicketPurchased::emit(&env, ticket_id, event_id, ticket.owner, amount, platform_fee, escrow_amount);
 
         Ok(ticket_id)
     }
