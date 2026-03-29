@@ -649,6 +649,16 @@ impl LumentixContract {
         storage::get_ticket(&env, ticket_id)
     }
 
+    /// Check whether a ticket is currently valid for entry.
+    /// A ticket is valid only when it exists, has not been used or refunded,
+    /// and its event is still published.
+    pub fn get_ticket_validity(env: Env, ticket_id: u64) -> Result<bool, LumentixError> {
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        let event = storage::get_event(&env, ticket.event_id)?;
+
+        Ok(!ticket.used && !ticket.refunded && event.status == EventStatus::Published)
+    }
+
     /// Get all tickets sold for a given event.
     /// Returns EventNotFound if the event does not exist.
     pub fn get_tickets_by_event(env: Env, event_id: u64) -> Result<Vec<Ticket>, LumentixError> {
