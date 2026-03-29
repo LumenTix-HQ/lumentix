@@ -791,6 +791,19 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Get the configured payment token address.
+    pub fn get_token(env: Env) -> Result<Address, LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        if !env.storage().instance().has(&"TOKEN") {
+            return Err(LumentixError::InvalidAddress);
+        }
+
+        Ok(storage::get_token(&env))
+    }
+
     /// Get the contract admin address.
     /// Returns the admin address if the contract is initialized.
     /// No auth required - provides transparency.

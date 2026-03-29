@@ -817,6 +817,43 @@ fn test_set_token_not_initialized() {
 }
 
 #[test]
+fn test_get_token_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let token = Address::generate(&env);
+
+    client.set_token(&admin, &token);
+
+    let stored_token = client.get_token();
+    assert_eq!(stored_token, token);
+}
+
+#[test]
+fn test_get_token_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(LumentixContract, ());
+    let client = LumentixContractClient::new(&env, &contract_id);
+
+    let result = client.try_get_token();
+    assert_eq!(result, Err(Ok(LumentixError::NotInitialized)));
+}
+
+#[test]
+fn test_get_token_missing_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+
+    let result = client.try_get_token();
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAddress)));
+}
+
+#[test]
 fn test_platform_fee_calculation_precision() {
     let env = Env::default();
     env.mock_all_auths();
