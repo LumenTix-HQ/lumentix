@@ -1,11 +1,11 @@
 use crate::error::LumentixError;
 use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
 use crate::types::EventStatus;
+use soroban_sdk::xdr;
 use soroban_sdk::{
     symbol_short, testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env,
     String, TryIntoVal, Val, Vec,
 };
-use soroban_sdk::xdr;
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
     let contract_id = env.register(LumentixContract, ());
@@ -272,6 +272,118 @@ fn test_purchase_ticket_draft_status_fails() {
     // Try to purchase ticket for draft event
     let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
     assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_batch_purchase_tickets_success_validates_ticket_properties() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    env.ledger().with_mut(|li| li.timestamp = 7777);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&buyer, &event_id, &3u32, &300i128);
+
+    assert_eq!(ticket_ids.len(), 3);
+    assert_eq!(ticket_ids.get(0).unwrap(), 1);
+    assert_eq!(ticket_ids.get(1).unwrap(), 2);
+    assert_eq!(ticket_ids.get(2).unwrap(), 3);
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.tickets_sold, 3);
+
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert_eq!(ticket.event_id, event_id);
+        assert_eq!(ticket.owner, buyer);
+        assert_eq!(ticket.purchase_time, 7777);
+        assert!(!ticket.used);
+        assert!(!ticket.refunded);
+    }
+}
+
+#[test]
+fn test_batch_purchase_tickets_collects_fee_and_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    client.set_platform_fee(&admin, &500u32);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&buyer, &event_id, &4u32, &400i128);
+
+    assert_eq!(ticket_ids.len(), 4);
+    assert_eq!(client.get_platform_balance(), 20i128);
+    assert_eq!(client.get_escrow_balance(&event_id), 380i128);
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_invalid_quantity_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let zero_quantity = client.try_batch_purchase_tickets(&buyer, &event_id, &0u32, &0i128);
+    assert_eq!(zero_quantity, Err(Ok(LumentixError::InvalidAmount)));
+
+    let over_batch_limit = client.try_batch_purchase_tickets(&buyer, &event_id, &11u32, &1100i128);
+    assert_eq!(over_batch_limit, Err(Ok(LumentixError::CapacityExceeded)));
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_when_capacity_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Limited Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &2u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let result = client.try_batch_purchase_tickets(&buyer, &event_id, &3u32, &300i128);
+    assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_invalid_payment_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let underpayment = client.try_batch_purchase_tickets(&buyer, &event_id, &2u32, &150i128);
+    assert_eq!(underpayment, Err(Ok(LumentixError::InsufficientFunds)));
+
+    let overpayment = client.try_batch_purchase_tickets(&buyer, &event_id, &2u32, &250i128);
+    assert_eq!(overpayment, Err(Ok(LumentixError::InsufficientFunds)));
 }
 
 // ============================================================================
@@ -1572,9 +1684,9 @@ fn test_event_created_emitted_with_correct_fields() {
     // Get all events emitted
     let events = env.events().all();
     assert_eq!(events.events().len(), 1);
-    
+
     let xdr_event = events.events().get(0).unwrap();
-    
+
     // Verify topic
     if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
         assert_eq!(body.topics.len(), 1);
@@ -1583,7 +1695,7 @@ fn test_event_created_emitted_with_correct_fields() {
         } else {
             panic!("Expected Symbol topic");
         }
-        
+
         // Verify data is a tuple with correct structure
         if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
             assert_eq!(data_vec.len(), 7); // (event_id, organizer, name, price, max_tickets, start, end)
@@ -1612,7 +1724,7 @@ fn test_ticket_purchased_emitted_with_correct_amounts() {
     // Get all events - should have EventCreated, EventStatusChanged, TicketPurchased
     let events = env.events().all();
     assert!(events.events().len() >= 1);
-    
+
     // Find TicketPurchased event by topic
     let mut found = false;
     for xdr_event in events.events() {
@@ -2010,7 +2122,10 @@ fn test_change_admin_success() {
 
     // Verify old admin can no longer call admin functions
     let old_admin_set_fee_result = client.try_set_platform_fee(&admin, &300u32);
-    assert_eq!(old_admin_set_fee_result, Err(Ok(LumentixError::Unauthorized)));
+    assert_eq!(
+        old_admin_set_fee_result,
+        Err(Ok(LumentixError::Unauthorized))
+    );
 }
 
 #[test]
@@ -2567,7 +2682,7 @@ fn test_update_event_get_event_returns_updated_values() {
     assert_eq!(event.end_time, 2500u64);
     assert_eq!(event.ticket_price, 150i128);
     assert_eq!(event.max_tickets, 100u32);
-    
+
     // Verify unchanged fields
     assert_eq!(event.id, event_id);
     assert_eq!(event.organizer, organizer);
