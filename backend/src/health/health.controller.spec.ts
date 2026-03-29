@@ -1,44 +1,67 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HealthCheckService, TypeOrmHealthIndicator } from '@nestjs/terminus';
-import { StellarService } from '../stellar/stellar.service';
+import {
+  HealthCheckResult,
+  HealthCheckService,
+  TypeOrmHealthIndicator,
+} from '@nestjs/terminus';
 import { HealthController } from './health.controller';
+import { StellarHealthIndicator } from './stellar.health';
 
 describe('HealthController', () => {
   let controller: HealthController;
+  let healthCheckService: { check: jest.Mock };
+  let dbIndicator: { pingCheck: jest.Mock };
+  let stellarIndicator: { isHealthy: jest.Mock };
 
   beforeEach(async () => {
+    healthCheckService = {
+      check: jest.fn((checks: (() => Promise<unknown>)[]) =>
+        Promise.all(checks.map((c) => c())).then((results) => {
+          const details = results.reduce<Record<string, unknown>>(
+            (acc, result) => ({
+              ...acc,
+              ...(result as Record<string, unknown>),
+            }),
+            {},
+          );
+
+          return {
+            status: 'ok',
+            info: details,
+            error: {},
+            details,
+          } as HealthCheckResult;
+        }),
+      ),
+    };
+
+    dbIndicator = {
+      pingCheck: jest.fn().mockResolvedValue({ database: { status: 'up' } }),
+    };
+
+    stellarIndicator = {
+      isHealthy: jest.fn().mockResolvedValue({
+        stellar: { status: 'up', network: 'testnet' },
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [HealthController],
       providers: [
-        HealthCheckService,
+        {
+          provide: HealthCheckService,
+          useValue: healthCheckService,
+        },
         {
           provide: TypeOrmHealthIndicator,
-          useValue: {
-            pingCheck: jest
-              .fn()
-              .mockResolvedValue({ database: { status: 'up' } }),
-          },
+          useValue: dbIndicator,
         },
         {
-          provide: StellarService,
-          useValue: {
-            checkConnectivity: jest.fn().mockResolvedValue(undefined),
-          },
+          provide: StellarHealthIndicator,
+          useValue: stellarIndicator,
         },
       ],
-    })
-      .overrideProvider(HealthCheckService)
-      .useValue({
-        check: jest.fn((checks: (() => Promise<unknown>)[]) =>
-          Promise.all(checks.map((c) => c())).then((results) => ({
-            status: 'ok',
-            info: Object.assign({}, ...results),
-            error: {},
-            details: Object.assign({}, ...results),
-          })),
-        ),
-      })
-      .compile();
+    }).compile();
 
     controller = module.get<HealthController>(HealthController);
   });
@@ -53,5 +76,10 @@ describe('HealthController', () => {
     expect(result.info).toBeDefined();
     expect(result.info?.database?.status).toBe('up');
     expect(result.info?.stellar?.status).toBe('up');
+    expect(result.info?.stellar?.network).toBe('testnet');
+    expect(dbIndicator.pingCheck).toHaveBeenCalledWith('database', {
+      timeout: 3000,
+    });
+    expect(stellarIndicator.isHealthy).toHaveBeenCalledWith('stellar');
   });
 });
