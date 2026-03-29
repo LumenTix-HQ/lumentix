@@ -2,8 +2,9 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AdminChanged, EventCancelled, EventCompleted, EventCreated, EventStatusChanged, EventUpdated,
-    PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketTransferred,
+    AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
+    EventUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketRefunded,
+    TicketTransferred, TicketUsed,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket};
@@ -772,6 +773,24 @@ impl LumentixContract {
         Ok(balance)
     }
 
+    /// Set the payment token address. Only the admin can call this.
+    pub fn set_token(env: Env, admin: Address, token: Address) -> Result<(), LumentixError> {
+        admin.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        storage::set_token(&env, &token);
+
+        Ok(())
+    }
+
     /// Get the contract admin address.
     /// Returns the admin address if the contract is initialized.
     /// No auth required - provides transparency.
@@ -786,11 +805,7 @@ impl LumentixContract {
     /// Emits AdminChanged event with old and new admin addresses.
     /// Fails with Unauthorized if caller is not the current admin.
     /// Fails with InvalidAddress if new_admin is the same as current admin.
-    pub fn change_admin(
-        env: Env,
-        admin: Address,
-        new_admin: Address,
-    ) -> Result<(), LumentixError> {
+    pub fn change_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), LumentixError> {
         admin.require_auth();
 
         let current_admin = storage::get_admin(&env);

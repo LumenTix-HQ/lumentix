@@ -1,11 +1,11 @@
 use crate::error::LumentixError;
 use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
 use crate::types::EventStatus;
+use soroban_sdk::xdr;
 use soroban_sdk::{
     symbol_short, testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env,
     String, TryIntoVal, Val, Vec,
 };
-use soroban_sdk::xdr;
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
     let contract_id = env.register(LumentixContract, ());
@@ -768,6 +768,52 @@ fn test_withdraw_platform_fees_no_balance() {
     // Try to withdraw with no fees collected
     let result = client.try_withdraw_platform_fees(&admin);
     assert_eq!(result, Err(Ok(LumentixError::NoPlatformFees)));
+}
+
+#[test]
+fn test_set_token_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(LumentixContract, ());
+    let client = LumentixContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    client.initialize(&admin);
+
+    let result = client.try_set_token(&admin, &token);
+    assert!(result.is_ok());
+
+    let stored_token = env.as_contract(&contract_id, || crate::storage::get_token(&env));
+    assert_eq!(stored_token, token);
+}
+
+#[test]
+fn test_set_token_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let unauthorized = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let result = client.try_set_token(&unauthorized, &token);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_set_token_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(LumentixContract, ());
+    let client = LumentixContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let result = client.try_set_token(&admin, &token);
+    assert_eq!(result, Err(Ok(LumentixError::NotInitialized)));
 }
 
 #[test]
@@ -1572,9 +1618,9 @@ fn test_event_created_emitted_with_correct_fields() {
     // Get all events emitted
     let events = env.events().all();
     assert_eq!(events.events().len(), 1);
-    
+
     let xdr_event = events.events().get(0).unwrap();
-    
+
     // Verify topic
     if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
         assert_eq!(body.topics.len(), 1);
@@ -1583,7 +1629,7 @@ fn test_event_created_emitted_with_correct_fields() {
         } else {
             panic!("Expected Symbol topic");
         }
-        
+
         // Verify data is a tuple with correct structure
         if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
             assert_eq!(data_vec.len(), 7); // (event_id, organizer, name, price, max_tickets, start, end)
@@ -1612,7 +1658,7 @@ fn test_ticket_purchased_emitted_with_correct_amounts() {
     // Get all events - should have EventCreated, EventStatusChanged, TicketPurchased
     let events = env.events().all();
     assert!(events.events().len() >= 1);
-    
+
     // Find TicketPurchased event by topic
     let mut found = false;
     for xdr_event in events.events() {
@@ -2010,7 +2056,10 @@ fn test_change_admin_success() {
 
     // Verify old admin can no longer call admin functions
     let old_admin_set_fee_result = client.try_set_platform_fee(&admin, &300u32);
-    assert_eq!(old_admin_set_fee_result, Err(Ok(LumentixError::Unauthorized)));
+    assert_eq!(
+        old_admin_set_fee_result,
+        Err(Ok(LumentixError::Unauthorized))
+    );
 }
 
 #[test]
@@ -2567,7 +2616,7 @@ fn test_update_event_get_event_returns_updated_values() {
     assert_eq!(event.end_time, 2500u64);
     assert_eq!(event.ticket_price, 150i128);
     assert_eq!(event.max_tickets, 100u32);
-    
+
     // Verify unchanged fields
     assert_eq!(event.id, event_id);
     assert_eq!(event.organizer, organizer);
