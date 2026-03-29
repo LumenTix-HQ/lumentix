@@ -1,12 +1,20 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ContributionsService } from './contributions.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { SponsorContribution, ContributionStatus } from './entities/sponsor-contribution.entity';
+import {
+  SponsorContribution,
+  ContributionStatus,
+} from './entities/sponsor-contribution.entity';
 import { SponsorTier } from './entities/sponsor-tier.entity';
 import { StellarService } from 'src/stellar';
 import { AuditService } from 'src/audit/audit.service';
 import { ConfigService } from '@nestjs/config';
-import { BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { User } from 'src/users/entities/user.entity';
 import { Event } from 'src/events/entities/event.entity';
 import { NotificationService } from 'src/notifications/notification.service';
@@ -45,7 +53,10 @@ describe('ContributionsService', () => {
         },
         {
           provide: StellarService,
-          useValue: { getTransaction: jest.fn() },
+          useValue: {
+            getTransaction: jest.fn(),
+            extractAndValidateMemo: jest.fn(),
+          },
         },
         {
           provide: AuditService,
@@ -83,7 +94,9 @@ describe('ContributionsService', () => {
   describe('createIntent', () => {
     it('should throw NotFoundException if tier missing', async () => {
       tierRepo.findOne.mockResolvedValue(null);
-      await expect(service.createIntent('t1', 's1')).rejects.toThrow(NotFoundException);
+      await expect(service.createIntent('t1', 's1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw ConflictException if capacity full', async () => {
@@ -93,18 +106,34 @@ describe('ContributionsService', () => {
         andWhere: jest.fn().mockReturnThis(),
         getCount: jest.fn().mockResolvedValue(1),
       });
-      await expect(service.createIntent('t1', 's1')).rejects.toThrow(ConflictException);
+      await expect(service.createIntent('t1', 's1')).rejects.toThrow(
+        ConflictException,
+      );
     });
 
     it('should create intent successfully', async () => {
-      tierRepo.findOne.mockResolvedValue({ id: 't1', maxSponsors: 5, price: 100 });
+      tierRepo.findOne.mockResolvedValue({
+        id: 't1',
+        maxSponsors: 5,
+        price: 100,
+      });
       contributionRepo.createQueryBuilder.mockReturnValue({
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         getCount: jest.fn().mockResolvedValue(0),
       });
-      contributionRepo.create.mockReturnValue({ id: 'c1', amount: 100, tierId: 't1', sponsorId: 's1' });
-      contributionRepo.save.mockResolvedValue({ id: 'c1', amount: 100, tierId: 't1', sponsorId: 's1' });
+      contributionRepo.create.mockReturnValue({
+        id: 'c1',
+        amount: 100,
+        tierId: 't1',
+        sponsorId: 's1',
+      });
+      contributionRepo.save.mockResolvedValue({
+        id: 'c1',
+        amount: 100,
+        tierId: 't1',
+        sponsorId: 's1',
+      });
 
       const result = await service.createIntent('t1', 's1');
       expect(result).toEqual({
@@ -121,18 +150,30 @@ describe('ContributionsService', () => {
   describe('confirmContribution', () => {
     it('should throw BadRequestException if transaction not found', async () => {
       stellarService.getTransaction.mockRejectedValue(new Error('err'));
-      await expect(service.confirmContribution('tx1')).rejects.toThrow(BadRequestException);
+      await expect(service.confirmContribution('tx1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw BadRequestException if memo missing', async () => {
       stellarService.getTransaction.mockResolvedValue({});
-      await expect(service.confirmContribution('tx1')).rejects.toThrow(BadRequestException);
+      stellarService.extractAndValidateMemo.mockImplementation(() => {
+        throw new BadRequestException(
+          'Transaction is missing a memo. Cannot correlate with a payment or contribution intent.',
+        );
+      });
+      await expect(service.confirmContribution('tx1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw NotFoundException if contribution not pending', async () => {
       stellarService.getTransaction.mockResolvedValue({ memo: 'c1' });
+      stellarService.extractAndValidateMemo.mockReturnValue('c1');
       contributionRepo.findOne.mockResolvedValue(null);
-      await expect(service.confirmContribution('tx1')).rejects.toThrow(NotFoundException);
+      await expect(service.confirmContribution('tx1')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should confirm contribution if all valid', async () => {
@@ -140,6 +181,7 @@ describe('ContributionsService', () => {
         memo: 'c1',
         _links: { operations: { href: 'http://ops' } },
       });
+      stellarService.extractAndValidateMemo.mockReturnValue('c1');
       contributionRepo.findOne.mockResolvedValue({
         id: 'c1',
         amount: 100,
@@ -148,7 +190,16 @@ describe('ContributionsService', () => {
       (global as any).fetch.mockResolvedValue({
         ok: true,
         json: async () => ({
-          _embedded: { records: [{ type: 'payment', to: 'ESCROW_WALLET', amount: '100.00', asset_type: 'native' }] },
+          _embedded: {
+            records: [
+              {
+                type: 'payment',
+                to: 'ESCROW_WALLET',
+                amount: '100.00',
+                asset_type: 'native',
+              },
+            ],
+          },
         }),
       });
 
@@ -157,7 +208,7 @@ describe('ContributionsService', () => {
         andWhere: jest.fn().mockReturnThis(),
         getCount: jest.fn().mockResolvedValue(0),
       });
-      
+
       contributionRepo.save.mockImplementation(async (x: any) => x);
 
       const result = await service.confirmContribution('tx1');

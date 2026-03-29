@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Horizon,
@@ -70,6 +75,21 @@ export class StellarService implements OnModuleDestroy {
   ): Promise<Horizon.ServerApi.TransactionRecord> {
     this.logger.debug(`getTransaction: ${hash}`);
     return this.server.transactions().transaction(hash).call();
+  }
+
+  extractAndValidateMemo(
+    txRecord: Horizon.ServerApi.TransactionRecord,
+  ): string {
+    const memo =
+      typeof txRecord.memo === 'string' ? txRecord.memo.trim() : undefined;
+
+    if (!memo) {
+      throw new BadRequestException(
+        'Transaction is missing a memo. Cannot correlate with a payment or contribution intent.',
+      );
+    }
+
+    return memo;
   }
 
   streamPayments(callback: PaymentCallback): () => void {
@@ -247,7 +267,8 @@ export class StellarService implements OnModuleDestroy {
       if (cursor) query = query.cursor(cursor);
       return await query.call();
     } catch (err: unknown) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
+      const status = (err as { response?: { status?: number } })?.response
+        ?.status;
       if (status === 404) {
         return { records: [] };
       }

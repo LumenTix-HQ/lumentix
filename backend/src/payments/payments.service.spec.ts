@@ -47,6 +47,7 @@ describe('PaymentsService', () => {
 
     mockStellarService = {
       getTransaction: jest.fn(),
+      extractAndValidateMemo: jest.fn(),
     };
 
     mockAuditService = {
@@ -70,7 +71,10 @@ describe('PaymentsService', () => {
         { provide: StellarService, useValue: mockStellarService },
         { provide: AuditService, useValue: mockAuditService },
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: NotificationService, useValue: { queuePaymentFailedEmail: jest.fn() } },
+        {
+          provide: NotificationService,
+          useValue: { queuePaymentFailedEmail: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -315,13 +319,18 @@ describe('PaymentsService', () => {
         memo: null,
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockImplementation(() => {
+        throw new BadRequestException(
+          'Transaction is missing a memo. Cannot correlate with a payment or contribution intent.',
+        );
+      });
 
       await expect(
         service.confirmPayment('tx-hash', 'user-123'),
       ).rejects.toThrow(BadRequestException);
       await expect(
         service.confirmPayment('tx-hash', 'user-123'),
-      ).rejects.toThrow('missing a memo');
+      ).rejects.toThrow('payment or contribution intent');
     });
 
     it('should throw NotFoundException when no pending payment for memo', async () => {
@@ -330,6 +339,7 @@ describe('PaymentsService', () => {
         memo: 'pay-unknown',
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockReturnValue('pay-unknown');
 
       mockPaymentsRepo.findOne.mockResolvedValue(null);
 
@@ -349,6 +359,7 @@ describe('PaymentsService', () => {
         memo: 'pay-123',
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockReturnValue('pay-123');
 
       mockPaymentsRepo.findOne.mockResolvedValue({
         id: 'pay-123',
@@ -381,6 +392,7 @@ describe('PaymentsService', () => {
         memo: 'pay-123',
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockReturnValue('pay-123');
 
       mockPaymentsRepo.findOne.mockResolvedValue({
         id: 'pay-123',
@@ -408,6 +420,7 @@ describe('PaymentsService', () => {
         memo: 'pay-123',
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockReturnValue('pay-123');
 
       mockPaymentsRepo.findOne.mockResolvedValue({
         id: 'pay-123',
@@ -441,6 +454,7 @@ describe('PaymentsService', () => {
         memo: 'pay-123',
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockReturnValue('pay-123');
 
       mockPaymentsRepo.findOne.mockResolvedValue({
         id: 'pay-123',
@@ -485,6 +499,7 @@ describe('PaymentsService', () => {
         memo: 'pay-123',
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockReturnValue('pay-123');
 
       mockPaymentsRepo.findOne.mockResolvedValue({
         id: 'pay-123',
@@ -529,6 +544,7 @@ describe('PaymentsService', () => {
         memo: 'pay-123',
         _links: { operations: { href: 'http://example.com' } },
       });
+      mockStellarService.extractAndValidateMemo.mockReturnValue('pay-123');
 
       mockPaymentsRepo.findOne.mockResolvedValue({
         id: 'pay-123',

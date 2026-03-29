@@ -122,14 +122,7 @@ export class ContributionsService {
     }
 
     // 2. Correlate via memo
-    const memoValue: string | undefined =
-      typeof txRecord.memo === 'string' ? txRecord.memo : undefined;
-
-    if (!memoValue) {
-      throw new BadRequestException(
-        'Transaction memo is missing. Cannot correlate with a contribution intent.',
-      );
-    }
+    const memoValue = this.stellarService.extractAndValidateMemo(txRecord);
 
     const contribution = await this.contributionRepository.findOne({
       where: { id: memoValue, status: ContributionStatus.PENDING },
@@ -234,7 +227,9 @@ export class ContributionsService {
   ): Promise<void> {
     const [sponsor, event] = await Promise.all([
       this.userRepository.findOne({ where: { id: contribution.sponsorId } }),
-      this.eventRepository.findOne({ where: { id: contribution.tier.eventId } }),
+      this.eventRepository.findOne({
+        where: { id: contribution.tier.eventId },
+      }),
     ]);
 
     if (!sponsor || !event) return;

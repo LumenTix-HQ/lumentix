@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Horizon, Keypair } from '@stellar/stellar-sdk';
 import { StellarService } from './stellar.service';
@@ -92,6 +93,60 @@ describe('StellarService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('extractAndValidateMemo', () => {
+    it('returns a string memo', () => {
+      expect(
+        service.extractAndValidateMemo({
+          memo: 'payment-123',
+        } as Horizon.ServerApi.TransactionRecord),
+      ).toBe('payment-123');
+    });
+
+    it('trims and returns a string memo', () => {
+      expect(
+        service.extractAndValidateMemo({
+          memo: '  contribution-456  ',
+        } as Horizon.ServerApi.TransactionRecord),
+      ).toBe('contribution-456');
+    });
+
+    it('throws when memo is undefined', () => {
+      expect(() =>
+        service.extractAndValidateMemo({
+          memo: undefined,
+        } as Horizon.ServerApi.TransactionRecord),
+      ).toThrow(
+        new BadRequestException(
+          'Transaction is missing a memo. Cannot correlate with a payment or contribution intent.',
+        ),
+      );
+    });
+
+    it('throws when memo is empty', () => {
+      expect(() =>
+        service.extractAndValidateMemo({
+          memo: '   ',
+        } as Horizon.ServerApi.TransactionRecord),
+      ).toThrow(
+        new BadRequestException(
+          'Transaction is missing a memo. Cannot correlate with a payment or contribution intent.',
+        ),
+      );
+    });
+
+    it('throws when memo is not a string', () => {
+      expect(() =>
+        service.extractAndValidateMemo({
+          memo: 123,
+        } as unknown as Horizon.ServerApi.TransactionRecord),
+      ).toThrow(
+        new BadRequestException(
+          'Transaction is missing a memo. Cannot correlate with a payment or contribution intent.',
+        ),
+      );
+    });
   });
 
   // ── releaseEscrowFunds ─────────────────────────────────────────────────

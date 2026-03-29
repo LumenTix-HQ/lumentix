@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -207,14 +206,7 @@ export class PaymentsService {
       );
     }
 
-    const memoValue: string | undefined =
-      typeof txRecord.memo === 'string' ? txRecord.memo : undefined;
-
-    if (!memoValue) {
-      throw new BadRequestException(
-        'Transaction is missing a memo. Cannot correlate with a payment intent.',
-      );
-    }
+    const memoValue = this.stellarService.extractAndValidateMemo(txRecord);
 
     const payment = await this.paymentsRepository.findOne({
       where: { id: memoValue, status: PaymentStatus.PENDING },
