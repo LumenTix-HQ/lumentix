@@ -274,6 +274,118 @@ fn test_purchase_ticket_draft_status_fails() {
     assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
 }
 
+#[test]
+fn test_batch_purchase_tickets_success_validates_ticket_properties() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    env.ledger().with_mut(|li| li.timestamp = 7777);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&buyer, &event_id, &3u32, &300i128);
+
+    assert_eq!(ticket_ids.len(), 3);
+    assert_eq!(ticket_ids.get(0).unwrap(), 1);
+    assert_eq!(ticket_ids.get(1).unwrap(), 2);
+    assert_eq!(ticket_ids.get(2).unwrap(), 3);
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.tickets_sold, 3);
+
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert_eq!(ticket.event_id, event_id);
+        assert_eq!(ticket.owner, buyer);
+        assert_eq!(ticket.purchase_time, 7777);
+        assert!(!ticket.used);
+        assert!(!ticket.refunded);
+    }
+}
+
+#[test]
+fn test_batch_purchase_tickets_collects_fee_and_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    client.set_platform_fee(&admin, &500u32);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&buyer, &event_id, &4u32, &400i128);
+
+    assert_eq!(ticket_ids.len(), 4);
+    assert_eq!(client.get_platform_balance(), 20i128);
+    assert_eq!(client.get_escrow_balance(&event_id), 380i128);
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_invalid_quantity_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let zero_quantity = client.try_batch_purchase_tickets(&buyer, &event_id, &0u32, &0i128);
+    assert_eq!(zero_quantity, Err(Ok(LumentixError::InvalidAmount)));
+
+    let over_batch_limit = client.try_batch_purchase_tickets(&buyer, &event_id, &11u32, &1100i128);
+    assert_eq!(over_batch_limit, Err(Ok(LumentixError::CapacityExceeded)));
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_when_capacity_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Limited Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &2u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let result = client.try_batch_purchase_tickets(&buyer, &event_id, &3u32, &300i128);
+    assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_invalid_payment_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let underpayment = client.try_batch_purchase_tickets(&buyer, &event_id, &2u32, &150i128);
+    assert_eq!(underpayment, Err(Ok(LumentixError::InsufficientFunds)));
+
+    let overpayment = client.try_batch_purchase_tickets(&buyer, &event_id, &2u32, &250i128);
+    assert_eq!(overpayment, Err(Ok(LumentixError::InsufficientFunds)));
+}
+
 // ============================================================================
 // TICKET USAGE TESTS
 // ============================================================================
