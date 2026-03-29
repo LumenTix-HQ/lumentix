@@ -274,6 +274,118 @@ fn test_purchase_ticket_draft_status_fails() {
     assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
 }
 
+#[test]
+fn test_batch_purchase_tickets_success_validates_ticket_properties() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    env.ledger().with_mut(|li| li.timestamp = 7777);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&buyer, &event_id, &3u32, &300i128);
+
+    assert_eq!(ticket_ids.len(), 3);
+    assert_eq!(ticket_ids.get(0).unwrap(), 1);
+    assert_eq!(ticket_ids.get(1).unwrap(), 2);
+    assert_eq!(ticket_ids.get(2).unwrap(), 3);
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.tickets_sold, 3);
+
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert_eq!(ticket.event_id, event_id);
+        assert_eq!(ticket.owner, buyer);
+        assert_eq!(ticket.purchase_time, 7777);
+        assert!(!ticket.used);
+        assert!(!ticket.refunded);
+    }
+}
+
+#[test]
+fn test_batch_purchase_tickets_collects_fee_and_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    client.set_platform_fee(&admin, &500u32);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&buyer, &event_id, &4u32, &400i128);
+
+    assert_eq!(ticket_ids.len(), 4);
+    assert_eq!(client.get_platform_balance(), 20i128);
+    assert_eq!(client.get_escrow_balance(&event_id), 380i128);
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_invalid_quantity_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let zero_quantity = client.try_batch_purchase_tickets(&buyer, &event_id, &0u32, &0i128);
+    assert_eq!(zero_quantity, Err(Ok(LumentixError::InvalidAmount)));
+
+    let over_batch_limit = client.try_batch_purchase_tickets(&buyer, &event_id, &11u32, &1100i128);
+    assert_eq!(over_batch_limit, Err(Ok(LumentixError::CapacityExceeded)));
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_when_capacity_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Limited Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &2u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let result = client.try_batch_purchase_tickets(&buyer, &event_id, &3u32, &300i128);
+    assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
+}
+
+#[test]
+fn test_batch_purchase_tickets_rejects_invalid_payment_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let underpayment = client.try_batch_purchase_tickets(&buyer, &event_id, &2u32, &150i128);
+    assert_eq!(underpayment, Err(Ok(LumentixError::InsufficientFunds)));
+
+    let overpayment = client.try_batch_purchase_tickets(&buyer, &event_id, &2u32, &250i128);
+    assert_eq!(overpayment, Err(Ok(LumentixError::InsufficientFunds)));
+}
+
 // ============================================================================
 // TICKET USAGE TESTS
 // ============================================================================
@@ -1627,6 +1739,174 @@ fn test_get_active_events_empty() {
 
     let active_events = client.get_active_events();
     assert_eq!(active_events.len(), 0);
+}
+
+#[test]
+fn test_get_events_by_organizer_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let events = client.get_events_by_organizer(&organizer);
+    assert_eq!(events.len(), 0);
+}
+
+#[test]
+fn test_get_events_by_organizer_single_event_full_field_validation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Organizer Event"),
+        &String::from_str(&env, "Organizer Description"),
+        &String::from_str(&env, "Organizer Location"),
+        &1234u64,
+        &5678u64,
+        &250i128,
+        &75u32,
+    );
+
+    let events = client.get_events_by_organizer(&organizer);
+    assert_eq!(events.len(), 1);
+
+    let event = events.get(0).unwrap();
+    assert_eq!(event.id, event_id);
+    assert_eq!(event.organizer, organizer);
+    assert_eq!(event.name, String::from_str(&env, "Organizer Event"));
+    assert_eq!(
+        event.description,
+        String::from_str(&env, "Organizer Description")
+    );
+    assert_eq!(event.location, String::from_str(&env, "Organizer Location"));
+    assert_eq!(event.start_time, 1234u64);
+    assert_eq!(event.end_time, 5678u64);
+    assert_eq!(event.ticket_price, 250i128);
+    assert_eq!(event.max_tickets, 75u32);
+    assert_eq!(event.tickets_sold, 0u32);
+    assert_eq!(event.status, EventStatus::Draft);
+}
+
+#[test]
+fn test_get_events_by_organizer_multiple_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id_1 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Event 1"),
+        &String::from_str(&env, "Description 1"),
+        &String::from_str(&env, "Location 1"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let event_id_2 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Event 2"),
+        &String::from_str(&env, "Description 2"),
+        &String::from_str(&env, "Location 2"),
+        &3000u64,
+        &4000u64,
+        &200i128,
+        &25u32,
+    );
+
+    let events = client.get_events_by_organizer(&organizer);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events.get(0).unwrap().id, event_id_1);
+    assert_eq!(events.get(1).unwrap().id, event_id_2);
+}
+
+#[test]
+fn test_get_events_by_organizer_isolates_other_organizers() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer_a = Address::generate(&env);
+    let organizer_b = Address::generate(&env);
+
+    let event_id_a1 = client.create_event(
+        &organizer_a,
+        &String::from_str(&env, "A Event 1"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let event_id_b1 = client.create_event(
+        &organizer_b,
+        &String::from_str(&env, "B Event 1"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &3000u64,
+        &4000u64,
+        &150i128,
+        &40u32,
+    );
+
+    let event_id_a2 = client.create_event(
+        &organizer_a,
+        &String::from_str(&env, "A Event 2"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &5000u64,
+        &6000u64,
+        &200i128,
+        &30u32,
+    );
+
+    let organizer_a_events = client.get_events_by_organizer(&organizer_a);
+    assert_eq!(organizer_a_events.len(), 2);
+    assert_eq!(organizer_a_events.get(0).unwrap().id, event_id_a1);
+    assert_eq!(organizer_a_events.get(1).unwrap().id, event_id_a2);
+
+    let organizer_b_events = client.get_events_by_organizer(&organizer_b);
+    assert_eq!(organizer_b_events.len(), 1);
+    assert_eq!(organizer_b_events.get(0).unwrap().id, event_id_b1);
+}
+
+#[test]
+fn test_get_events_by_organizer_includes_cancelled_events() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let draft_event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let cancelled_event_id = create_and_publish_event(&env, &client, &organizer);
+    client.cancel_event(&organizer, &cancelled_event_id);
+
+    let events = client.get_events_by_organizer(&organizer);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events.get(0).unwrap().id, draft_event_id);
+    assert_eq!(events.get(1).unwrap().id, cancelled_event_id);
+    assert_eq!(events.get(1).unwrap().status, EventStatus::Cancelled);
 }
 
 // ============================================================================
