@@ -16,8 +16,12 @@ export class AuditService {
 
   constructor(
     @InjectRepository(AuditLog)
-    private readonly auditLogRepository: Repository<AuditLog>,
+    public readonly auditLogRepository: Repository<AuditLog>,
   ) {}
+
+  getQueryBuilder() {
+    return this.auditLogRepository.createQueryBuilder('audit');
+  }
 
   async log(entry: AuditLogEntry): Promise<AuditLog> {
     const record = this.auditLogRepository.create({

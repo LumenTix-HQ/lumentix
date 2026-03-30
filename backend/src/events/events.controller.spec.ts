@@ -3,6 +3,7 @@ import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { EventsController } from './events.controller';
 import { EventsService } from './events.service';
+import { TicketsService } from '../tickets/tickets.service';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Event, EventStatus } from './entities/event.entity';
 import { Role } from '../common/decorators/roles.decorator';
@@ -19,6 +20,9 @@ const mockEvent: Event = {
   currency: 'USD',
   organizerId: 'organizer-1',
   status: EventStatus.DRAFT,
+  maxAttendees: 100,
+  escrowPublicKey: null,
+  escrowSecretEncrypted: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -29,6 +33,11 @@ const mockEventsService = {
   deleteEvent: jest.fn(),
   getEventById: jest.fn(),
   listEvents: jest.fn(),
+};
+
+const mockTicketsService = {
+  findByEvent: jest.fn(),
+  getEventTicketSummary: jest.fn(),
 };
 
 function createMockExecutionContext(
@@ -62,6 +71,7 @@ describe('EventsController', () => {
       controllers: [EventsController],
       providers: [
         { provide: EventsService, useValue: mockEventsService },
+        { provide: TicketsService, useValue: mockTicketsService },
         RolesGuard,
         Reflector,
       ],
@@ -115,7 +125,8 @@ describe('EventsController', () => {
     const updated = { ...mockEvent, title: 'Updated' };
     mockEventsService.updateEvent.mockResolvedValue(updated);
 
-    const result = await controller.update('uuid-1', { title: 'Updated' });
+    const mockReq = { user: { id: 'caller-uuid' } } as any;
+    const result = await controller.update('uuid-1', { title: 'Updated' }, mockReq);
     expect(result.title).toBe('Updated');
   });
 });

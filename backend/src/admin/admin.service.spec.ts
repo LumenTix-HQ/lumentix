@@ -5,6 +5,7 @@ import { AdminService } from './admin.service';
 import { Event, EventStatus } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/enums/user-role.enum';
+import { UserStatus } from '../users/enums/user-status.enum';
 
 const makeEvent = (status: EventStatus): Event =>
   ({
@@ -18,7 +19,7 @@ const makeUser = (): User =>
     id: 'user-uuid',
     email: 'user@example.com',
     role: UserRole.EVENT_GOER,
-    status: 'active',
+    status: UserStatus.ACTIVE,
   }) as unknown as User;
 
 describe('AdminService', () => {
@@ -104,11 +105,11 @@ describe('AdminService', () => {
       userRepo.save.mockImplementation(async (u: User) => u);
 
       const result = await service.blockUser('user-uuid');
-      expect((result as any).status).toBe('blocked');
+      expect(result.status).toBe(UserStatus.BLOCKED);
     });
 
     it('throws if user is already blocked', async () => {
-      const user = { ...makeUser(), status: 'blocked' };
+      const user = { ...makeUser(), status: UserStatus.BLOCKED };
       userRepo.findOne.mockResolvedValue(user);
       await expect(service.blockUser('user-uuid')).rejects.toThrow(
         BadRequestException,

@@ -1,0 +1,20 @@
+[package]
+name = "lumentix_sponsors"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { version = "25.1.1", features = ["alloc"] }
+
+[dev-dependencies]
+soroban-sdk = { version = "25.1.1", features = ["alloc", "testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+lto = true
+codegen-units = 1

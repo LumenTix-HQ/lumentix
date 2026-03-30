@@ -1,0 +1,294 @@
+
+> lumentix-backend@0.0.1 test
+> jest
+
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStarting Stellar payment stream listener[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mOpening Stellar payment stream...[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStellar payment stream connected[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStarting Stellar payment stream listener[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mOpening Stellar payment stream...[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStellar payment stream connected[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStarting Stellar payment stream listener[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mOpening Stellar payment stream...[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStellar payment stream connected[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStellar payment stream shut down[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStarting Stellar payment stream listener[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mOpening Stellar payment stream...[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStellar payment stream connected[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStellar payment stream shut down[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:39 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mReceived payment: type=payment id=op-1[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:39 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mPayment confirmed via stream: txHash=tx-abc[39m
+[31m[Nest] 25572  - [39m26/03/2026, 10:30:40 [31m  ERROR[39m [38;5;3m[StellarWebhookService] [39m[31mUnexpected error confirming payment for tx tx-hash-abc[39m
+[31m[Nest] 25572  - [39m26/03/2026, 10:30:40 [31m  ERROR[39m [38;5;3m[StellarWebhookService] [39mError: unexpected db error
+    at Object.<anonymous> (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\src\stellar\stellar-webhook.service.spec.ts:128:9)
+    at Promise.then.completed (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:298:28)
+    at new Promise (<anonymous>)
+    at callAsyncCircusFn (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:231:10)
+    at _callCircusTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:316:40)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at _runTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:252:3)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:126:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at run (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:71:3)
+    at runAndTransformResultsToJestFormat (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapterInit.js:122:21)
+    at jestAdapter (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapter.js:79:19)
+    at runTestInternal [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:367:16[90m)[39m
+    at runTest [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:444:34[90m)[39m
+    at Object.worker [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\testWorker.js:106:12[90m)[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mReceived payment: type=payment id=op-1[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mNo pending payment or sponsor found for tx: tx-sponsor[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mReceived payment: type=set_options id=op-1[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mSkipping non-payment operation type: set_options[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mReceived payment: type=payment id=op-1[39m
+[33m[Nest] 25572  - [39m26/03/2026, 10:30:40 [33m   WARN[39m [38;5;3m[StellarWebhookService] [39m[33mPayment record has no transaction_hash, skipping[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mReceived payment: type=payment id=op-1[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mNo pending payment or sponsor found for tx: tx-hash-abc[39m
+[31m[Nest] 25572  - [39m26/03/2026, 10:30:40 [31m  ERROR[39m [38;5;3m[StellarWebhookService] [39m[31mFailed to open stream, scheduling reconnect[39m
+[31m[Nest] 25572  - [39m26/03/2026, 10:30:40 [31m  ERROR[39m [38;5;3m[StellarWebhookService] [39mError: connection refused
+    at Object.<anonymous> (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\src\stellar\stellar-webhook.service.spec.ts:167:17)
+    at C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-mock[24m\build\index.js:397:39
+    at Object.<anonymous> (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-mock[24m\build\index.js:404:13)
+    at Object.mockConstructor [as streamPayments] (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-mock[24m\build\index.js:148:19)
+    at StellarWebhookService.connect (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\src\stellar\stellar-webhook.service.ts:53:47)
+    at StellarWebhookService.onModuleInit (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\src\stellar\stellar-webhook.service.ts:35:10)
+    at Object.<anonymous> (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\src\stellar\stellar-webhook.service.spec.ts:171:15)
+    at Promise.then.completed (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:298:28)
+    at new Promise (<anonymous>)
+    at callAsyncCircusFn (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:231:10)
+    at _callCircusTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:316:40)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at _runTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:252:3)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:126:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at run (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:71:3)
+    at runAndTransformResultsToJestFormat (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapterInit.js:122:21)
+    at jestAdapter (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapter.js:79:19)
+    at runTestInternal [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:367:16[90m)[39m
+    at runTest [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:444:34[90m)[39m
+    at Object.worker [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\testWorker.js:106:12[90m)[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mReceived payment: type=payment id=op-1[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mNo pending payment or sponsor found for tx: tx-hash-abc[39m
+[95m[Nest] 25572  - [39m26/03/2026, 10:30:40 [95m  DEBUG[39m [38;5;3m[StellarWebhookService] [39m[95mReceived payment: type=create_account id=op-1[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:40 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mPayment confirmed via stream: txHash=tx-create[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:40 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStarting Stellar payment stream listener[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:40 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mOpening Stellar payment stream...[39m
+[33m[Nest] 25572  - [39m26/03/2026, 10:30:40 [33m   WARN[39m [38;5;3m[StellarWebhookService] [39m[33mReconnecting Stellar stream in 5000ms...[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:45 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mOpening Stellar payment stream...[39m
+[32m[Nest] 25572  - [39m26/03/2026, 10:30:45 [32m    LOG[39m [38;5;3m[StellarWebhookService] [39m[32mStellar payment stream connected[39m
+FAIL src/stellar/stellar-webhook.service.spec.ts (25.794 s)
+  ● StellarWebhookService › handlePayment › falls through to sponsor confirmation when no payment matches
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: "tx-sponsor"
+
+    Number of calls: 0
+
+    [0m [90m 104 |[39m       )[33m;[39m
+     [90m 105 |[39m
+    [31m[1m>[22m[39m[90m 106 |[39m       expect(mockSponsorsService[33m.[39mconfirmSponsorPayment)[33m.[39mtoHaveBeenCalledWith(
+     [90m     |[39m                                                         [31m[1m^[22m[39m
+     [90m 107 |[39m         [32m'tx-sponsor'[39m[33m,[39m
+     [90m 108 |[39m       )[33m;[39m
+     [90m 109 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (stellar/stellar-webhook.service.spec.ts:106:57)
+
+PASS src/exchange-rates/exchange-rates.controller.spec.ts (26.727 s)
+PASS src/wallet/wallet.controller.spec.ts
+PASS src/payments/payments.controller.spec.ts
+PASS src/tickets/tickets.service.spec.ts (6.56 s)
+FAIL src/sponsors/sponsors.controller.spec.ts (34.763 s)
+  ● SponsorsController › should be defined
+
+    Nest can't resolve dependencies of the SponsorsController (SponsorsService, ?). Please make sure that the argument ContributionsService at index [1] is available in the RootTestModule context.
+
+    Potential solutions:
+    - Is RootTestModule a valid NestJS module?
+    - If ContributionsService is a provider, is it part of the current RootTestModule?
+    - If ContributionsService is exported from a separate @Module, is that module imported within RootTestModule?
+      @Module({
+        imports: [ /* the Module containing ContributionsService */ ]
+      })
+
+    For more common dependency resolution issues, see: https://docs.nestjs.com/faq/common-errors
+
+    [0m [90m  8 |[39m
+     [90m  9 |[39m   beforeEach([36masync[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 10 |[39m     [36mconst[39m module[33m:[39m [33mTestingModule[39m [33m=[39m [36mawait[39m [33mTest[39m[33m.[39mcreateTestingModule({
+     [90m    |[39m                                   [31m[1m^[22m[39m
+     [90m 11 |[39m       controllers[33m:[39m [[33mSponsorsController[39m][33m,[39m
+     [90m 12 |[39m       providers[33m:[39m [
+     [90m 13 |[39m         { provide[33m:[39m [33mSponsorsService[39m[33m,[39m useValue[33m:[39m {} }[33m,[39m[0m
+
+      at TestingInjector.lookupComponentInParentModules (../node_modules/@nestjs/core/injector/injector.js:290:19)
+      at TestingInjector.resolveComponentWrapper (../node_modules/@nestjs/testing/testing-injector.js:19:45)
+      at resolveParam (../node_modules/@nestjs/core/injector/injector.js:140:38)
+          at async Promise.all (index 1)
+      at TestingInjector.resolveConstructorParams (../node_modules/@nestjs/core/injector/injector.js:169:27)
+      at TestingInjector.loadInstance (../node_modules/@nestjs/core/injector/injector.js:75:13)
+      at TestingInjector.loadController (../node_modules/@nestjs/core/injector/injector.js:94:9)
+      at ../node_modules/@nestjs/core/injector/instance-loader.js:68:13
+          at async Promise.all (index 0)
+      at TestingInstanceLoader.createInstancesOfControllers (../node_modules/@nestjs/core/injector/instance-loader.js:67:9)
+      at ../node_modules/@nestjs/core/injector/instance-loader.js:42:13
+          at async Promise.all (index 1)
+      at TestingInstanceLoader.createInstances (../node_modules/@nestjs/core/injector/instance-loader.js:39:9)
+      at TestingInstanceLoader.createInstancesOfDependencies (../node_modules/@nestjs/core/injector/instance-loader.js:22:13)
+      at TestingInstanceLoader.createInstancesOfDependencies (../node_modules/@nestjs/testing/testing-instance-loader.js:9:9)
+      at TestingModuleBuilder.createInstancesOfDependencies (../node_modules/@nestjs/testing/testing-module.builder.js:118:9)
+      at TestingModuleBuilder.compile (../node_modules/@nestjs/testing/testing-module.builder.js:74:9)
+      at Object.<anonymous> (sponsors/sponsors.controller.spec.ts:10:35)
+
+PASS src/audit/audit.controller.spec.ts
+PASS src/payments/payments.service.spec.ts
+PASS src/audit/audit.service.spec.ts
+PASS src/users/users.service.spec.ts
+PASS src/events/events.controller.spec.ts
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:52 [31m  ERROR[39m [38;5;3m[RefundService] [39m[31mRefund failed: paymentId=pay-1 user=user-1 reason=Invalid payment amount "0" — partial or zero refunds are rejected.[39m
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:52 [31m  ERROR[39m [38;5;3m[RefundService] [39m[31mRefund failed: paymentId=pay-1 user=user-1 reason=Invalid payment amount "-5" — partial or zero refunds are rejected.[39m
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:52 [31m  ERROR[39m [38;5;3m[RefundService] [39m[31mRefund failed: paymentId=pay-1 user=user-1 reason=User "user-1" has no Stellar public key on file. Cannot send refund.[39m
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:52 [31m  ERROR[39m [38;5;3m[RefundService] [39m[31mRefund failed: paymentId=pay-1 user=user-1 reason=Horizon timeout[39m
+PASS src/payments/refunds/refund.service.spec.ts
+PASS src/health/health.controller.spec.ts
+PASS src/admin/admin.service.spec.ts
+PASS src/sponsors/contributions.service.spec.ts
+PASS src/wallet/wallet.service.spec.ts
+PASS src/transactions/transactions.controller.spec.ts
+PASS src/users/users.controller.spec.ts
+PASS src/events/state/event-state.service.spec.ts
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:57 [31m  ERROR[39m [38;5;3m[EscrowService] [39m[31mFailed to fund escrow account GESCROW_PUBLIC_KEY_ABC123[39m
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:57 [31m  ERROR[39m [38;5;3m[EscrowService] [39mError: Network error
+    at Object.<anonymous> (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\src\payments\services\escrow.service.spec.ts:183:9)
+    at Promise.then.completed (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:298:28)
+    at new Promise (<anonymous>)
+    at callAsyncCircusFn (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:231:10)
+    at _callCircusTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:316:40)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at _runTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:252:3)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:126:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at run (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:71:3)
+    at runAndTransformResultsToJestFormat (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapterInit.js:122:21)
+    at jestAdapter (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapter.js:79:19)
+    at runTestInternal [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:367:16[90m)[39m
+    at runTest [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:444:34[90m)[39m
+    at Object.worker [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\testWorker.js:106:12[90m)[39m
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:57 [31m  ERROR[39m [38;5;3m[EscrowService] [39m[31mFailed to release escrow for event event-uuid-1[39m
+[31m[Nest] 26528  - [39m26/03/2026, 10:30:57 [31m  ERROR[39m [38;5;3m[EscrowService] [39mError: Network error
+    at Object.<anonymous> (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\src\payments\services\escrow.service.spec.ts:275:9)
+    at Promise.then.completed (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:298:28)
+    at new Promise (<anonymous>)
+    at callAsyncCircusFn (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\utils.js:231:10)
+    at _callCircusTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:316:40)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at _runTest (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:252:3)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:126:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at _runTestsForDescribeBlock (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:121:9)
+    at run (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\run.js:71:3)
+    at runAndTransformResultsToJestFormat (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapterInit.js:122:21)
+    at jestAdapter (C:\Users\DELL\blockchain_development\integrations\lumentix\backend\node_modules\[4mjest-circus[24m\build\legacy-code-todo-rewrite\jestAdapter.js:79:19)
+    at runTestInternal [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:367:16[90m)[39m
+    at runTest [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\runTest.js:444:34[90m)[39m
+    at Object.worker [90m(c:\Users\DELL\blockchain_development\integrations\lumentix\backend\[39mnode_modules\[4mjest-runner[24m\build\testWorker.js:106:12[90m)[39m
+PASS src/payments/services/escrow.service.spec.ts
+PASS src/auth/auth.controller.spec.ts
+PASS src/currencies/currencies.controller.spec.ts
+PASS src/currencies/currencies.service.spec.ts
+PASS src/auth/auth.service.spec.ts
+PASS src/events/events.service.spec.ts
+PASS src/sponsors/sponsors.service.spec.ts
+PASS src/transactions/transactions.service.spec.ts
+PASS src/app.controller.spec.ts
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[95m[Nest] 14768  - [39m26/03/2026, 10:31:00 [95m  DEBUG[39m [38;5;3m[StellarService] [39m[95mreleaseEscrowFunds: destination=GAYK3HXRT5EOJEXX2CM53CTRJQRVOE6ZXWZV4NHGRNYXFS7SPHHCJBZN[39m
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[95m[Nest] 14768  - [39m26/03/2026, 10:31:00 [95m  DEBUG[39m [38;5;3m[StellarService] [39m[95mreleaseEscrowFunds: destination=GAYK3HXRT5EOJEXX2CM53CTRJQRVOE6ZXWZV4NHGRNYXFS7SPHHCJBZN[39m
+PASS src/stellar/stellar.service.spec.ts
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[95m[Nest] 14768  - [39m26/03/2026, 10:31:00 [95m  DEBUG[39m [38;5;3m[StellarService] [39m[95mreleaseEscrowFunds: destination=GAYK3HXRT5EOJEXX2CM53CTRJQRVOE6ZXWZV4NHGRNYXFS7SPHHCJBZN[39m
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[95m[Nest] 14768  - [39m26/03/2026, 10:31:00 [95m  DEBUG[39m [38;5;3m[StellarService] [39m[95mreleaseEscrowFunds: destination=GAYK3HXRT5EOJEXX2CM53CTRJQRVOE6ZXWZV4NHGRNYXFS7SPHHCJBZN[39m
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[95m[Nest] 14768  - [39m26/03/2026, 10:31:00 [95m  DEBUG[39m [38;5;3m[StellarService] [39m[95mreleaseEscrowFunds: destination=GAYK3HXRT5EOJEXX2CM53CTRJQRVOE6ZXWZV4NHGRNYXFS7SPHHCJBZN[39m
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[95m[Nest] 14768  - [39m26/03/2026, 10:31:00 [95m  DEBUG[39m [38;5;3m[StellarService] [39m[95mreleaseEscrowFunds: destination=GAYK3HXRT5EOJEXX2CM53CTRJQRVOE6ZXWZV4NHGRNYXFS7SPHHCJBZN[39m
+[32m[Nest] 14768  - [39m26/03/2026, 10:31:00 [32m    LOG[39m [38;5;3m[StellarService] [39m[32mStellarService initialised → https://horizon-testnet.stellar.org[39m
+[95m[Nest] 14768  - [39m26/03/2026, 10:31:00 [95m  DEBUG[39m [38;5;3m[StellarService] [39m[95mreleaseEscrowFunds: destination=GAYK3HXRT5EOJEXX2CM53CTRJQRVOE6ZXWZV4NHGRNYXFS7SPHHCJBZN[39m
+PASS src/exchange-rates/exchange-rates.service.spec.ts
+PASS src/payments/services/encryption.util.spec.ts
+PASS src/admin/roles.guard.spec.ts
+
+Summary of all failing tests
+FAIL stellar/stellar-webhook.service.spec.ts (25.794 s)
+  ● StellarWebhookService › handlePayment › falls through to sponsor confirmation when no payment matches
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: "tx-sponsor"
+
+    Number of calls: 0
+
+    [0m [90m 104 |[39m       )[33m;[39m
+     [90m 105 |[39m
+    [31m[1m>[22m[39m[90m 106 |[39m       expect(mockSponsorsService[33m.[39mconfirmSponsorPayment)[33m.[39mtoHaveBeenCalledWith(
+     [90m     |[39m                                                         [31m[1m^[22m[39m
+     [90m 107 |[39m         [32m'tx-sponsor'[39m[33m,[39m
+     [90m 108 |[39m       )[33m;[39m
+     [90m 109 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (stellar/stellar-webhook.service.spec.ts:106:57)
+
+FAIL sponsors/sponsors.controller.spec.ts (34.763 s)
+  ● SponsorsController › should be defined
+
+    Nest can't resolve dependencies of the SponsorsController (SponsorsService, ?). Please make sure that the argument ContributionsService at index [1] is available in the RootTestModule context.
+
+    Potential solutions:
+    - Is RootTestModule a valid NestJS module?
+    - If ContributionsService is a provider, is it part of the current RootTestModule?
+    - If ContributionsService is exported from a separate @Module, is that module imported within RootTestModule?
+      @Module({
+        imports: [ /* the Module containing ContributionsService */ ]
+      })
+
+    For more common dependency resolution issues, see: https://docs.nestjs.com/faq/common-errors
+
+    [0m [90m  8 |[39m
+     [90m  9 |[39m   beforeEach([36masync[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 10 |[39m     [36mconst[39m module[33m:[39m [33mTestingModule[39m [33m=[39m [36mawait[39m [33mTest[39m[33m.[39mcreateTestingModule({
+     [90m    |[39m                                   [31m[1m^[22m[39m
+     [90m 11 |[39m       controllers[33m:[39m [[33mSponsorsController[39m][33m,[39m
+     [90m 12 |[39m       providers[33m:[39m [
+     [90m 13 |[39m         { provide[33m:[39m [33mSponsorsService[39m[33m,[39m useValue[33m:[39m {} }[33m,[39m[0m
+
+      at TestingInjector.lookupComponentInParentModules (../node_modules/@nestjs/core/injector/injector.js:290:19)
+      at TestingInjector.resolveComponentWrapper (../node_modules/@nestjs/testing/testing-injector.js:19:45)
+      at resolveParam (../node_modules/@nestjs/core/injector/injector.js:140:38)
+          at async Promise.all (index 1)
+      at TestingInjector.resolveConstructorParams (../node_modules/@nestjs/core/injector/injector.js:169:27)
+      at TestingInjector.loadInstance (../node_modules/@nestjs/core/injector/injector.js:75:13)
+      at TestingInjector.loadController (../node_modules/@nestjs/core/injector/injector.js:94:9)
+      at ../node_modules/@nestjs/core/injector/instance-loader.js:68:13
+          at async Promise.all (index 0)
+      at TestingInstanceLoader.createInstancesOfControllers (../node_modules/@nestjs/core/injector/instance-loader.js:67:9)
+      at ../node_modules/@nestjs/core/injector/instance-loader.js:42:13
+          at async Promise.all (index 1)
+      at TestingInstanceLoader.createInstances (../node_modules/@nestjs/core/injector/instance-loader.js:39:9)
+      at TestingInstanceLoader.createInstancesOfDependencies (../node_modules/@nestjs/core/injector/instance-loader.js:22:13)
+      at TestingInstanceLoader.createInstancesOfDependencies (../node_modules/@nestjs/testing/testing-instance-loader.js:9:9)
+      at TestingModuleBuilder.createInstancesOfDependencies (../node_modules/@nestjs/testing/testing-module.builder.js:118:9)
+      at TestingModuleBuilder.compile (../node_modules/@nestjs/testing/testing-module.builder.js:74:9)
+      at Object.<anonymous> (sponsors/sponsors.controller.spec.ts:10:35)
+
+
+Test Suites: 2 failed, 30 passed, 32 total
+Tests:       2 failed, 155 passed, 157 total
+Snapshots:   0 total
+Time:        49.861 s, estimated 54 s
+Ran all test suites.

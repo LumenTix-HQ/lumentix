@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { EscrowService } from './escrow.service';
 import { encrypt } from './encryption.util';
 import { AuditService } from 'src/audit/audit.service';
+import { AuditAction } from 'src/audit/entities/audit-log.entity';
 import { Event, EventStatus } from 'src/events/entities/event.entity';
 import { StellarService } from 'src/stellar';
 
@@ -33,6 +34,7 @@ function makeEvent(overrides: Partial<Event> = {}): Event {
     currency: 'XLM',
     organizerId: 'org-uuid-1',
     status: EventStatus.PUBLISHED,
+    maxAttendees: null,
     escrowPublicKey: null,
     escrowSecretEncrypted: null,
     createdAt: new Date(),
@@ -107,7 +109,7 @@ describe('EscrowService', () => {
       ],
     }).compile();
 
-    service = module.get<EscrowService>(EscrowService);
+    service = (module as any).get(EscrowService);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -186,7 +188,7 @@ describe('EscrowService', () => {
       );
     });
 
-    it('logs an audit entry on success', async () => {
+    it('logs an audit entry with ESCROW_CREATED action on success', async () => {
       const event = makeEvent({ status: EventStatus.PUBLISHED });
       const qb = makeQbMock(event);
       eventRepository.createQueryBuilder.mockReturnValue(qb);
@@ -194,7 +196,10 @@ describe('EscrowService', () => {
       await service.createEscrow('event-uuid-1');
 
       expect(auditService.log).toHaveBeenCalledWith(
-        expect.objectContaining({ resourceId: 'event-uuid-1' }),
+        expect.objectContaining({
+          action: AuditAction.ESCROW_CREATED,
+          resourceId: 'event-uuid-1',
+        }),
       );
     });
   });

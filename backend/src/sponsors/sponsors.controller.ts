@@ -12,6 +12,12 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { SponsorsService } from './sponsors.service';
 import { ContributionsService } from './contributions.service';
 import { CreateSponsorTierDto } from './dto/create-sponsor-tier.dto';
@@ -20,10 +26,12 @@ import { ContributionIntentDto } from './dto/contribution-intent.dto';
 import { ConfirmContributionDto } from './dto/confirm-contribution.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 
+@ApiTags('Sponsors')
 @Controller('events/:eventId/tiers')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class SponsorsController {
   constructor(
     private readonly sponsorsService: SponsorsService,
@@ -34,6 +42,10 @@ export class SponsorsController {
 
   @Post()
   @Roles(Role.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create sponsor tier', description: 'Organizer-only. Creates a new sponsorship tier for an event.' })
+  @ApiResponse({ status: 201, description: 'Tier created' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   create(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @Body() dto: CreateSponsorTierDto,
@@ -43,12 +55,18 @@ export class SponsorsController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'List sponsor tiers', description: 'Public. Shows available sponsorship tiers for an event.' })
+  @ApiResponse({ status: 200, description: 'List of tiers' })
   list(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.sponsorsService.listTiers(eventId);
   }
 
   @Put(':id')
   @Roles(Role.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update sponsor tier', description: 'Organizer-only. Updates tier details.' })
+  @ApiResponse({ status: 200, description: 'Tier updated' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSponsorTierDto,
@@ -59,7 +77,11 @@ export class SponsorsController {
 
   @Delete(':id')
   @Roles(Role.ORGANIZER)
+  @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete sponsor tier', description: 'Organizer-only. Removes a tier if no contributions exist.' })
+  @ApiResponse({ status: 204, description: 'Tier deleted' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   delete(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
@@ -69,12 +91,12 @@ export class SponsorsController {
 
   // ── Contribution flow (sponsor) ───────────────────────────────────────────
 
-  /**
-   * POST /events/:eventId/tiers/contribute/intent
-   * Sponsor selects a tier and receives the escrow wallet + amount to pay.
-   */
   @Post('contribute/intent')
   @Roles(Role.SPONSOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create contribution intent', description: 'Sponsor selects a tier and receives the escrow wallet.' })
+  @ApiResponse({ status: 201, description: 'Intent created' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   createIntent(
     @Body() dto: ContributionIntentDto,
     @Req() req: AuthenticatedRequest,
@@ -82,12 +104,12 @@ export class SponsorsController {
     return this.contributionsService.createIntent(dto.tierId, req.user.id);
   }
 
-  /**
-   * POST /events/:eventId/tiers/contribute/confirm
-   * Sponsor submits the on-chain transaction hash after broadcasting.
-   */
   @Post('contribute/confirm')
   @Roles(Role.SPONSOR)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Confirm contribution', description: 'Sponsor submits the on-chain transaction hash.' })
+  @ApiResponse({ status: 200, description: 'Contribution confirmed' })
+  @ApiResponse({ status: 400, description: 'Bad Request' })
   confirmContribution(@Body() dto: ConfirmContributionDto) {
     return this.contributionsService.confirmContribution(dto.transactionHash);
   }

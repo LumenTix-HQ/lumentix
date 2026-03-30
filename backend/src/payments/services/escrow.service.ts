@@ -93,7 +93,7 @@ export class EscrowService {
       .execute();
 
     await this.auditService.log({
-      action: AuditAction.ESCROW_RELEASED, // reuse closest action; extend enum for ESCROW_CREATED if desired
+      action: AuditAction.ESCROW_CREATED,
       userId: SYSTEM_USER_ID,
       resourceId: eventId,
       meta: { escrowPublicKey: publicKey, eventId },
@@ -104,6 +104,19 @@ export class EscrowService {
     );
 
     return publicKey;
+  }
+
+  /**
+   * Decrypt the AES-256-GCM encrypted escrow secret stored on the Event entity.
+   * Format expected: "<iv_hex>:<authTag_hex>:<ciphertext_hex>"
+   *
+   * @param encryptedSecret  The value of event.escrowSecretEncrypted
+   * @returns                The plaintext Stellar secret key
+   */
+
+  async decryptEscrowSecret(encryptedSecret: string): Promise<string> {
+    // Delegate to the imported decrypt utility.
+    return decrypt(encryptedSecret, this.encryptionSecret);
   }
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -6,6 +6,9 @@ import { Repository } from 'typeorm';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
 import { UserRole } from './enums/user-role.enum';
+import { UserStatus } from './enums/user-status.enum';
+import { CurrenciesService } from '../currencies/currencies.service';
+import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
 
 const makeMockUser = (): User => ({
   id: 'uuid-1',
@@ -13,6 +16,10 @@ const makeMockUser = (): User => ({
   passwordHash: 'hashed_password',
   role: UserRole.EVENT_GOER,
   stellarPublicKey: null,
+  status: UserStatus.ACTIVE,
+  balances: {},
+  balancesUpdatedAt: null,
+  notificationPreferences: {},
   createdAt: new Date(),
   updatedAt: new Date(),
 });
@@ -39,6 +46,8 @@ describe('UsersService', () => {
           provide: getRepositoryToken(User),
           useValue: mockRepository,
         },
+        { provide: CurrenciesService, useValue: {} },
+        { provide: ExchangeRatesService, useValue: {} },
       ],
     }).compile();
 

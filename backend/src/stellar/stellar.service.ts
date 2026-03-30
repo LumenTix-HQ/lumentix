@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Horizon,
@@ -8,6 +13,7 @@ import {
   TransactionBuilder,
   BASE_FEE,
   Operation,
+  Asset,
 } from '@stellar/stellar-sdk';
 
 export type PaymentCallback = (
@@ -69,6 +75,21 @@ export class StellarService implements OnModuleDestroy {
   ): Promise<Horizon.ServerApi.TransactionRecord> {
     this.logger.debug(`getTransaction: ${hash}`);
     return this.server.transactions().transaction(hash).call();
+  }
+
+  extractAndValidateMemo(
+    txRecord: Horizon.ServerApi.TransactionRecord,
+  ): string {
+    const memo =
+      typeof txRecord.memo === 'string' ? txRecord.memo.trim() : undefined;
+
+    if (!memo) {
+      throw new BadRequestException(
+        'Transaction is missing a memo. Cannot correlate with a payment or contribution intent.',
+      );
+    }
+
+    return memo;
   }
 
   streamPayments(callback: PaymentCallback): () => void {
@@ -139,11 +160,15 @@ export class StellarService implements OnModuleDestroy {
   }
 
   /**
-   * Transfer the full XLM balance (minus fees) from the escrow account
-   * to the destination (organizer wallet), then merge the escrow account.
+   * Release all funds held in an escrow account to the destination wallet
+   * and close the escrow account.
    *
-   * @param escrowSecret  Decrypted secret of the escrow account
-   * @param destination   Organizer's public key
+   * Transfers every non-native asset balance (e.g. USDC) via individual
+   * `payment` operations first, then merges the account to sweep the
+   * remaining native XLM balance to the destination.
+   *
+   * @param escrowSecret  Decrypted secret key of the escrow account
+   * @param destination   Recipient's Stellar public key (e.g. organizer wallet)
    */
   async releaseEscrowFunds(
     escrowSecret: string,
@@ -156,14 +181,65 @@ export class StellarService implements OnModuleDestroy {
       escrowKeypair.publicKey(),
     );
 
-    // Merge account sends entire remaining balance (after fee) to destination
+    const txBuilder = new TransactionBuilder(escrowAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    });
+
+    // Send each non-native asset balance before merging
+    for (const balance of escrowAccount.balances) {
+      if (balance.asset_type !== 'native' && parseFloat(balance.balance) > 0) {
+        const bal = balance as Horizon.HorizonApi.BalanceLine<
+          'credit_alphanum4' | 'credit_alphanum12'
+        >;
+        txBuilder.addOperation(
+          Operation.payment({
+            destination,
+            asset: new Asset(bal.asset_code, bal.asset_issuer),
+            amount: bal.balance,
+          }),
+        );
+      }
+    }
+
+    // Merge account to send remaining XLM and close the escrow
+    txBuilder.addOperation(Operation.accountMerge({ destination }));
+
+    const tx = txBuilder.setTimeout(30).build();
+    tx.sign(escrowKeypair);
+    return this.server.submitTransaction(tx);
+  }
+
+  async sendPayment(
+    escrowSecret: string,
+    destination: string,
+    amount: string,
+    assetCode: string = 'XLM',
+    assetIssuer?: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    this.logger.debug(
+      `sendPayment: destination=${destination} amount=${amount} asset=${assetCode}`,
+    );
+
+    const escrowKeypair = Keypair.fromSecret(escrowSecret);
+    const escrowAccount = await this.server.loadAccount(
+      escrowKeypair.publicKey(),
+    );
+
+    const asset =
+      assetCode.toUpperCase() === 'XLM'
+        ? Asset.native()
+        : new Asset(assetCode, assetIssuer);
+
     const tx = new TransactionBuilder(escrowAccount, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
     })
       .addOperation(
-        Operation.accountMerge({
+        Operation.payment({
           destination,
+          asset,
+          amount,
         }),
       )
       .setTimeout(30)
@@ -171,6 +247,33 @@ export class StellarService implements OnModuleDestroy {
 
     tx.sign(escrowKeypair);
     return this.server.submitTransaction(tx);
+  }
+
+  /**
+   * Get paginated transaction history for a Stellar account.
+   * Returns an empty records array for new/unfunded accounts (Horizon 404).
+   */
+  async getAccountTransactions(
+    publicKey: string,
+    cursor?: string,
+    limit = 10,
+  ): Promise<{ records: Horizon.ServerApi.TransactionRecord[] }> {
+    try {
+      let query = this.server
+        .transactions()
+        .forAccount(publicKey)
+        .limit(limit)
+        .order('desc');
+      if (cursor) query = query.cursor(cursor);
+      return await query.call();
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response
+        ?.status;
+      if (status === 404) {
+        return { records: [] };
+      }
+      throw err;
+    }
   }
 
   /**

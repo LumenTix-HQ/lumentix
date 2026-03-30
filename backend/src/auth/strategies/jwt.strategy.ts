@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { UsersService } from '../../users/users.service';
+import { UserStatus } from '../../users/enums/user-status.enum';
 
 export interface JwtPayload {
   sub: string;
@@ -28,7 +29,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user) {
       throw new UnauthorizedException();
     }
+    if (user.status === UserStatus.BLOCKED) {
+      throw new UnauthorizedException('User account is blocked.');
+    }
     // This is attached to request.user on protected routes
-    return { userId: payload.sub, role: payload.role };
+    return { id: payload.sub, role: payload.role.toLowerCase() };
   }
 }

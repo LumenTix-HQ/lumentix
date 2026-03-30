@@ -50,6 +50,13 @@ export class Event {
   status: EventStatus;
 
   /**
+   * Maximum number of attendees (ticket sales cap).
+   * NULL means the event has no capacity limit.
+   */
+  @Column({ type: 'int', nullable: true, default: null })
+  maxAttendees: number | null;
+
+  /**
    * Stellar public key of this event's dedicated escrow account.
    * Populated when the event is published.
    */

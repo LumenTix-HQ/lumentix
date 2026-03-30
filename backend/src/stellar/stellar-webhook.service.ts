@@ -1,8 +1,14 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { Horizon } from '@stellar/stellar-sdk';
-import { StellarService } from '../stellar.service';
-import { PaymentsService } from '../../payments/payments.service';
-import { SponsorsService } from '../../sponsors/sponsors.service';
+import { StellarService } from './stellar.service';
+import { PaymentsService } from '../payments/payments.service';
+import { SponsorsService } from '../sponsors/sponsors.service';
+import { ContributionsService } from '../sponsors/contributions.service';
 
 const RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
@@ -21,6 +27,7 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
     private readonly stellarService: StellarService,
     private readonly paymentsService: PaymentsService,
     private readonly sponsorsService: SponsorsService,
+    private readonly contributionsService: ContributionsService,
   ) {}
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -131,7 +138,7 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
   private async tryConfirmPayment(transactionHash: string): Promise<boolean> {
     try {
-      await this.paymentsService.confirmPayment(transactionHash);
+      await this.paymentsService.confirmPayment(transactionHash, 'system');
       this.logger.log(
         `Payment confirmed via stream: txHash=${transactionHash}`,
       );
@@ -156,9 +163,9 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
   private async tryConfirmSponsor(transactionHash: string): Promise<boolean> {
     try {
-      await this.sponsorsService.confirmSponsorPayment(transactionHash);
+      await this.contributionsService.confirmContribution(transactionHash);
       this.logger.log(
-        `Sponsor payment confirmed via stream: txHash=${transactionHash}`,
+        `Sponsor contribution confirmed via stream: txHash=${transactionHash}`,
       );
       return true;
     } catch (err: unknown) {
@@ -166,7 +173,7 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
       if (isBadRequest(err) && isNotFoundMessage(err)) return false;
 
       this.logger.error(
-        `Unexpected error confirming sponsor for tx ${transactionHash}`,
+        `Unexpected error confirming sponsor contribution for tx ${transactionHash}`,
         err,
       );
       return false;

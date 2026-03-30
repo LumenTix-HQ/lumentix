@@ -11,8 +11,10 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
 import { DuplicateEventDto } from './dto/duplicate-event.dto';
 import { EventStateService } from './state/event-state.service';
-import { SponsorTier } from '../sponsors/entities/sponsor-tier.entity';
-import { UploadService } from '../common/upload/upload.service';
+import { NotificationService } from '../notifications/notification.service';
+import { User } from '../users/entities/user.entity';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { EscrowService } from '../payments/services/escrow.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -27,10 +29,13 @@ export class EventsService {
   constructor(
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
-    @InjectRepository(SponsorTier)
-    private readonly tierRepository: Repository<SponsorTier>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(TicketEntity)
+    private readonly ticketRepository: Repository<TicketEntity>,
     private readonly eventStateService: EventStateService,
-    private readonly uploadService: UploadService,
+    private readonly notificationService: NotificationService,
+    private readonly escrowService: EscrowService,
   ) {}
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
@@ -43,13 +48,25 @@ export class EventsService {
     return this.eventRepository.save(event);
   }
 
-  async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
+  async updateEvent(
+    id: string,
+    dto: UpdateEventDto,
+    callerId: string,
+  ): Promise<Event> {
     const event = await this.getEventById(id);
 
-    // Validate state transition before applying any updates
+    // ── Ownership check ────────────────────────────────────────────────────
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
     if (dto.status !== undefined && dto.status !== event.status) {
       this.eventStateService.validateTransition(event.status, dto.status);
     }
+
+    const previousStatus = event.status;
+    const isPublishing =
+      dto.status === EventStatus.PUBLISHED && dto.status !== previousStatus;
 
     const updates: Partial<Event> = {
       ...(dto.title !== undefined && { title: dto.title }),
@@ -57,7 +74,7 @@ export class EventsService {
       ...(dto.location !== undefined && { location: dto.location }),
       ...(dto.ticketPrice !== undefined && { ticketPrice: dto.ticketPrice }),
       ...(dto.currency !== undefined && { currency: dto.currency }),
-      ...(dto.status !== undefined && { status: dto.status }),
+      ...(!isPublishing && dto.status !== undefined && { status: dto.status }),
       ...(dto.startDate !== undefined && {
         startDate: new Date(dto.startDate),
       }),
@@ -65,11 +82,53 @@ export class EventsService {
     };
 
     Object.assign(event, updates);
-    return this.eventRepository.save(event);
+
+    if (isPublishing) {
+      await this.eventRepository.save(event);
+      const published = await this.publishEvent(id, callerId);
+      this.queueLifecycleEmail(published).catch(() => undefined);
+      return published;
+    }
+
+    const saved = await this.eventRepository.save(event);
+
+    if (dto.status !== undefined && dto.status !== previousStatus) {
+      this.queueLifecycleEmail(saved).catch(() => undefined);
+    }
+
+    return saved;
   }
 
-  async deleteEvent(id: string): Promise<void> {
+  async publishEvent(id: string, callerId: string): Promise<Event> {
     const event = await this.getEventById(id);
+
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    this.eventStateService.validateTransition(
+      event.status,
+      EventStatus.PUBLISHED,
+    );
+
+    event.status = EventStatus.PUBLISHED;
+    await this.eventRepository.save(event);
+
+    if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
+      await this.escrowService.createEscrow(event.id);
+    }
+
+    return this.getEventById(id);
+  }
+
+  async deleteEvent(id: string, callerId: string): Promise<void> {
+    const event = await this.getEventById(id);
+
+    // ── Ownership check ────────────────────────────────────────────────────
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
     await this.eventRepository.remove(event);
   }
 
@@ -106,51 +165,44 @@ export class EventsService {
     };
   }
 
-  async updateEventImage(
-    id: string,
-    file: Express.Multer.File,
-    callerId: string,
-  ): Promise<Event> {
-    const event = await this.getEventById(id);
-    if (event.organizerId !== callerId) throw new ForbiddenException();
-    event.imageUrl = await this.uploadService.saveFile(file);
-    return this.eventRepository.save(event);
-  }
+  private async queueLifecycleEmail(event: Event): Promise<void> {
+    if (event.status === EventStatus.CANCELLED) {
+      const tickets = await this.ticketRepository.find({
+        where: { eventId: event.id },
+      });
 
-  async duplicateEvent(
-    id: string,
-    dto: DuplicateEventDto,
-    callerId: string,
-  ): Promise<Event> {
-    const source = await this.getEventById(id);
-    if (source.organizerId !== callerId) throw new ForbiddenException();
+      const ownerIds = [...new Set(tickets.map((t) => t.ownerId))];
+      if (ownerIds.length === 0) return;
 
-    const duplicate = this.eventRepository.create({
-      title: dto.title ?? `${source.title} (Copy)`,
-      description: source.description,
-      location: source.location,
-      ticketPrice: source.ticketPrice,
-      currency: source.currency,
-      maxAttendees: source.maxAttendees,
-      category: source.category,
-      startDate: new Date(dto.startDate),
-      endDate: new Date(dto.endDate),
-      organizerId: callerId,
-      status: EventStatus.DRAFT,
-    });
-    const saved = await this.eventRepository.save(duplicate);
+      const users = await this.userRepository.findByIds(ownerIds);
+      const emails = users.map((u) => u.email).filter(Boolean);
+      if (emails.length === 0) return;
 
-    const tiers = await this.tierRepository.find({ where: { eventId: id } });
-    for (const tier of tiers) {
-      await this.tierRepository.save(
-        this.tierRepository.create({
-          ...tier,
-          id: undefined,
-          eventId: saved.id,
-        }),
-      );
+      await this.notificationService.queueEventCancelledEmail({
+        emails,
+        eventTitle: event.title,
+        refundInfo: 'A refund will be processed for eligible tickets.',
+      });
+    } else if (event.status === EventStatus.PUBLISHED) {
+      const organizer = await this.userRepository.findOne({
+        where: { id: event.organizerId },
+      });
+      if (!organizer) return;
+
+      await this.notificationService.queueEventPublishedEmail({
+        email: organizer.email,
+        eventTitle: event.title,
+      });
+    } else if (event.status === EventStatus.COMPLETED) {
+      const organizer = await this.userRepository.findOne({
+        where: { id: event.organizerId },
+      });
+      if (!organizer) return;
+
+      await this.notificationService.queueEventCompletedEmail({
+        email: organizer.email,
+        eventTitle: event.title,
+      });
     }
-
-    return saved;
   }
 }

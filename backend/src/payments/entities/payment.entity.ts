@@ -3,12 +3,15 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum PaymentStatus {
   PENDING = 'pending',
   CONFIRMED = 'confirmed',
   FAILED = 'failed',
+  REFUNDED = 'refunded',
 }
 
 @Entity('payments')
@@ -37,6 +40,13 @@ export class Payment {
     default: PaymentStatus.PENDING,
   })
   status: PaymentStatus;
+
+  @Index()
+  @Column({ type: 'timestamptz', nullable: true })
+  expiresAt: Date | null;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 
   @CreateDateColumn()
   createdAt: Date;

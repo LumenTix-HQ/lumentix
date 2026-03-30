@@ -16,6 +16,9 @@ import {
   ContributionStatus,
 } from './entities/sponsor-contribution.entity';
 import { SponsorTier } from './entities/sponsor-tier.entity';
+import { NotificationService } from 'src/notifications/notification.service';
+import { User } from 'src/users/entities/user.entity';
+import { Event } from 'src/events/entities/event.entity';
 
 const SUPPORTED_ASSETS = ['XLM', 'USDC'] as const;
 type SupportedAsset = (typeof SUPPORTED_ASSETS)[number];
@@ -38,9 +41,14 @@ export class ContributionsService {
     private readonly contributionRepository: Repository<SponsorContribution>,
     @InjectRepository(SponsorTier)
     private readonly tierRepository: Repository<SponsorTier>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(Event)
+    private readonly eventRepository: Repository<Event>,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
+    private readonly notificationService: NotificationService,
   ) {
     this.escrowWallet =
       this.configService.get<string>('ESCROW_WALLET_PUBLIC_KEY') ?? '';
@@ -114,14 +122,7 @@ export class ContributionsService {
     }
 
     // 2. Correlate via memo
-    const memoValue: string | undefined =
-      typeof txRecord.memo === 'string' ? txRecord.memo : undefined;
-
-    if (!memoValue) {
-      throw new BadRequestException(
-        'Transaction memo is missing. Cannot correlate with a contribution intent.',
-      );
-    }
+    const memoValue = this.stellarService.extractAndValidateMemo(txRecord);
 
     const contribution = await this.contributionRepository.findOne({
       where: { id: memoValue, status: ContributionStatus.PENDING },
@@ -208,12 +209,40 @@ export class ContributionsService {
       `Contribution confirmed: id=${contribution.id} txHash=${transactionHash}`,
     );
 
+    // 9. Queue sponsor confirmation email (non-blocking)
+    this.queueSponsorConfirmedEmail(contribution, transactionHash).catch(
+      () => undefined,
+    );
+
     return confirmed;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────────────────────────────────────────
+
+  private async queueSponsorConfirmedEmail(
+    contribution: SponsorContribution,
+    transactionHash: string,
+  ): Promise<void> {
+    const [sponsor, event] = await Promise.all([
+      this.userRepository.findOne({ where: { id: contribution.sponsorId } }),
+      this.eventRepository.findOne({
+        where: { id: contribution.tier.eventId },
+      }),
+    ]);
+
+    if (!sponsor || !event) return;
+
+    await this.notificationService.queueSponsorConfirmedEmail({
+      email: sponsor.email,
+      sponsorName: sponsor.email,
+      eventTitle: event.title,
+      amount: Number(contribution.amount),
+      currency: 'XLM',
+      transactionHash,
+    });
+  }
 
   private async getTierById(id: string): Promise<SponsorTier> {
     const tier = await this.tierRepository.findOne({ where: { id } });

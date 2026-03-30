@@ -7,6 +7,8 @@ import { UsersModule } from '../users/users.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { BruteForceService } from '../common/services/brute-force.service';
+import { BruteForceGuard } from '../common/guards/brute-force.guard';
 import type { StringValue } from 'ms';
 
 @Module({
@@ -28,7 +30,8 @@ import type { StringValue } from 'ms';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, BruteForceService, BruteForceGuard],
+  exports: [BruteForceService, BruteForceGuard],
   controllers: [AuthController],
 })
 export class AuthModule {}
