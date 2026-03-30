@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { RequestRoleDto } from './dto/request-role.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { Roles } from 'src/admin/roles.decorator';
@@ -60,6 +61,19 @@ export class UsersController {
       req.user.id,
       updateDto,
     );
+  }
+
+  @Post('me/request-role')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Request a role upgrade (EVENT_GOER only)' })
+  @ApiResponse({ status: 201, description: 'Role request created' })
+  @ApiResponse({ status: 400, description: 'Not eligible for role upgrade' })
+  @ApiResponse({ status: 409, description: 'Duplicate pending request' })
+  async requestRole(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: RequestRoleDto,
+  ) {
+    return this.usersService.requestRole(req.user.id, dto);
   }
 
   @Get(':id')

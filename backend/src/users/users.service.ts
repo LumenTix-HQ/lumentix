@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -8,7 +9,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { User } from './entities/user.entity';
+import { RoleRequest } from './entities/role-request.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { RequestRoleDto } from './dto/request-role.dto';
 import { UserRole } from './enums/user-role.enum';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { ExchangeRatesService } from '../exchange-rates/exchange-rates.service';
@@ -29,6 +32,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    @InjectRepository(RoleRequest)
+    private readonly roleRequestRepository: Repository<RoleRequest>,
     private readonly currenciesService: CurrenciesService,
     private readonly exchangeRatesService: ExchangeRatesService,
   ) {}
@@ -182,6 +187,29 @@ export class UsersService {
     };
     const saved = await this.usersRepository.save(user);
     return this.sanitize(saved);
+  }
+
+  async requestRole(userId: string, dto: RequestRoleDto): Promise<RoleRequest> {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User with id ${userId} not found`);
+
+    if (user.role !== UserRole.EVENT_GOER) {
+      throw new BadRequestException('Only EVENT_GOER users can request a role upgrade');
+    }
+
+    const existing = await this.roleRequestRepository.findOne({
+      where: { userId, requestedRole: dto.requestedRole, status: 'pending' },
+    });
+    if (existing) {
+      throw new ConflictException('A pending request for this role already exists');
+    }
+
+    const request = this.roleRequestRepository.create({
+      userId,
+      requestedRole: dto.requestedRole,
+      reason: dto.reason ?? null,
+    });
+    return this.roleRequestRepository.save(request);
   }
 
   private sanitize(user: User): Omit<User, 'passwordHash'> {
