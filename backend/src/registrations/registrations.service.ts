@@ -8,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Repository } from 'typeorm';
+import { DataSource, LessThan, Repository } from 'typeorm';
 import {
   Registration,
   RegistrationStatus,
@@ -16,6 +16,9 @@ import {
 import { EventsService } from '../events/events.service';
 import { EventStatus } from '../events/entities/event.entity';
 import { ListRegistrationsDto } from './dto/list-registrations.dto';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { RefundService } from '../payments/refunds/refund.service';
+import { AuditService } from '../audit/audit.service';
 
 export interface RegisterResult {
   registration: Registration;
@@ -30,7 +33,12 @@ export class RegistrationsService {
   constructor(
     @InjectRepository(Registration)
     private readonly repo: Repository<Registration>,
+    @InjectRepository(TicketEntity)
+    private readonly ticketRepo: Repository<TicketEntity>,
     private readonly eventsService: EventsService,
+    private readonly refundService: RefundService,
+    private readonly auditService: AuditService,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ── POST /events/:id/register ──────────────────────────────────────────────
@@ -44,7 +52,6 @@ export class RegistrationsService {
       );
     }
 
-    // Duplicate check
     const existing = await this.repo.findOne({
       where: [
         { eventId, userId, status: RegistrationStatus.PENDING },
@@ -56,7 +63,6 @@ export class RegistrationsService {
       throw new ConflictException('You are already registered for this event');
     }
 
-    // Capacity check
     if (event.maxAttendees !== null && event.maxAttendees !== undefined) {
       const confirmed = await this.repo.count({
         where: [
@@ -120,7 +126,6 @@ export class RegistrationsService {
       take: limit,
     });
 
-    // Attach waitlist position for waitlisted entries
     const enriched = await Promise.all(
       data.map(async (r) => {
         if (r.status === RegistrationStatus.WAITLISTED) {
@@ -134,7 +139,7 @@ export class RegistrationsService {
     return { data: enriched, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  // ── Cancel & promote ───────────────────────────────────────────────────────
+  // ── Cancel (simple, no refund) ─────────────────────────────────────────────
 
   async cancel(registrationId: string, callerId: string): Promise<Registration> {
     const reg = await this.findById(registrationId);
@@ -153,6 +158,65 @@ export class RegistrationsService {
     if (reg.status === RegistrationStatus.CONFIRMED) {
       await this.promoteFromWaitlist(reg.eventId);
     }
+
+    return saved;
+  }
+
+  // ── DELETE /events/:eventId/registrations/:registrationId (with refund) ────
+
+  async cancelWithRefund(
+    eventId: string,
+    registrationId: string,
+    callerId: string,
+  ): Promise<Registration> {
+    const reg = await this.findById(registrationId);
+
+    if (reg.userId !== callerId) throw new ForbiddenException();
+    if (reg.eventId !== eventId)
+      throw new NotFoundException('Registration not found for this event');
+
+    if (reg.status !== RegistrationStatus.CONFIRMED) {
+      throw new BadRequestException(
+        'Only confirmed registrations can be cancelled',
+      );
+    }
+
+    const event = await this.eventsService.getEventById(eventId);
+
+    if (event.status !== EventStatus.PUBLISHED) {
+      throw new BadRequestException('Cannot cancel registration for this event');
+    }
+
+    const hoursUntilStart =
+      (new Date(event.startDate).getTime() - Date.now()) / (1000 * 60 * 60);
+    if (hoursUntilStart < 24) {
+      throw new BadRequestException(
+        'Cancellations are not allowed within 24 hours of the event start',
+      );
+    }
+
+    const saved = await this.dataSource.transaction(async (em) => {
+      reg.status = RegistrationStatus.CANCELLED;
+      const result = await em.save(Registration, reg);
+
+      if (reg.ticketId) {
+        await em.update(TicketEntity, { id: reg.ticketId }, { status: 'refunded' });
+      }
+
+      return result;
+    });
+
+    // Stellar refund outside DB transaction (not transactional)
+    if (reg.paymentId) {
+      await this.refundService.refundSinglePayment(reg.paymentId);
+    }
+
+    await this.auditService.log({
+      action: 'REGISTRATION_CANCELLED',
+      userId: callerId,
+      resourceId: registrationId,
+      meta: { eventId, paymentId: reg.paymentId },
+    });
 
     return saved;
   }
@@ -213,7 +277,6 @@ export class RegistrationsService {
     next.status = RegistrationStatus.PENDING;
     await this.repo.save(next);
 
-    // Schedule expiry: demote back to WAITLISTED after 24h if still PENDING
     setTimeout(
       async () => {
         try {

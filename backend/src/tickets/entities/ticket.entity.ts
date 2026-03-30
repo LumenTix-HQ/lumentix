@@ -6,7 +6,7 @@ import {
   Index,
 } from 'typeorm';
 
-export type TicketStatus = 'valid' | 'used' | 'refunded';
+export type TicketStatus = 'valid' | 'used' | 'refunded' | 'expired';
 
 @Entity({ name: 'tickets' })
 export class TicketEntity {

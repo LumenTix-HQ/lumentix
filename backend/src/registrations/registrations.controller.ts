@@ -61,4 +61,14 @@ export class RegistrationsController {
   ) {
     return this.service.cancel(id, req.user.id);
   }
+
+  @Delete('events/:eventId/registrations/:registrationId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  cancelWithRefund(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Param('registrationId', ParseUUIDPipe) registrationId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.service.cancelWithRefund(eventId, registrationId, req.user.id);
+  }
 }

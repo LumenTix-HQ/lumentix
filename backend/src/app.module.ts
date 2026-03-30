@@ -27,6 +27,7 @@ import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
+import { RegistrationsModule } from './registrations/registrations.module';
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { AdminModule } from './admin/admin.module';
     ExchangeRatesModule,
     TicketsModule,
     AdminModule,
+    RegistrationsModule,
   ],
   controllers: [AppController],
   providers: [

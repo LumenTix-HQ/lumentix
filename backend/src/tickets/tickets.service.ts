@@ -15,6 +15,7 @@ import * as qrcode from 'qrcode';
 import { TicketEntity } from './entities/ticket.entity';
 import { TicketSigningService } from './ticket-signing.service';
 import { IssueTicketResponseDto } from './dto/issue-ticket-response.dto';
+import { BulkIssueResultDto } from './dto/bulk-issue-result.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { PaymentStatus } from '../payments/entities/payment.entity';
 import { StellarService } from '../stellar/stellar.service';
@@ -195,11 +196,52 @@ export class TicketsService {
     };
   }
 
-  async transferTicket(
+  async bulkIssueTickets(paymentIds: string[]): Promise<BulkIssueResultDto[]> {
+    const results = await Promise.allSettled(
+      paymentIds.map((id) => this.issueTicket(id)),
+    );
+    return results.map((r, i) => ({
+      paymentId: paymentIds[i],
+      success: r.status === 'fulfilled',
+      ticketId: r.status === 'fulfilled' ? r.value.ticket.id : undefined,
+      error: r.status === 'rejected' ? (r.reason as Error)?.message : undefined,
+    }));
+  }
+
+  async regenerateQr(
     ticketId: string,
-    callerOwnerId: string,
-    newOwnerId: string,
-  ): Promise<TicketEntity> {
+    requesterId: string,
+  ): Promise<{ qrCodeDataUrl: string }> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    if (ticket.ownerId !== requesterId) throw new ForbiddenException();
+    if (ticket.status !== 'valid')
+      throw new BadRequestException('Ticket is not valid');
+
+    const signature = this.ticketSigningService.sign(ticket.id);
+    const qrPayload = JSON.stringify({ ticketId: ticket.id, signature });
+    const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
+    return { qrCodeDataUrl };
+  }
+
+  async getVerifyStatus(
+    ticketId: string,
+    signature: string,
+  ): Promise<{ valid: boolean; status: string; eventId?: string }> {
+    const isValid = this.ticketSigningService.verify(ticketId, signature);
+    if (!isValid) return { valid: false, status: 'invalid_signature' };
+
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) return { valid: false, status: 'not_found' };
+
+    return {
+      valid: ticket.status === 'valid',
+      status: ticket.status,
+      eventId: ticket.eventId,
+    };
+  }
+
+  async transferTicket(
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
 

@@ -194,6 +194,36 @@ export class RefundService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // PUBLIC — refundSinglePayment(paymentId)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Refund a single confirmed payment. Used for individual registration cancellations.
+   */
+  async refundSinglePayment(paymentId: string): Promise<RefundResultDto> {
+    const payment = await this.paymentsRepository.findOne({
+      where: { id: paymentId },
+    });
+    if (!payment) throw new NotFoundException(`Payment "${paymentId}" not found.`);
+
+    const event = await this.eventsRepository.findOne({
+      where: { id: payment.eventId },
+      select: ['id', 'title', 'status', 'escrowPublicKey', 'escrowSecretEncrypted'],
+    });
+    if (!event) throw new NotFoundException(`Event not found.`);
+
+    if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
+      throw new BadRequestException('Event has no escrow account configured');
+    }
+
+    const escrowSecret = await this.escrowService.decryptEscrowSecret(
+      event.escrowSecretEncrypted,
+    );
+
+    return this.processSingleRefund(payment, event, escrowSecret);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // PRIVATE — process a single payment refund
   // ─────────────────────────────────────────────────────────────────────────
 
