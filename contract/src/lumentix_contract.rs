@@ -622,6 +622,30 @@ impl LumentixContract {
         events
     }
 
+    /// Get all events created by a specific organizer with a specific status.
+    /// Returns an empty vector if no events match.
+    /// No auth required.
+    pub fn get_events_by_organizer_and_status(
+        env: Env,
+        organizer: Address,
+        status: EventStatus,
+    ) -> Vec<Event> {
+        let mut events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.organizer == organizer && event.status == status {
+                    events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        events
+    }
+
     /// Get all active (published) events.
     /// Iterates through all events and filters for status == Published.
     /// Returns an empty vector if no published events exist.
@@ -661,6 +685,33 @@ impl LumentixContract {
         while ticket_id < next_ticket_id {
             if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
                 if ticket.event_id == event_id {
+                    tickets.push_back(ticket);
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(tickets)
+    }
+
+    /// Get all refunded tickets for a given event.
+    /// Returns EventNotFound if the event does not exist.
+    /// Returns an empty vector if the event has no refunded tickets.
+    /// No auth required.
+    pub fn get_refunded_tickets_by_event(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<Ticket>, LumentixError> {
+        // Ensure the event exists.
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut tickets = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id && ticket.refunded {
                     tickets.push_back(ticket);
                 }
             }
