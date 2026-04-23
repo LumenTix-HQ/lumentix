@@ -698,6 +698,34 @@ impl LumentixContract {
         tickets
     }
 
+    /// Get all refunded tickets for a specific event.
+    /// Useful for organizers to track refund activity and for auditing after event cancellation.
+    /// Returns an empty Vec if no refunded tickets exist for the event.
+    pub fn get_refunded_tickets_by_event(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<Ticket>, LumentixError> {
+        // Verify the event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut refunded_tickets = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        // Iterate through all tickets
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                // Check if ticket belongs to this event and is refunded
+                if ticket.event_id == event_id && ticket.refunded {
+                    refunded_tickets.push_back(ticket);
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(refunded_tickets)
+    }
+
     /// Extend the TTL of an event. Only the organizer can call this.
     pub fn bump_event_ttl(env: Env, event_id: u64) -> Result<(), LumentixError> {
         let event = storage::get_event(&env, event_id)?;
