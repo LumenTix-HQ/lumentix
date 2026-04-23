@@ -837,11 +837,7 @@ impl LumentixContract {
     /// Emits AdminChanged event with old and new admin addresses.
     /// Fails with Unauthorized if caller is not the current admin.
     /// Fails with InvalidAddress if new_admin is the same as current admin.
-    pub fn change_admin(
-        env: Env,
-        admin: Address,
-        new_admin: Address,
-    ) -> Result<(), LumentixError> {
+    pub fn change_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), LumentixError> {
         admin.require_auth();
 
         let current_admin = storage::get_admin(&env);
