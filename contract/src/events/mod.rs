@@ -123,10 +123,8 @@ pub struct AdminChanged;
 
 impl AdminChanged {
     pub fn emit(env: &Env, caller: Address, old_admin: Address, new_admin: Address) {
-        env.events().publish(
-            (symbol_short!("admchng"),),
-            (caller, old_admin, new_admin),
-        );
+        env.events()
+            .publish((symbol_short!("admchng"),), (caller, old_admin, new_admin));
     }
 }
 
@@ -231,9 +229,7 @@ pub struct EscrowReleased;
 
 impl EscrowReleased {
     pub fn emit(env: &Env, event_id: u64, organizer: Address, amount: i128) {
-        env.events().publish(
-            (symbol_short!("escrwrel"),),
-            (event_id, organizer, amount),
-        );
+        env.events()
+            .publish((symbol_short!("escrwrel"),), (event_id, organizer, amount));
     }
 }

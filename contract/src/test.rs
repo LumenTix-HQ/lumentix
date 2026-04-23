@@ -1,11 +1,12 @@
+#![allow(irrefutable_let_patterns)]
+
 use crate::error::LumentixError;
 use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
 use crate::storage;
 use crate::types::{EventStatus, Ticket};
 use soroban_sdk::xdr;
 use soroban_sdk::{
-    symbol_short, testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env,
-    String, TryIntoVal, Val, Vec,
+    testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, String,
 };
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
@@ -519,6 +520,73 @@ fn test_refund_multiple_tickets() {
 
     let ticket2 = client.get_ticket_info(&ticket_id_2);
     assert!(ticket2.refunded);
+}
+
+#[test]
+fn test_full_event_cancellation_with_multiple_buyer_refunds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer1 = Address::generate(&env);
+    let buyer2 = Address::generate(&env);
+    let buyer3 = Address::generate(&env);
+    let buyer4 = Address::generate(&env);
+
+    client.set_platform_fee(&admin, &500u32);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Cancellation Flow Event"),
+        &String::from_str(&env, "Full cancellation refund scenario"),
+        &String::from_str(&env, "Main Hall"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &4u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let ticket_id_1 = client.purchase_ticket(&buyer1, &event_id, &100i128);
+    let ticket_id_2 = client.purchase_ticket(&buyer2, &event_id, &100i128);
+    let ticket_id_3 = client.purchase_ticket(&buyer3, &event_id, &100i128);
+    let ticket_id_4 = client.purchase_ticket(&buyer4, &event_id, &100i128);
+
+    assert_eq!(client.get_availability(&event_id), 0);
+    assert_eq!(client.get_escrow_balance(&event_id), 380i128);
+
+    client.use_ticket(&ticket_id_1, &organizer);
+    client.cancel_event(&organizer, &event_id);
+
+    assert!(client.try_refund_ticket(&ticket_id_2, &buyer2).is_ok());
+    assert!(client.try_refund_ticket(&ticket_id_3, &buyer3).is_ok());
+    assert!(client.try_refund_ticket(&ticket_id_4, &buyer4).is_ok());
+
+    let used_refund = client.try_refund_ticket(&ticket_id_1, &buyer1);
+    assert_eq!(used_refund, Err(Ok(LumentixError::TicketAlreadyUsed)));
+
+    assert_eq!(client.get_escrow_balance(&event_id), 80i128);
+
+    let ticket1 = client.get_ticket_info(&ticket_id_1);
+    let ticket2 = client.get_ticket_info(&ticket_id_2);
+    let ticket3 = client.get_ticket_info(&ticket_id_3);
+    let ticket4 = client.get_ticket_info(&ticket_id_4);
+
+    assert!(ticket1.used);
+    assert!(!ticket1.refunded);
+    assert!(ticket2.refunded);
+    assert!(ticket3.refunded);
+    assert!(ticket4.refunded);
+
+    assert_eq!(client.get_availability(&event_id), 3);
+
+    let late_buyer = Address::generate(&env);
+    let purchase_result = client.try_purchase_ticket(&late_buyer, &event_id, &100i128);
+    assert_eq!(
+        purchase_result,
+        Err(Ok(LumentixError::InvalidStatusTransition))
+    );
 }
 
 #[test]
@@ -1932,7 +2000,7 @@ fn test_event_created_emitted_with_correct_fields() {
     let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
 
-    let event_id = client.create_event(
+    let _event_id = client.create_event(
         &organizer,
         &String::from_str(&env, "Test Event"),
         &String::from_str(&env, "Description"),
@@ -1947,7 +2015,7 @@ fn test_event_created_emitted_with_correct_fields() {
     let events = env.events().all();
     assert_eq!(events.events().len(), 1);
 
-    let xdr_event = events.events().get(0).unwrap();
+    let xdr_event = events.events().first().unwrap();
 
     // Verify topic
     if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
@@ -1981,11 +2049,11 @@ fn test_ticket_purchased_emitted_with_correct_amounts() {
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
     // Purchase ticket
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    let _ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Get all events - should have EventCreated, EventStatusChanged, TicketPurchased
     let events = env.events().all();
-    assert!(events.events().len() >= 1);
+    assert!(!events.events().is_empty());
 
     // Find TicketPurchased event by topic
     let mut found = false;
