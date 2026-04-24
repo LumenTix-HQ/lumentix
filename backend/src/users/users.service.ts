@@ -14,7 +14,6 @@ import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RoleRequest } from './entities/role-request.entity';
-import { CreateUserDto } from './dto/create-user.dto';
 import { RequestRoleDto } from './dto/request-role.dto';
 import { UserRole } from './enums/user-role.enum';
 import { UserStatus } from './enums/user-status.enum';
@@ -43,7 +42,7 @@ export class UsersService {
     private readonly roleRequestRepository: Repository<RoleRequest>,
     private readonly currenciesService: CurrenciesService,
     private readonly exchangeRatesService: ExchangeRatesService,
-  ) {}
+  ) { }
 
   async createUser(
     createUserDto: CreateUserDto,

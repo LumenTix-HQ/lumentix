@@ -334,4 +334,148 @@ describe('StellarService', () => {
       expect(xdr.length).toBeGreaterThan(0);
     });
   });
+
+  // ── getAccountTransactions ─────────────────────────────────────────────
+
+  describe('getAccountTransactions', () => {
+    const testPublicKey = Keypair.random().publicKey();
+
+    it('should return transactions with paging_token for cursor', async () => {
+      const mockRecords = [
+        { paging_token: 'token-1', id: 'tx-1', type: 'payment' },
+        { paging_token: 'token-2', id: 'tx-2', type: 'payment' },
+      ];
+
+      const mockServer = (service as any).server;
+      mockServer.transactions = jest.fn().mockReturnValue({
+        forAccount: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            order: jest.fn().mockReturnValue({
+              cursor: jest.fn().mockReturnValue({
+                call: jest.fn().mockResolvedValue({ records: mockRecords }),
+              }),
+            }),
+          }),
+        }),
+      });
+
+      const result = await service.getAccountTransactions(testPublicKey, 'cursor-token', 20);
+
+      expect(result).toEqual({ records: mockRecords });
+      expect(mockServer.transactions().forAccount).toHaveBeenCalledWith(testPublicKey);
+      expect(mockServer.transactions().forAccount().limit).toHaveBeenCalledWith(20);
+      expect(mockServer.transactions().forAccount().limit().order).toHaveBeenCalledWith('desc');
+    });
+
+    it('should use default limit of 10', async () => {
+      const mockRecords = [];
+      const mockServer = (service as any).server;
+      mockServer.transactions = jest.fn().mockReturnValue({
+        forAccount: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            order: jest.fn().mockReturnValue({
+              call: jest.fn().mockResolvedValue({ records: mockRecords }),
+            }),
+          }),
+        }),
+      });
+
+      await service.getAccountTransactions(testPublicKey);
+
+      expect(mockServer.transactions().forAccount().limit).toHaveBeenCalledWith(10);
+    });
+
+    it('should pass limit to Horizon without capping (capping is done in WalletService)', async () => {
+      const mockRecords = [];
+      const mockServer = (service as any).server;
+      mockServer.transactions = jest.fn().mockReturnValue({
+        forAccount: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            order: jest.fn().mockReturnValue({
+              call: jest.fn().mockResolvedValue({ records: mockRecords }),
+            }),
+          }),
+        }),
+      });
+
+      await service.getAccountTransactions(testPublicKey, undefined, 100);
+
+      expect(mockServer.transactions().forAccount().limit).toHaveBeenCalledWith(100);
+    });
+
+    it('should return empty records for 404 (unfunded account)', async () => {
+      const mockServer = (service as any).server;
+      const error = { response: { status: 404 } };
+      mockServer.transactions = jest.fn().mockReturnValue({
+        forAccount: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            order: jest.fn().mockReturnValue({
+              call: jest.fn().mockRejectedValue(error),
+            }),
+          }),
+        }),
+      });
+
+      const result = await service.getAccountTransactions(testPublicKey);
+
+      expect(result).toEqual({ records: [] });
+    });
+
+    it('should propagate non-404 errors', async () => {
+      const mockServer = (service as any).server;
+      const error = { response: { status: 500 } };
+      mockServer.transactions = jest.fn().mockReturnValue({
+        forAccount: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            order: jest.fn().mockReturnValue({
+              call: jest.fn().mockRejectedValue(error),
+            }),
+          }),
+        }),
+      });
+
+      await expect(service.getAccountTransactions(testPublicKey)).rejects.toEqual(error);
+    });
+
+    it('should order transactions in descending order', async () => {
+      const mockRecords = [];
+      const mockServer = (service as any).server;
+      mockServer.transactions = jest.fn().mockReturnValue({
+        forAccount: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            order: jest.fn().mockReturnValue({
+              call: jest.fn().mockResolvedValue({ records: mockRecords }),
+            }),
+          }),
+        }),
+      });
+
+      await service.getAccountTransactions(testPublicKey);
+
+      expect(mockServer.transactions().forAccount().limit().order).toHaveBeenCalledWith('desc');
+    });
+
+    it('should not call cursor if cursor is not provided', async () => {
+      const mockRecords = [];
+      const mockServer = (service as any).server;
+      const mockCursor = jest.fn().mockReturnValue({
+        call: jest.fn().mockResolvedValue({ records: mockRecords }),
+      });
+
+      mockServer.transactions = jest.fn().mockReturnValue({
+        forAccount: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            order: jest.fn().mockReturnValue({
+              cursor: mockCursor,
+              call: jest.fn().mockResolvedValue({ records: mockRecords }),
+            }),
+          }),
+        }),
+      });
+
+      await service.getAccountTransactions(testPublicKey);
+
+      expect(mockCursor).not.toHaveBeenCalled();
+    });
+  });
 });

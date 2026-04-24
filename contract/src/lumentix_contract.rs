@@ -3,8 +3,8 @@
 use crate::error::LumentixError;
 use crate::events::{
     AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
-    EventUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketRefunded,
-    TicketTransferred, TicketUsed,
+    EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket, PERSISTENT_LIFETIME};
@@ -433,7 +433,7 @@ impl LumentixContract {
         storage::set_ticket(&env, ticket_id, &ticket);
 
         // Emit TicketTransferred event
-        TicketTransferred::emit(&env, ticket_id, from, to, ticket.event_id);
+        TicketTransferred::emit(&env, ticket_id, ticket.event_id, from, to);
 
         Ok(())
     }
@@ -835,6 +835,51 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Returns the configured **protocol (platform) fee** and the **fee recipient** used for ticket flows.
+    ///
+    /// The fee is expressed in **basis points** (bps): `1_000` bps = 10%, `10_000` bps = 100%. The recipient is
+    /// always the contract **admin** address (the same account that receives accrued fees when
+    /// [`Self::withdraw_platform_fees`] is called). This query is read-only aside from emitting a diagnostic event.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` — Soroban [`Env`]: host, storage, and event interface. No caller identity is read; there is no
+    ///   `Address` parameter and **no authentication** is required.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((fee_bps, fee_recipient))` — `fee_bps` is the current platform fee in \[0, 10_000\] (enforced on
+    ///   [`Self::set_platform_fee`]). `fee_recipient` is the admin [`Address`] from instance storage.
+    ///
+    /// # Errors
+    ///
+    /// * [`LumentixError::NotInitialized`] — returned before any storage reads if the contract has not been
+    ///   initialized via [`Self::initialize`].
+    ///
+    /// # Events
+    ///
+    /// On success, emits [`ProtocolFeeQueried`] (`feequery` topic) with `(fee_bps, fee_recipient)` for indexing
+    /// and analytics. **Every successful call emits this event**, including repeated reads with the same values.
+    ///
+    /// # Panics
+    ///
+    /// This entrypoint does not use `panic!` for control flow. A panic could still occur only if underlying
+    /// Soroban storage or the event subsystem encounters an unrecoverable host error, or if instance storage is
+    /// in an inconsistent state (for example, initialized without a valid admin record—should not happen when
+    /// only using the public API).
+    pub fn get_protocol_fee(env: Env) -> Result<(u32, Address), LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        let fee_bps = storage::get_platform_fee_bps(&env);
+        let fee_recipient = storage::get_admin(&env);
+
+        // Emit diagnostic event for off-chain analytics tracking
+        ProtocolFeeQueried::emit(&env, fee_bps, fee_recipient.clone());
+
+        Ok((fee_bps, fee_recipient))
+    }
+
     /// Get the current platform fee in basis points.
     pub fn get_platform_fee(env: Env) -> u32 {
         storage::get_platform_fee_bps(&env)
@@ -853,6 +898,100 @@ impl LumentixContract {
         let event = storage::get_event(&env, event_id)?;
         let revenue = event.tickets_sold as i128 * event.ticket_price;
         Ok(revenue)
+    }
+
+    /// Deposit funds into a group's (event's) treasury for future distributions.
+    /// The depositor must be the event organizer or the admin.
+    /// The event must exist and not be cancelled.
+    /// Amount must be positive.
+    pub fn deposit_funds(
+        env: Env,
+        depositor: Address,
+        event_id: u64,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        depositor.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Only the organizer or admin may deposit into an event treasury
+        let admin = storage::get_admin(&env);
+        if event.organizer != depositor && admin != depositor {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Cannot deposit into a cancelled event
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Add to escrow (treasury)
+        storage::add_escrow(&env, event_id, amount);
+        let new_balance = storage::get_escrow(&env, event_id)?;
+
+        // Emit FundsDeposited event
+        FundsDeposited::emit(&env, event_id, depositor, amount, new_balance);
+
+        Ok(new_balance)
+    }
+
+    /// Withdraw allocated funds from a group's (event's) treasury.
+    /// The withdrawer must be the event organizer or the admin.
+    /// The event must exist and not be cancelled.
+    /// Amount must be positive and not exceed available escrow balance.
+    pub fn withdraw_funds(
+        env: Env,
+        withdrawer: Address,
+        event_id: u64,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        withdrawer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Only the organizer or admin may withdraw from an event treasury
+        let admin = storage::get_admin(&env);
+        if event.organizer != withdrawer && admin != withdrawer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Cannot withdraw from a cancelled event
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Check available escrow balance
+        let current_balance = storage::get_escrow(&env, event_id)?;
+        if current_balance < amount {
+            return Err(LumentixError::InsufficientEscrow);
+        }
+
+        // Deduct from escrow (treasury)
+        storage::deduct_escrow(&env, event_id, amount)?;
+        let new_balance = storage::get_escrow(&env, event_id)?;
+
+        // Emit FundsWithdrawn event
+        FundsWithdrawn::emit(&env, event_id, withdrawer, amount, new_balance);
+
+        Ok(new_balance)
     }
 
     /// Withdraw all accumulated platform fees. Only the admin can withdraw.
@@ -951,5 +1090,41 @@ impl LumentixContract {
     /// No auth required - useful for frontends and deployment scripts.
     pub fn get_is_initialized(env: Env) -> bool {
         storage::is_initialized(&env)
+    }
+
+    /// Get the addresses of all checked-in (used ticket) attendees for an event.
+    /// Verifies the event exists, then iterates all tickets collecting owners of
+    /// used tickets matching event_id. Deduplicates so each address appears once.
+    pub fn get_event_attendees(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<Address>, LumentixError> {
+        // Verify event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut attendees: Vec<Address> = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id && ticket.used {
+                    // Deduplicate: only add if not already present
+                    let mut already_added = false;
+                    for i in 0..attendees.len() {
+                        if attendees.get(i).unwrap() == ticket.owner {
+                            already_added = true;
+                            break;
+                        }
+                    }
+                    if !already_added {
+                        attendees.push_back(ticket.owner);
+                    }
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(attendees)
     }
 }

@@ -192,10 +192,10 @@ impl TicketPurchased {
 pub struct TicketTransferred;
 
 impl TicketTransferred {
-    pub fn emit(env: &Env, ticket_id: u64, from: Address, to: Address, event_id: u64) {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, from: Address, to: Address) {
         env.events().publish(
-            (symbol_short!("tkttrans"),),
-            (ticket_id, from, to, event_id),
+            (symbol_short!("tkttrans"), ticket_id, event_id),
+            (ticket_id, event_id, from, to),
         );
     }
 }
@@ -231,5 +231,40 @@ impl EscrowReleased {
     pub fn emit(env: &Env, event_id: u64, organizer: Address, amount: i128) {
         env.events()
             .publish((symbol_short!("escrwrel"),), (event_id, organizer, amount));
+    }
+}
+
+/// Diagnostic event emitted on each successful [`crate::lumentix_contract::LumentixContract::get_protocol_fee`]
+/// invocation. Carries the current fee (bps) and admin recipient for analytics and indexers; not a state change.
+pub struct ProtocolFeeQueried;
+
+impl ProtocolFeeQueried {
+    pub fn emit(env: &Env, fee_bps: u32, fee_recipient: Address) {
+        env.events()
+            .publish((symbol_short!("feequery"),), (fee_bps, fee_recipient));
+    }
+}
+
+/// Event emitted when funds are deposited into a group's treasury.
+pub struct FundsDeposited;
+
+impl FundsDeposited {
+    pub fn emit(env: &Env, event_id: u64, depositor: Address, amount: i128, new_balance: i128) {
+        env.events().publish(
+            (symbol_short!("deposit"),),
+            (event_id, depositor, amount, new_balance),
+        );
+    }
+}
+
+/// Event emitted when funds are withdrawn from a group's treasury.
+pub struct FundsWithdrawn;
+
+impl FundsWithdrawn {
+    pub fn emit(env: &Env, event_id: u64, withdrawer: Address, amount: i128, new_balance: i128) {
+        env.events().publish(
+            (symbol_short!("withdraw"),),
+            (event_id, withdrawer, amount, new_balance),
+        );
     }
 }
