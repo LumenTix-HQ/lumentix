@@ -124,7 +124,7 @@ fn test_get_protocol_fee_emits_event() {
     // At least one event should have been emitted (the ProtocolFeeQueried event)
     let events = env.events().all();
     assert!(
-        events.events().len() > 0,
+        !events.events().is_empty(),
         "at least one event should have been emitted"
     );
 }
@@ -141,19 +141,19 @@ fn test_get_protocol_fee_emits_event_each_call() {
     // We verify by checking that events are non-empty after each individual call.
     client.get_protocol_fee();
     assert!(
-        env.events().all().events().len() > 0,
+        !env.events().all().events().is_empty(),
         "first call should emit an event"
     );
 
     client.get_protocol_fee();
     assert!(
-        env.events().all().events().len() > 0,
+        !env.events().all().events().is_empty(),
         "second call should emit an event"
     );
 
     client.get_protocol_fee();
     assert!(
-        env.events().all().events().len() > 0,
+        !env.events().all().events().is_empty(),
         "third call should emit an event"
     );
 }
@@ -514,7 +514,7 @@ fn test_deposit_funds_emits_event() {
     client.deposit_funds(&organizer, &event_id, &250i128);
 
     let events = env.events().all();
-    assert!(events.events().len() > 0, "deposit should emit an event");
+    assert!(!events.events().is_empty(), "deposit should emit an event");
 }
 
 // ─── Boundary & Edge Case Tests: deposit_funds ───────────────────────────────
