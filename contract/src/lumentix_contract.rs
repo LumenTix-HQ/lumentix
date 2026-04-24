@@ -3,7 +3,7 @@
 use crate::error::LumentixError;
 use crate::events::{
     AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
-    EventUpdated, FundsDeposited, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
     TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
@@ -893,35 +893,57 @@ impl LumentixContract {
         Ok(new_balance)
     }
 
-    /// Withdraw **all** accumulated protocol (platform) fees to the admin’s off-chain settlement path.
-    ///
-    /// This is the on-chain “cash out” for the global platform fee balance incremented by ticket sales and similar
-    /// flows. It is **not** the same as releasing per-event escrow to an organizer ([`Self::release_escrow`]).
-    ///
-    /// # Arguments
-    ///
-    /// * `env` — Soroban [`Env`].
-    /// * `admin` — Must match the stored admin; `require_auth` is enforced on this address.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(amount)` — the full previous [`crate::storage::get_platform_balance`] value, in the same unit as
-    ///   ticket prices / fees (typically the payment token’s smallest unit). Storage is cleared to zero after a
-    ///   successful withdrawal.
-    ///
-    /// # Errors
-    ///
-    /// * [`LumentixError::Unauthorized`] — caller is not the current admin.
-    /// * [`LumentixError::NoPlatformFees`] — current balance is zero (nothing to withdraw).
-    ///
-    /// # Events
-    ///
-    /// On success, emits [`PlatformFeesWithdrawn`] (`feewith` topic) with `(admin, amount)`.
-    ///
-    /// # Panics
-    ///
-    /// Does not panic on expected validation paths. Missing admin in storage (never initialized) would surface
-    /// as a host panic when reading admin—callers should only invoke after successful [`Self::initialize`].
+    /// Withdraw allocated funds from a group's (event's) treasury.
+    /// The withdrawer must be the event organizer or the admin.
+    /// The event must exist and not be cancelled.
+    /// Amount must be positive and not exceed available escrow balance.
+    pub fn withdraw_funds(
+        env: Env,
+        withdrawer: Address,
+        event_id: u64,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        withdrawer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Only the organizer or admin may withdraw from an event treasury
+        let admin = storage::get_admin(&env);
+        if event.organizer != withdrawer && admin != withdrawer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Cannot withdraw from a cancelled event
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Check available escrow balance
+        let current_balance = storage::get_escrow(&env, event_id)?;
+        if current_balance < amount {
+            return Err(LumentixError::InsufficientEscrow);
+        }
+
+        // Deduct from escrow (treasury)
+        storage::deduct_escrow(&env, event_id, amount)?;
+        let new_balance = storage::get_escrow(&env, event_id)?;
+
+        // Emit FundsWithdrawn event
+        FundsWithdrawn::emit(&env, event_id, withdrawer, amount, new_balance);
+
+        Ok(new_balance)
+    }
+
+    /// Withdraw all accumulated platform fees. Only the admin can withdraw.
     pub fn withdraw_platform_fees(env: Env, admin: Address) -> Result<i128, LumentixError> {
         admin.require_auth();
 
