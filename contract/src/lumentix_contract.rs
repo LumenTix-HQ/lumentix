@@ -937,4 +937,30 @@ impl LumentixContract {
 
         Ok(attendees)
     }
+
+    /// Get the count of used (checked-in) tickets for a specific event.
+    /// Returns LumentixError::EventNotFound if the event does not exist.
+    /// Returns 0 if no tickets have been used. No auth required.
+    pub fn get_used_tickets_count(env: Env, event_id: u64) -> Result<u32, LumentixError> {
+        // (1) Verify event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut count: u32 = 0;
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        // (2) Iterate through all ticket IDs from 1 to TICKET_CTR
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                // (3) Count tickets matching event_id where used == true
+                if ticket.event_id == event_id && ticket.used {
+                    count += 1;
+                }
+            }
+            ticket_id += 1;
+        }
+
+        // (4) Return the count as u32
+        Ok(count)
+    }
 }
