@@ -123,7 +123,10 @@ fn test_get_protocol_fee_emits_event() {
 
     // At least one event should have been emitted (the ProtocolFeeQueried event)
     let events = env.events().all();
-    assert!(events.events().len() > 0, "at least one event should have been emitted");
+    assert!(
+        events.events().len() > 0,
+        "at least one event should have been emitted"
+    );
 }
 
 #[test]
@@ -233,7 +236,10 @@ fn test_get_protocol_fee_unauthorized_set_does_not_change_fee() {
     let _ = client.try_set_platform_fee(&attacker, &9999u32);
 
     let (fee_bps, _) = client.get_protocol_fee();
-    assert_eq!(fee_bps, 200, "fee must not change after unauthorized attempt");
+    assert_eq!(
+        fee_bps, 200,
+        "fee must not change after unauthorized attempt"
+    );
 }
 
 #[test]
@@ -455,11 +461,7 @@ fn test_deposit_funds_cancelled_event_rejected() {
         &100i128,
         &10u32,
     );
-    client.update_event_status(
-        &event_id,
-        &crate::types::EventStatus::Published,
-        &organizer,
-    );
+    client.update_event_status(&event_id, &crate::types::EventStatus::Published, &organizer);
     client.cancel_event(&organizer, &event_id);
 
     let result = client.try_deposit_funds(&organizer, &event_id, &100i128);
@@ -584,14 +586,13 @@ fn test_deposit_funds_into_completed_event_allowed() {
         &100i128,
         &10u32,
     );
-    client.update_event_status(
-        &event_id,
-        &crate::types::EventStatus::Published,
-        &organizer,
-    );
+    client.update_event_status(&event_id, &crate::types::EventStatus::Published, &organizer);
     env.ledger().with_mut(|li| li.timestamp = 2001);
     client.complete_event(&organizer, &event_id);
 
     let result = client.try_deposit_funds(&organizer, &event_id, &100i128);
-    assert!(result.is_ok(), "deposit into completed event should succeed");
+    assert!(
+        result.is_ok(),
+        "deposit into completed event should succeed"
+    );
 }

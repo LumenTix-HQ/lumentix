@@ -239,10 +239,8 @@ pub struct ProtocolFeeQueried;
 
 impl ProtocolFeeQueried {
     pub fn emit(env: &Env, fee_bps: u32, fee_recipient: Address) {
-        env.events().publish(
-            (symbol_short!("feequery"),),
-            (fee_bps, fee_recipient),
-        );
+        env.events()
+            .publish((symbol_short!("feequery"),), (fee_bps, fee_recipient));
     }
 }
 
