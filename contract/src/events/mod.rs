@@ -234,7 +234,8 @@ impl EscrowReleased {
     }
 }
 
-/// Diagnostic event emitted when get_protocol_fee is invoked, for off-chain analytics.
+/// Diagnostic event emitted on each successful [`crate::lumentix_contract::LumentixContract::get_protocol_fee`]
+/// invocation. Carries the current fee (bps) and admin recipient for analytics and indexers; not a state change.
 pub struct ProtocolFeeQueried;
 
 impl ProtocolFeeQueried {

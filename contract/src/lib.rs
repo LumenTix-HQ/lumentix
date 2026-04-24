@@ -192,6 +192,9 @@ mod tests;
 #[cfg(test)]
 mod get_protocol_fee_test;
 
+#[cfg(test)]
+mod withdraw_platform_fees_test;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{CheckInEvent, EventCancelled, TransferEvent};

@@ -784,9 +784,38 @@ impl LumentixContract {
         Ok(())
     }
 
-    /// Get the current protocol fee percentage (in basis points) and fee recipient address.
-    /// Emits a ProtocolFeeQueried diagnostic event for off-chain analytics.
-    /// Returns NotInitialized error if the contract has not been initialized.
+    /// Returns the configured **protocol (platform) fee** and the **fee recipient** used for ticket flows.
+    ///
+    /// The fee is expressed in **basis points** (bps): `1_000` bps = 10%, `10_000` bps = 100%. The recipient is
+    /// always the contract **admin** address (the same account that receives accrued fees when
+    /// [`Self::withdraw_platform_fees`] is called). This query is read-only aside from emitting a diagnostic event.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` — Soroban [`Env`]: host, storage, and event interface. No caller identity is read; there is no
+    ///   `Address` parameter and **no authentication** is required.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((fee_bps, fee_recipient))` — `fee_bps` is the current platform fee in \[0, 10_000\] (enforced on
+    ///   [`Self::set_platform_fee`]). `fee_recipient` is the admin [`Address`] from instance storage.
+    ///
+    /// # Errors
+    ///
+    /// * [`LumentixError::NotInitialized`] — returned before any storage reads if the contract has not been
+    ///   initialized via [`Self::initialize`].
+    ///
+    /// # Events
+    ///
+    /// On success, emits [`ProtocolFeeQueried`] (`feequery` topic) with `(fee_bps, fee_recipient)` for indexing
+    /// and analytics. **Every successful call emits this event**, including repeated reads with the same values.
+    ///
+    /// # Panics
+    ///
+    /// This entrypoint does not use `panic!` for control flow. A panic could still occur only if underlying
+    /// Soroban storage or the event subsystem encounters an unrecoverable host error, or if instance storage is
+    /// in an inconsistent state (for example, initialized without a valid admin record—should not happen when
+    /// only using the public API).
     pub fn get_protocol_fee(env: Env) -> Result<(u32, Address), LumentixError> {
         if !storage::is_initialized(&env) {
             return Err(LumentixError::NotInitialized);
@@ -864,7 +893,35 @@ impl LumentixContract {
         Ok(new_balance)
     }
 
-    /// Withdraw all accumulated platform fees. Only the admin can withdraw.
+    /// Withdraw **all** accumulated protocol (platform) fees to the admin’s off-chain settlement path.
+    ///
+    /// This is the on-chain “cash out” for the global platform fee balance incremented by ticket sales and similar
+    /// flows. It is **not** the same as releasing per-event escrow to an organizer ([`Self::release_escrow`]).
+    ///
+    /// # Arguments
+    ///
+    /// * `env` — Soroban [`Env`].
+    /// * `admin` — Must match the stored admin; `require_auth` is enforced on this address.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(amount)` — the full previous [`crate::storage::get_platform_balance`] value, in the same unit as
+    ///   ticket prices / fees (typically the payment token’s smallest unit). Storage is cleared to zero after a
+    ///   successful withdrawal.
+    ///
+    /// # Errors
+    ///
+    /// * [`LumentixError::Unauthorized`] — caller is not the current admin.
+    /// * [`LumentixError::NoPlatformFees`] — current balance is zero (nothing to withdraw).
+    ///
+    /// # Events
+    ///
+    /// On success, emits [`PlatformFeesWithdrawn`] (`feewith` topic) with `(admin, amount)`.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic on expected validation paths. Missing admin in storage (never initialized) would surface
+    /// as a host panic when reading admin—callers should only invoke after successful [`Self::initialize`].
     pub fn withdraw_platform_fees(env: Env, admin: Address) -> Result<i128, LumentixError> {
         admin.require_auth();
 
