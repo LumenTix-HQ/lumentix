@@ -3573,3 +3573,150 @@ fn test_get_tickets_by_buyer_populates_all_ticket_fields() {
     assert_eq!(listed.used, ticket_info.used);
     assert_eq!(listed.refunded, ticket_info.refunded);
 }
+
+// ============================================================================
+// TTL EXTENSION TESTS
+// ============================================================================
+
+#[test]
+fn test_bump_event_ttl_valid_event_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_bump_event_ttl(&event_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_bump_event_ttl_nonexistent_event_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+
+    let result = client.try_bump_event_ttl(&9999u64);
+    assert_eq!(result, Err(Ok(LumentixError::EventNotFound)));
+}
+
+#[test]
+fn test_bump_ticket_ttl_valid_ticket_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_bump_ticket_ttl(&ticket_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_bump_ticket_ttl_nonexistent_ticket_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+
+    let result = client.try_bump_ticket_ttl(&9999u64);
+    assert_eq!(result, Err(Ok(LumentixError::TicketNotFound)));
+}
+
+#[test]
+fn test_bump_event_ttl_multiple_times_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Call bump_event_ttl multiple times on the same event — should be idempotent
+    assert!(client.try_bump_event_ttl(&event_id).is_ok());
+    assert!(client.try_bump_event_ttl(&event_id).is_ok());
+    assert!(client.try_bump_event_ttl(&event_id).is_ok());
+}
+
+#[test]
+fn test_bump_ticket_ttl_multiple_times_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Call bump_ticket_ttl multiple times on the same ticket — should be idempotent
+    assert!(client.try_bump_ticket_ttl(&ticket_id).is_ok());
+    assert!(client.try_bump_ticket_ttl(&ticket_id).is_ok());
+    assert!(client.try_bump_ticket_ttl(&ticket_id).is_ok());
+}
+
+#[test]
+fn test_bump_event_ttl_data_still_readable_after_bump() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Record event data before bumping TTL
+    let event_before = client.get_event(&event_id);
+
+    client.bump_event_ttl(&event_id);
+
+    // Verify all event fields are intact after the TTL bump
+    let event_after = client.get_event(&event_id);
+    assert_eq!(event_after.id, event_before.id);
+    assert_eq!(event_after.organizer, event_before.organizer);
+    assert_eq!(event_after.name, event_before.name);
+    assert_eq!(event_after.description, event_before.description);
+    assert_eq!(event_after.location, event_before.location);
+    assert_eq!(event_after.start_time, event_before.start_time);
+    assert_eq!(event_after.end_time, event_before.end_time);
+    assert_eq!(event_after.ticket_price, event_before.ticket_price);
+    assert_eq!(event_after.max_tickets, event_before.max_tickets);
+    assert_eq!(event_after.tickets_sold, event_before.tickets_sold);
+    assert_eq!(event_after.status, event_before.status);
+}
+
+#[test]
+fn test_bump_ticket_ttl_data_still_readable_after_bump() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Record ticket data before bumping TTL
+    let ticket_before = client.get_ticket_info(&ticket_id);
+
+    client.bump_ticket_ttl(&ticket_id);
+
+    // Verify all ticket fields are intact after the TTL bump
+    let ticket_after = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket_after.id, ticket_before.id);
+    assert_eq!(ticket_after.event_id, ticket_before.event_id);
+    assert_eq!(ticket_after.owner, ticket_before.owner);
+    assert_eq!(ticket_after.purchase_time, ticket_before.purchase_time);
+    assert_eq!(ticket_after.used, ticket_before.used);
+    assert_eq!(ticket_after.refunded, ticket_before.refunded);
+}
