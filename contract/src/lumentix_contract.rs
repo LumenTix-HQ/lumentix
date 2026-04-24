@@ -3,8 +3,8 @@
 use crate::error::LumentixError;
 use crate::events::{
     AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
-    EventUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketRefunded,
-    TicketTransferred, TicketUsed,
+    EventUpdated, FundsDeposited, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket, PERSISTENT_LIFETIME};
@@ -784,6 +784,22 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Get the current protocol fee percentage (in basis points) and fee recipient address.
+    /// Emits a ProtocolFeeQueried diagnostic event for off-chain analytics.
+    /// Returns NotInitialized error if the contract has not been initialized.
+    pub fn get_protocol_fee(env: Env) -> Result<(u32, Address), LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        let fee_bps = storage::get_platform_fee_bps(&env);
+        let fee_recipient = storage::get_admin(&env);
+
+        // Emit diagnostic event for off-chain analytics tracking
+        ProtocolFeeQueried::emit(&env, fee_bps, fee_recipient.clone());
+
+        Ok((fee_bps, fee_recipient))
+    }
+
     /// Get the current platform fee in basis points.
     pub fn get_platform_fee(env: Env) -> u32 {
         storage::get_platform_fee_bps(&env)
@@ -802,6 +818,50 @@ impl LumentixContract {
         let event = storage::get_event(&env, event_id)?;
         let revenue = event.tickets_sold as i128 * event.ticket_price;
         Ok(revenue)
+    }
+
+    /// Deposit funds into a group's (event's) treasury for future distributions.
+    /// The depositor must be the event organizer or the admin.
+    /// The event must exist and not be cancelled.
+    /// Amount must be positive.
+    pub fn deposit_funds(
+        env: Env,
+        depositor: Address,
+        event_id: u64,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        depositor.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Only the organizer or admin may deposit into an event treasury
+        let admin = storage::get_admin(&env);
+        if event.organizer != depositor && admin != depositor {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Cannot deposit into a cancelled event
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Add to escrow (treasury)
+        storage::add_escrow(&env, event_id, amount);
+        let new_balance = storage::get_escrow(&env, event_id)?;
+
+        // Emit FundsDeposited event
+        FundsDeposited::emit(&env, event_id, depositor, amount, new_balance);
+
+        Ok(new_balance)
     }
 
     /// Withdraw all accumulated platform fees. Only the admin can withdraw.
