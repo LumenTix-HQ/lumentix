@@ -901,4 +901,40 @@ impl LumentixContract {
     pub fn get_is_initialized(env: Env) -> bool {
         storage::is_initialized(&env)
     }
+
+    /// Get the addresses of all checked-in (used ticket) attendees for an event.
+    /// Verifies the event exists, then iterates all tickets collecting owners of
+    /// used tickets matching event_id. Deduplicates so each address appears once.
+    pub fn get_event_attendees(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<Address>, LumentixError> {
+        // Verify event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut attendees: Vec<Address> = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id && ticket.used {
+                    // Deduplicate: only add if not already present
+                    let mut already_added = false;
+                    for i in 0..attendees.len() {
+                        if attendees.get(i).unwrap() == ticket.owner {
+                            already_added = true;
+                            break;
+                        }
+                    }
+                    if !already_added {
+                        attendees.push_back(ticket.owner);
+                    }
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(attendees)
+    }
 }
