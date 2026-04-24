@@ -255,3 +255,15 @@ impl FundsDeposited {
         );
     }
 }
+
+/// Event emitted when funds are withdrawn from a group's treasury.
+pub struct FundsWithdrawn;
+
+impl FundsWithdrawn {
+    pub fn emit(env: &Env, event_id: u64, withdrawer: Address, amount: i128, new_balance: i128) {
+        env.events().publish(
+            (symbol_short!("withdraw"),),
+            (event_id, withdrawer, amount, new_balance),
+        );
+    }
+}

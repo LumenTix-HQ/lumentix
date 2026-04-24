@@ -3,7 +3,7 @@
 use crate::error::LumentixError;
 use crate::events::{
     AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
-    EventUpdated, FundsDeposited, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
     TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
@@ -860,6 +860,56 @@ impl LumentixContract {
 
         // Emit FundsDeposited event
         FundsDeposited::emit(&env, event_id, depositor, amount, new_balance);
+
+        Ok(new_balance)
+    }
+
+    /// Withdraw allocated funds from a group's (event's) treasury.
+    /// The withdrawer must be the event organizer or the admin.
+    /// The event must exist and not be cancelled.
+    /// Amount must be positive and not exceed available escrow balance.
+    pub fn withdraw_funds(
+        env: Env,
+        withdrawer: Address,
+        event_id: u64,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        withdrawer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Only the organizer or admin may withdraw from an event treasury
+        let admin = storage::get_admin(&env);
+        if event.organizer != withdrawer && admin != withdrawer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Cannot withdraw from a cancelled event
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Check available escrow balance
+        let current_balance = storage::get_escrow(&env, event_id)?;
+        if current_balance < amount {
+            return Err(LumentixError::InsufficientEscrow);
+        }
+
+        // Deduct from escrow (treasury)
+        storage::deduct_escrow(&env, event_id, amount)?;
+        let new_balance = storage::get_escrow(&env, event_id)?;
+
+        // Emit FundsWithdrawn event
+        FundsWithdrawn::emit(&env, event_id, withdrawer, amount, new_balance);
 
         Ok(new_balance)
     }

@@ -596,3 +596,275 @@ fn test_deposit_funds_into_completed_event_allowed() {
         "deposit into completed event should succeed"
     );
 }
+
+#[test]
+fn test_deposit_funds_maximum_i128_value() {
+    // Test with maximum possible i128 value
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Max Value Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Use maximum i128 value
+    let max_i128: i128 = i128::MAX;
+    let balance = client.deposit_funds(&organizer, &event_id, &max_i128);
+    assert_eq!(balance, max_i128);
+    assert_eq!(client.get_escrow_balance(&event_id), max_i128);
+}
+
+#[test]
+fn test_deposit_funds_near_maximum_i128() {
+    // Test with value near maximum to ensure no overflow
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Near Max Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Use value close to max but with room for addition
+    let near_max: i128 = i128::MAX - 1000;
+    let balance = client.deposit_funds(&organizer, &event_id, &near_max);
+    assert_eq!(balance, near_max);
+    
+    // Add another deposit to test overflow protection
+    let additional = 500i128;
+    let new_balance = client.deposit_funds(&organizer, &event_id, &additional);
+    assert_eq!(new_balance, near_max + additional);
+}
+
+#[test]
+fn test_deposit_funds_multiple_large_deposits() {
+    // Test multiple large deposits to check for overflow in accumulation
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Multi Large Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Make several large deposits
+    let large_amount1: i128 = i128::MAX / 4;
+    let large_amount2: i128 = i128::MAX / 4;
+    let large_amount3: i128 = i128::MAX / 4;
+
+    let balance1 = client.deposit_funds(&organizer, &event_id, &large_amount1);
+    assert_eq!(balance1, large_amount1);
+
+    let balance2 = client.deposit_funds(&organizer, &event_id, &large_amount2);
+    assert_eq!(balance2, large_amount1 + large_amount2);
+
+    let balance3 = client.deposit_funds(&organizer, &event_id, &large_amount3);
+    assert_eq!(balance3, large_amount1 + large_amount2 + large_amount3);
+}
+
+#[test]
+fn test_deposit_funds_zero_and_negative_boundary() {
+    // Test boundary conditions for zero and negative amounts
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Boundary Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Test zero amount (should fail)
+    let result_zero = client.try_deposit_funds(&organizer, &event_id, &0i128);
+    assert_eq!(result_zero, Err(Ok(LumentixError::InvalidAmount)));
+
+    // Test negative amount (should fail)
+    let result_negative = client.try_deposit_funds(&organizer, &event_id, &-1i128);
+    assert_eq!(result_negative, Err(Ok(LumentixError::InvalidAmount)));
+
+    // Test minimum positive amount (should succeed)
+    let result_min_positive = client.deposit_funds(&organizer, &event_id, &1i128);
+    assert_eq!(result_min_positive, 1i128);
+}
+
+#[test]
+fn test_deposit_funds_extreme_small_amounts() {
+    // Test with very small positive amounts
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Small Amounts Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Test with smallest positive amounts
+    let amounts = [1i128, 2i128, 3i128, 5i128, 10i128];
+    let mut expected_balance = 0i128;
+    
+    for amount in amounts.iter() {
+        expected_balance += amount;
+        let balance = client.deposit_funds(&organizer, &event_id, amount);
+        assert_eq!(balance, expected_balance);
+    }
+}
+
+#[test]
+fn test_deposit_funds_rapid_succession() {
+    // Test many deposits in rapid succession to check for state consistency
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Rapid Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Make 100 small deposits rapidly
+    let mut expected_total = 0i128;
+    for i in 1..=100 {
+        let amount = i * 10i128; // 10, 20, 30, ..., 1000
+        expected_total += amount;
+        let balance = client.deposit_funds(&organizer, &event_id, &amount);
+        assert_eq!(balance, expected_total);
+    }
+    
+    // Verify final balance
+    assert_eq!(client.get_escrow_balance(&event_id), expected_total);
+}
+
+#[test]
+fn test_deposit_funds_alternating_large_small() {
+    // Test alternating large and small deposits
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Alternating Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Alternate between large and small amounts
+    let deposits = [
+        1_000_000i128, 1i128, 
+        500_000i128, 2i128,
+        100_000i128, 3i128,
+        50_000i128, 4i128,
+    ];
+    
+    let mut expected_balance = 0i128;
+    for amount in deposits.iter() {
+        expected_balance += amount;
+        let balance = client.deposit_funds(&organizer, &event_id, amount);
+        assert_eq!(balance, expected_balance);
+    }
+}
+
+#[test]
+fn test_deposit_funds_state_persistence() {
+    // Test that deposit state persists correctly across multiple operations
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = setup_initialized(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &soroban_sdk::String::from_str(&env, "Persistence Test"),
+        &soroban_sdk::String::from_str(&env, "Desc"),
+        &soroban_sdk::String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &10u32,
+    );
+
+    // Make initial deposits
+    client.deposit_funds(&organizer, &event_id, &1000i128);
+    client.deposit_funds(&organizer, &event_id, &2000i128);
+    client.deposit_funds(&organizer, &event_id, &3000i128);
+    
+    let balance_before = client.get_escrow_balance(&event_id);
+    assert_eq!(balance_before, 6000i128);
+
+    // Publish the event first before ticket purchases
+    client.update_event_status(&event_id, &crate::types::EventStatus::Published, &organizer);
+
+    // Perform some other operations (ticket purchases, etc.)
+    let buyer = Address::generate(&env);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    
+    // Check that escrow balance is updated correctly
+    let balance_after_purchase = client.get_escrow_balance(&event_id);
+    // Should be previous balance + ticket price - platform fee (0% fee = 100)
+    assert_eq!(balance_after_purchase, 6100i128);
+    
+    // Continue depositing
+    client.deposit_funds(&organizer, &event_id, &4000i128);
+    let final_balance = client.get_escrow_balance(&event_id);
+    assert_eq!(final_balance, 10100i128);
+}
