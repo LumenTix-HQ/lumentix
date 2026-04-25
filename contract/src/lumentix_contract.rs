@@ -7,7 +7,7 @@ use crate::events::{
     TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
-use crate::types::{Event, EventStatus, Ticket, PERSISTENT_LIFETIME};
+use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
 
@@ -432,10 +432,34 @@ impl LumentixContract {
         ticket.owner = to.clone();
         storage::set_ticket(&env, ticket_id, &ticket);
 
+        // Record transfer in history
+        storage::append_ticket_transfer_history(
+            &env,
+            ticket_id,
+            TicketTransferRecord {
+                from: from.clone(),
+                to: to.clone(),
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
         // Emit TicketTransferred event
         TicketTransferred::emit(&env, ticket_id, ticket.event_id, from, to);
 
         Ok(())
+    }
+
+    /// Return the full ownership transfer history for a ticket.
+    /// Each entry records the previous owner, new owner, and ledger timestamp of the transfer.
+    /// Returns an empty Vec if the ticket exists but has never been transferred.
+    /// Returns TicketNotFound if the ticket does not exist.
+    pub fn get_ticket_transfer_history(
+        env: Env,
+        ticket_id: u64,
+    ) -> Result<Vec<TicketTransferRecord>, LumentixError> {
+        // Verify the ticket exists before returning history
+        storage::get_ticket(&env, ticket_id)?;
+        Ok(storage::get_ticket_transfer_history(&env, ticket_id))
     }
 
     /// Refund a ticket for a cancelled event.
