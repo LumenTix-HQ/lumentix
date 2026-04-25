@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracttype, Address, String, Vec};
 
 pub const INSTANCE_LIFETIME: u32 = 535_680; // ~30 days
 pub const PERSISTENT_LIFETIME: u32 = 535_680; // ~30 days
@@ -41,6 +41,18 @@ pub struct Ticket {
     pub purchase_time: u64,
     pub used: bool,
     pub refunded: bool,
+}
+
+/// A single record in a ticket's transfer history
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TicketTransferRecord {
+    /// Address that sent the ticket
+    pub from: Address,
+    /// Address that received the ticket
+    pub to: Address,
+    /// Ledger timestamp when the transfer occurred
+    pub timestamp: u64,
 }
 
 /// Fee collected event for tracking platform fees
