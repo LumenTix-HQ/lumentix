@@ -566,7 +566,7 @@ fn test_full_event_cancellation_with_multiple_buyer_refunds() {
     let used_refund = client.try_refund_ticket(&ticket_id_1, &buyer1);
     assert_eq!(used_refund, Err(Ok(LumentixError::TicketAlreadyUsed)));
 
-    assert_eq!(client.get_escrow_balance(&event_id), 80i128);
+    assert_eq!(client.get_escrow_balance(&event_id), 95i128);
 
     let ticket1 = client.get_ticket_info(&ticket_id_1);
     let ticket2 = client.get_ticket_info(&ticket_id_2);
@@ -3572,4 +3572,111 @@ fn test_get_tickets_by_buyer_populates_all_ticket_fields() {
     assert_eq!(listed.purchase_time, ticket_info.purchase_time);
     assert_eq!(listed.used, ticket_info.used);
     assert_eq!(listed.refunded, ticket_info.refunded);
+}
+
+#[test]
+fn test_concurrent_event_operations_multiple_organizers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    let (admin, client) = create_test_contract(&env);
+    client.set_platform_fee(&admin, &500); // 5% fee
+
+    let organizer_a = Address::generate(&env);
+    let organizer_b = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // 1. Two organizers create an event
+    let event_a_id = client.create_event(
+        &organizer_a,
+        &String::from_str(&env, "Event A"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1500,
+        &2500,
+        &100i128, // ticket_price = 100
+        &100u32,
+    );
+    client.update_event_status(&event_a_id, &EventStatus::Published, &organizer_a);
+
+    let event_b_id = client.create_event(
+        &organizer_b,
+        &String::from_str(&env, "Event B"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &2000,
+        &3000,
+        &200i128, // ticket_price = 200
+        &50u32,
+    );
+    client.update_event_status(&event_b_id, &EventStatus::Published, &organizer_b);
+
+    // 2. Buyer purchases tickets for both events
+    let ticket_a_id = client.purchase_ticket(&buyer, &event_a_id, &100i128);
+    let ticket_b_id = client.purchase_ticket(&buyer, &event_b_id, &200i128);
+
+    // 3. Verify get_tickets_by_buyer returns tickets from both events
+    let buyer_tickets = client.get_tickets_by_buyer(&buyer);
+    assert_eq!(buyer_tickets.len(), 2);
+    
+    let mut has_a = false;
+    let mut has_b = false;
+    for ticket in buyer_tickets.iter() {
+        if ticket.event_id == event_a_id {
+            has_a = true;
+        }
+        if ticket.event_id == event_b_id {
+            has_b = true;
+        }
+    }
+    assert!(has_a && has_b);
+
+    // 4. Organizer A cancels their event - organizer B's event is unaffected
+    client.cancel_event(&organizer_a, &event_a_id);
+    assert_eq!(client.get_event_status(&event_a_id), EventStatus::Cancelled);
+    assert_eq!(client.get_event_status(&event_b_id), EventStatus::Published);
+
+    // 5. Buyer refunds ticket from cancelled event A
+    client.refund_ticket(&ticket_a_id, &buyer);
+    let ticket_a_info = client.get_ticket_info(&ticket_a_id);
+    assert!(ticket_a_info.refunded);
+
+    // 6. Buyer uses ticket at event B
+    client.use_ticket(&ticket_b_id, &organizer_b);
+    let ticket_b_info = client.get_ticket_info(&ticket_b_id);
+    assert!(ticket_b_info.used);
+
+    // 7. Organizer B completes their event and releases escrow
+    env.ledger().with_mut(|li| {
+        li.timestamp = 3500; // Past end_time of 3000
+    });
+    client.complete_event(&organizer_b, &event_b_id);
+    let released_escrow = client.release_escrow(&organizer_b, &event_b_id);
+    // Ticket B was 200, fee is 5% = 10, escrow should be 190
+    assert_eq!(released_escrow, 190);
+
+    // 8. Verify platform fee balance accumulated from both events' sales
+    // Event A ticket: 100 * 5% = 5
+    // Event B ticket: 200 * 5% = 10
+    // Total platform fees = 15
+    assert_eq!(client.get_platform_balance(), 15);
+
+    // 9. Admin withdraws all platform fees
+    let withdrawn = client.withdraw_platform_fees(&admin);
+    assert_eq!(withdrawn, 15);
+    assert_eq!(client.get_platform_balance(), 0);
+
+    // 10. Verify all getter functions return correct isolated data
+    // Total platform tickets sold
+    // Event A (refunded doesn't remove it from get_total_tickets_sold if it just sums tickets_sold? wait, refund_ticket decrements tickets_sold)
+    // Let's check get_total_tickets_sold and get_organizer_total_revenue
+    // Event A had 1 ticket sold, but was refunded (tickets_sold = 0)
+    // Event B had 1 ticket sold (tickets_sold = 1)
+    assert_eq!(client.get_total_tickets_sold(), 1);
+    
+    assert_eq!(client.get_organizer_total_revenue(&organizer_a), 0);
+    assert_eq!(client.get_organizer_total_revenue(&organizer_b), 200);
 }

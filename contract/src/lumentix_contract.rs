@@ -469,7 +469,10 @@ impl LumentixContract {
         }
 
         // Deduct from escrow
-        storage::deduct_escrow(&env, ticket.event_id, event.ticket_price)?;
+        let fee_bps = storage::get_platform_fee_bps(&env);
+        let platform_fee = (event.ticket_price * fee_bps as i128) / 10000;
+        let escrow_amount = event.ticket_price - platform_fee;
+        storage::deduct_escrow(&env, ticket.event_id, escrow_amount)?;
 
         // Mark ticket as refunded
         ticket.refunded = true;
@@ -900,5 +903,43 @@ impl LumentixContract {
     /// No auth required - useful for frontends and deployment scripts.
     pub fn get_is_initialized(env: Env) -> bool {
         storage::is_initialized(&env)
+    }
+
+    /// Get total revenue for an organizer across all events.
+    /// Iterates through all event IDs from 1 to EVENT_CTR, calculates gross revenue, and sums it up.
+    /// Returns 0 if the organizer has no events or no sales. No auth required.
+    pub fn get_organizer_total_revenue(env: Env, organizer: Address) -> i128 {
+        let mut total_revenue: i128 = 0;
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.organizer == organizer {
+                    total_revenue += event.tickets_sold as i128 * event.ticket_price;
+                }
+            }
+            event_id += 1;
+        }
+
+        total_revenue
+    }
+
+    /// Get total tickets sold across all events on the platform.
+    /// Iterates through all events from 1 to EVENT_CTR and sums up the tickets_sold field.
+    /// No auth required.
+    pub fn get_total_tickets_sold(env: Env) -> u64 {
+        let mut total_tickets: u64 = 0;
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                total_tickets += event.tickets_sold as u64;
+            }
+            event_id += 1;
+        }
+
+        total_tickets
     }
 }
