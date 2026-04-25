@@ -59,9 +59,17 @@ pub fn set_token(env: &Env, token: &Address) {
         .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
 }
 
-/// Get token address
+/// Get token address as a Result
+pub fn get_token_result(env: &Env) -> Result<Address, LumentixError> {
+    env.storage()
+        .instance()
+        .get(&TOKEN)
+        .ok_or(LumentixError::NotInitialized)
+}
+
+/// Get token address (panics if not set)
 pub fn get_token(env: &Env) -> Address {
-    let token: Address = env.storage().instance().get(&TOKEN).unwrap();
+    let token: Address = get_token_result(env).unwrap();
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);

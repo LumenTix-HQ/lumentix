@@ -29,6 +29,7 @@ pub struct Event {
     pub max_tickets: u32,
     pub tickets_sold: u32,
     pub status: EventStatus,
+    pub paused: bool,
 }
 
 /// Ticket structure

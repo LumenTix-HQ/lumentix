@@ -67,6 +67,7 @@ impl LumentixContract {
             max_tickets,
             tickets_sold: 0,
             status: EventStatus::Draft,
+            paused: false,
         };
 
         storage::set_event(&env, event_id, &event);
@@ -220,6 +221,11 @@ impl LumentixContract {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
+        // Event must not be paused
+        if event.paused {
+            return Err(LumentixError::EventPaused);
+        }
+
         // Check capacity — reject when sold out
         if event.tickets_sold >= event.max_tickets {
             return Err(LumentixError::EventSoldOut);
@@ -228,6 +234,12 @@ impl LumentixContract {
         // Validate payment amount
         if amount < event.ticket_price {
             return Err(LumentixError::InsufficientFunds);
+        }
+
+        // Process token transfer if token is set
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&buyer, &env.current_contract_address(), &amount);
         }
 
         // Calculate platform fee
@@ -280,10 +292,9 @@ impl LumentixContract {
     /// Batch size is capped at 10 tickets per transaction.
     pub fn batch_purchase_tickets(
         env: Env,
-        buyer: Address,
         event_id: u64,
         quantity: u32,
-        total_amount: i128,
+        buyer: Address,
     ) -> Result<Vec<u64>, LumentixError> {
         buyer.require_auth();
 
@@ -302,16 +313,24 @@ impl LumentixContract {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
-        // Validate total_amount matches expected price
-        let expected_amount = event.ticket_price * quantity as i128;
-        if total_amount != expected_amount {
-            return Err(LumentixError::InsufficientFunds);
+        // Event must not be paused
+        if event.paused {
+            return Err(LumentixError::EventPaused);
         }
 
         // Check availability for the requested quantity
         let available = event.max_tickets.saturating_sub(event.tickets_sold);
         if available < quantity {
             return Err(LumentixError::EventSoldOut);
+        }
+
+        // Calculate total amount
+        let total_amount = event.ticket_price * quantity as i128;
+
+        // Process token transfer if token is set
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&buyer, &env.current_contract_address(), &total_amount);
         }
 
         // Calculate platform fee for total amount
@@ -364,6 +383,43 @@ impl LumentixContract {
         }
 
         Ok(ticket_ids)
+    }
+
+    /// Pause ticket sales for an event. Only the organizer can pause.
+    pub fn pause_ticket_sales(env: Env, event_id: u64, organizer: Address) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        event.paused = true;
+        storage::set_event(&env, event_id, &event);
+
+        Ok(())
+    }
+
+    /// Resume ticket sales for a paused event. Only the organizer can resume.
+    pub fn resume_ticket_sales(env: Env, event_id: u64) -> Result<(), LumentixError> {
+        let mut event = storage::get_event(&env, event_id)?;
+        
+        // Enforce organizer auth as requested
+        event.organizer.require_auth();
+
+        if !event.paused {
+            return Ok(()); // Already resumed or never paused
+        }
+
+        event.paused = false;
+        storage::set_event(&env, event_id, &event);
+
+        Ok(())
     }
 
     /// Mark a ticket as used (check-in at event).
@@ -498,6 +554,12 @@ impl LumentixContract {
         let escrow_amount = event.ticket_price - platform_fee;
         storage::deduct_escrow(&env, ticket.event_id, escrow_amount)?;
 
+        // Transfer tokens back to buyer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &buyer, &event.ticket_price);
+        }
+
         // Mark ticket as refunded
         ticket.refunded = true;
         storage::set_ticket(&env, ticket_id, &ticket);
@@ -590,6 +652,12 @@ impl LumentixContract {
         }
 
         storage::clear_escrow(&env, event_id);
+
+        // Transfer tokens to organizer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &organizer, &escrow_balance);
+        }
 
         // Emit EscrowReleased event
         EscrowReleased::emit(&env, event_id, organizer, escrow_balance);
@@ -693,6 +761,44 @@ impl LumentixContract {
         }
 
         active_events
+    }
+
+    /// Get events whose end time has passed.
+    /// Excludes cancelled events. Acts as a historical archive.
+    pub fn get_past_events(env: Env, current_time: u64) -> Vec<Event> {
+        let mut past_events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.end_time < current_time && event.status != EventStatus::Cancelled {
+                    past_events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        past_events
+    }
+
+    /// List all cancelled events platform-wide.
+    /// Administrators and automated indexers need this feed.
+    pub fn get_cancelled_events(env: Env) -> Vec<Event> {
+        let mut cancelled_events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.status == EventStatus::Cancelled {
+                    cancelled_events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        cancelled_events
     }
 
     /// Get ticket data by ID.
@@ -939,6 +1045,12 @@ impl LumentixContract {
         storage::add_escrow(&env, event_id, amount);
         let new_balance = storage::get_escrow(&env, event_id)?;
 
+        // Process token transfer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&depositor, &env.current_contract_address(), &amount);
+        }
+
         // Emit FundsDeposited event
         FundsDeposited::emit(&env, event_id, depositor, amount, new_balance);
 
@@ -989,6 +1101,12 @@ impl LumentixContract {
         storage::deduct_escrow(&env, event_id, amount)?;
         let new_balance = storage::get_escrow(&env, event_id)?;
 
+        // Transfer tokens to withdrawer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &withdrawer, &amount);
+        }
+
         // Emit FundsWithdrawn event
         FundsWithdrawn::emit(&env, event_id, withdrawer, amount, new_balance);
 
@@ -1010,6 +1128,12 @@ impl LumentixContract {
         }
 
         storage::clear_platform_balance(&env);
+
+        // Transfer tokens to admin
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &admin, &balance);
+        }
 
         // Emit PlatformFeesWithdrawn event
         PlatformFeesWithdrawn::emit(&env, admin, balance);
