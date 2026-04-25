@@ -27,7 +27,7 @@ export class PaymentsService {
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
-  ) {}
+  ) { }
 
   // ----------------------------------------------------------------
   // Issue #126 – getPaymentById (used by controller status endpoint)
@@ -179,23 +179,35 @@ export class PaymentsService {
     });
 
     for (const payment of expired) {
-      payment.status = PaymentStatus.FAILED;
-      await this.paymentsRepository.save(payment);
+      await this.markFailed(payment, 'Payment expired');
+    }
+  }
 
-      await this.auditService.log({
-        action: 'PAYMENT_EXPIRED',
-        entityId: payment.id,
-        entityType: 'Payment',
-        userId: payment.userId,
-        metadata: { currency: payment.currency, expiresAt: payment.expiresAt },
-      });
+  private async markFailed(payment: Payment, reason: string): Promise<void> {
+    payment.status = PaymentStatus.FAILED;
+    await this.paymentsRepository.save(payment);
 
-      await this.notificationService.queuePaymentExpiredEmail({
+    await this.auditService.log({
+      action: 'PAYMENT_FAILED',
+      entityId: payment.id,
+      entityType: 'Payment',
+      userId: payment.userId,
+      metadata: { reason, currency: payment.currency },
+    });
+
+    try {
+      const event = await this.eventsService.getEventById(payment.eventId);
+      await this.notificationService.queuePaymentFailedEmail({
         userId: payment.userId,
-        paymentId: payment.id,
+        email: '', // Handled by processor
+        eventTitle: event.title,
+        amount: Number(payment.amount),
         currency: payment.currency,
-        expiresAt: payment.expiresAt,
+        reason,
       });
+    } catch (error) {
+      // Log error but don't fail the marking process
+      console.error(`Failed to queue payment failure email for ${payment.id}:`, error);
     }
   }
 }

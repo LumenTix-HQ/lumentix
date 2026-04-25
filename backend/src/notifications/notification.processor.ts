@@ -17,7 +17,7 @@ export class NotificationProcessor {
     private readonly mailerService: MailerService,
     @Inject(forwardRef(() => UsersService))
     private readonly usersService: UsersService,
-  ) {}
+  ) { }
 
   private async shouldSkip(job: Job, preferenceKey: string): Promise<boolean> {
     const criticalJobs = ['sendRefundEmail', 'eventCancelled']; // cancellation is critical
@@ -36,7 +36,7 @@ export class NotificationProcessor {
       // Actually UsersService.findById returns sanitized user.
       // Let's check if notificationPreferences is included in sanitized user.
       const prefs = (user as any).notificationPreferences;
-      
+
       if (prefs && prefs[preferenceKey] === false) {
         this.logger.log(`Skipping ${job.name} email for user ${job.data.userId} — opted out`);
         return true;
@@ -44,7 +44,7 @@ export class NotificationProcessor {
     } catch (error) {
       this.logger.error(`Failed to check preferences for user ${job.data.userId}: ${error.message}`);
     }
-    
+
     return false;
   }
 
@@ -121,7 +121,19 @@ export class NotificationProcessor {
   @Process('sendSponsorConfirmedEmail')
   async handleSponsorConfirmedEmail(job: Job) {
     this.logger.log(`Sending sponsor confirmed email for job ${job.id}...`);
-    const { email, sponsorName, eventTitle, amount, currency, transactionHash } = job.data;
+    const { userId, email: providedEmail, sponsorName, eventTitle, amount, currency, transactionHash } = job.data;
+
+    let email = providedEmail;
+    if (userId && !email) {
+      const user = await this.usersService.findById(userId);
+      email = user.email;
+    }
+
+    if (!email) {
+      this.logger.error(`No email found for sponsor confirmation job ${job.id}`);
+      return;
+    }
+
     const subject = `Sponsorship Confirmed: ${eventTitle}`;
     const html = `
       <div style="font-family: Arial, sans-serif;">
@@ -139,7 +151,19 @@ export class NotificationProcessor {
   async handlePaymentFailedEmail(job: Job) {
     // Payment failure is critical, no skip check
     this.logger.log(`Sending payment failed email for job ${job.id}...`);
-    const { email, eventTitle, amount, currency, reason } = job.data;
+    const { userId, email: providedEmail, eventTitle, amount, currency, reason } = job.data;
+
+    let email = providedEmail;
+    if (userId && !email) {
+      const user = await this.usersService.findById(userId);
+      email = user.email;
+    }
+
+    if (!email) {
+      this.logger.error(`No email found for payment failure job ${job.id}`);
+      return;
+    }
+
     const subject = `Payment Failed: ${eventTitle}`;
     const html = `
       <div style="font-family: Arial, sans-serif;">
@@ -154,22 +178,32 @@ export class NotificationProcessor {
   }
 
   @Process('sendEventCancelledEmail')
-  async handleEventCancelledEmail(job: Job<{ emails: string[]; eventTitle: string; refundInfo: string }>) {
+  async handleEventCancelledEmail(job: Job) {
     // Cancellation is critical, no skip check
-    this.logger.log(`Sending event cancelled emails for job ${job.id}...`);
-    const { emails, eventTitle, refundInfo } = job.data;
+    this.logger.log(`Sending event cancelled email for job ${job.id}...`);
+    const { userId, eventTitle } = job.data;
+
+    if (!userId) {
+      this.logger.error(`No userId found for event cancellation job ${job.id}`);
+      return;
+    }
+
+    const user = await this.usersService.findById(userId);
+    if (!user || !user.email) {
+      this.logger.error(`No email found for user ${userId} in cancellation job ${job.id}`);
+      return;
+    }
+
     const subject = `Event Cancelled: ${eventTitle}`;
     const html = `
       <div style="font-family: Arial, sans-serif;">
         <h2>Event Cancelled: ${eventTitle}</h2>
         <p>We regret to inform you that the event <strong>${eventTitle}</strong> has been cancelled.</p>
-        <p>${refundInfo}</p>
+        <p>A refund will be processed for eligible tickets.</p>
       </div>
     `;
-    for (const email of emails) {
-      await this.mailerService.send(email, subject, html);
-    }
-    return { sent: true, count: emails.length };
+    await this.mailerService.send(user.email, subject, html);
+    return { sent: true };
   }
 
   @Process('sendEventPublishedEmail')
@@ -177,7 +211,19 @@ export class NotificationProcessor {
     if (await this.shouldSkip(job, 'eventPublished')) return;
 
     this.logger.log(`Sending event published email for job ${job.id}...`);
-    const { email, eventTitle } = job.data;
+    const { organizerId, eventTitle } = job.data;
+
+    if (!organizerId) {
+      this.logger.error(`No organizerId found for event published job ${job.id}`);
+      return;
+    }
+
+    const user = await this.usersService.findById(organizerId);
+    if (!user || !user.email) {
+      this.logger.error(`No email found for organizer ${organizerId} in published job ${job.id}`);
+      return;
+    }
+
     const subject = `Your Event is Live: ${eventTitle}`;
     const html = `
       <div style="font-family: Arial, sans-serif;">
@@ -185,7 +231,7 @@ export class NotificationProcessor {
         <p>Congratulations! Your event <strong>${eventTitle}</strong> has been published and is now accepting registrations.</p>
       </div>
     `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send(user.email, subject, html);
     return { sent: true };
   }
 
@@ -194,7 +240,19 @@ export class NotificationProcessor {
     if (await this.shouldSkip(job, 'eventCompleted')) return;
 
     this.logger.log(`Sending event completed email for job ${job.id}...`);
-    const { email, eventTitle } = job.data;
+    const { organizerId, eventTitle } = job.data;
+
+    if (!organizerId) {
+      this.logger.error(`No organizerId found for event completed job ${job.id}`);
+      return;
+    }
+
+    const user = await this.usersService.findById(organizerId);
+    if (!user || !user.email) {
+      this.logger.error(`No email found for organizer ${organizerId} in completed job ${job.id}`);
+      return;
+    }
+
     const subject = `Event Completed: ${eventTitle}`;
     const html = `
       <div style="font-family: Arial, sans-serif;">
@@ -202,7 +260,7 @@ export class NotificationProcessor {
         <p>Your event <strong>${eventTitle}</strong> has been marked as completed. Thank you for hosting on Lumentix!</p>
       </div>
     `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send(user.email, subject, html);
     return { sent: true };
   }
 
