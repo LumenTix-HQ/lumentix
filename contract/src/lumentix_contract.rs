@@ -9,7 +9,7 @@ use crate::events::{
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
 use crate::validation;
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec, Map};
 
 #[contract]
 pub struct LumentixContract;
@@ -799,6 +799,109 @@ impl LumentixContract {
         }
 
         cancelled_events
+    }
+
+    /// Implement batch_transfer_tickets write function for transferring multiple tickets in one call.
+    /// Iterate and enforce auth on from once, verifying from owns all tickets, updating paths to to.
+    pub fn batch_transfer_tickets(
+        env: Env,
+        ticket_ids: Vec<u64>,
+        to: Address,
+        from: Address,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+
+        for ticket_id in ticket_ids.iter() {
+            // Read the ticket
+            let mut ticket = storage::get_ticket(&env, ticket_id)?;
+
+            // Verify the caller is the current owner
+            if ticket.owner != from {
+                return Err(LumentixError::Unauthorized);
+            }
+
+            // Verify ticket is not used
+            if ticket.used {
+                return Err(LumentixError::TicketAlreadyUsed);
+            }
+
+            // Verify ticket is not refunded
+            if ticket.refunded {
+                return Err(LumentixError::RefundNotAllowed);
+            }
+
+            // Read the event and verify it's published
+            let event = storage::get_event(&env, ticket.event_id)?;
+            if event.status != EventStatus::Published {
+                return Err(LumentixError::InvalidStatusTransition);
+            }
+
+            // Update ticket owner
+            ticket.owner = to.clone();
+            storage::set_ticket(&env, ticket_id, &ticket);
+
+            // Record transfer in history
+            storage::append_ticket_transfer_history(
+                &env,
+                ticket_id,
+                TicketTransferRecord {
+                    from: from.clone(),
+                    to: to.clone(),
+                    timestamp: env.ledger().timestamp(),
+                },
+            );
+
+            // Emit TicketTransferred event
+            TicketTransferred::emit(&env, ticket_id, ticket.event_id, from.clone(), to.clone());
+        }
+
+        Ok(())
+    }
+
+    /// Implement get_most_active_organizers read function to list top event creators.
+    /// Analyze the complete event dataset, grouping and counting events by organizer,
+    /// sorting them by count descending, and returning the top 10 organizers.
+    pub fn get_most_active_organizers(env: Env) -> Vec<(Address, u32)> {
+        let mut organizer_counts = Map::<Address, u32>::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                let count = organizer_counts.get(event.organizer.clone()).unwrap_or(0);
+                organizer_counts.set(event.organizer, count + 1);
+            }
+            event_id += 1;
+        }
+
+        // Convert Map to Vec of tuples for sorting
+        let mut result = Vec::<(Address, u32)>::new(&env);
+        for entry in organizer_counts.iter() {
+            result.push_back(entry);
+        }
+
+        // Simple bubble sort for descending order (top organizers first)
+        let len = result.len();
+        if len > 1 {
+            for i in 0..len {
+                for j in 0..len - 1 - i {
+                    let a = result.get(j).unwrap();
+                    let b = result.get(j + 1).unwrap();
+                    if a.1 < b.1 {
+                        result.set(j, b);
+                        result.set(j + 1, a);
+                    }
+                }
+            }
+        }
+
+        // Return top 10
+        let mut top_10 = Vec::<(Address, u32)>::new(&env);
+        for entry in result.iter().take(10) {
+            top_10.push_back(entry);
+        }
+
+        top_10
     }
 
     /// Get ticket data by ID.
