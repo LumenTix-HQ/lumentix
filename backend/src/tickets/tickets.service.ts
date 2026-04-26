@@ -176,14 +176,19 @@ export class TicketsService {
     const qrPayload = JSON.stringify({ ticketId: saved.id, signature });
     const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
 
+    let pdfUrl: string | null = null;
     const user = await this.userRepo.findOne({ where: { id: payment.userId } });
     if (user && event) {
       try {
-        const pdfBuffer = await this.ticketPdfService.generate(saved, event, user, qrCodeDataUrl);
-        pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString('base64')}`;
+        pdfUrl = await this.ticketPdfService.generate(
+          saved,
+          event,
+          user.email,
+          qrCodeDataUrl,
+        );
         saved.pdfUrl = pdfUrl;
         await this.ticketRepo.save(saved);
-      } catch {
+      } catch (err) {
         // PDF generation failure is non-fatal
       }
 
@@ -254,6 +259,10 @@ export class TicketsService {
   }
 
   async transferTicket(
+    ticketId: string,
+    callerOwnerId: string,
+    newOwnerId: string,
+  ): Promise<TicketEntity> {
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
