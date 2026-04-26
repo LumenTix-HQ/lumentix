@@ -25,7 +25,7 @@ import { AuditModule } from '../audit/audit.module';
     NotificationModule,
     AuditModule,
   ],
-  providers: [TicketsService, TicketSigningService, TicketExpiryJob],
+  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob],
   controllers: [TicketsController, TicketsPublicController, VerificationController],
   exports: [TicketsService],
 })
