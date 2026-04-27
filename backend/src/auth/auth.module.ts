@@ -11,13 +11,14 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { BruteForceService } from '../common/services/brute-force.service';
 import { BruteForceGuard } from '../common/guards/brute-force.guard';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
 import { MailerModule } from '../mailer/mailer.module';
 import type { StringValue } from 'ms';
 
 @Module({
   imports: [
     UsersModule,
-    TypeOrmModule.forFeature([PasswordResetToken]),
+    TypeOrmModule.forFeature([PasswordResetToken, RefreshToken]),
     MailerModule,
     PassportModule,
     ConfigModule,

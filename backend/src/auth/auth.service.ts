@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -28,9 +29,11 @@ export class AuthService {
     private readonly mailerService: MailerService,
     @InjectRepository(PasswordResetToken)
     private readonly passwordResetTokenRepository: Repository<PasswordResetToken>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
   ) {}
 
-  async register(dto: RegisterDto): Promise<{ access_token: string }> {
+  async register(dto: RegisterDto): Promise<{ accessToken: string; refreshToken: string }> {
     const user = await this.usersService.createUser({
       email: dto.email,
       password: dto.password,
@@ -40,7 +43,7 @@ export class AuthService {
     return this.signToken(user.id, user.role);
   }
 
-  async login(dto: LoginDto): Promise<{ access_token: string }> {
+  async login(dto: LoginDto): Promise<{ accessToken: string; refreshToken: string }> {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -136,8 +139,83 @@ export class AuthService {
     return { message: 'Password has been reset successfully.' };
   }
 
-  private signToken(userId: string, role: string): { access_token: string } {
+  async refresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+    const parts = refreshToken.split(':');
+    if (parts.length !== 2) {
+      throw new UnauthorizedException('Invalid refresh token format');
+    }
+    const [tokenId, secret] = parts;
+
+    const tokenRecord = await this.refreshTokenRepository.findOne({ where: { id: tokenId } });
+    if (!tokenRecord) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (tokenRecord.revoked) {
+      throw new UnauthorizedException('Refresh token is revoked');
+    }
+
+    if (tokenRecord.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedException('Refresh token is expired');
+    }
+
+    const isMatch = await bcrypt.compare(secret, tokenRecord.token);
+    if (!isMatch) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // Revoke old token
+    tokenRecord.revoked = true;
+    await this.refreshTokenRepository.save(tokenRecord);
+
+    const user = await this.usersService.findById(tokenRecord.userId);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    return this.signToken(user.id, user.role);
+  }
+
+  async logout(refreshToken: string): Promise<void> {
+    const parts = refreshToken.split(':');
+    if (parts.length !== 2) {
+      throw new UnauthorizedException('Invalid refresh token format');
+    }
+    const [tokenId, secret] = parts;
+
+    const tokenRecord = await this.refreshTokenRepository.findOne({ where: { id: tokenId } });
+    if (!tokenRecord) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    const isMatch = await bcrypt.compare(secret, tokenRecord.token);
+    if (!isMatch) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    tokenRecord.revoked = true;
+    await this.refreshTokenRepository.save(tokenRecord);
+  }
+
+  private async signToken(userId: string, role: string): Promise<{ accessToken: string; refreshToken: string }> {
     const payload: { sub: string; role: string } = { sub: userId, role };
-    return { access_token: this.jwtService.sign(payload) };
+    const accessToken = this.jwtService.sign(payload);
+
+    const rawSecret = crypto.randomBytes(32).toString('hex');
+    const hashedSecret = await bcrypt.hash(rawSecret, BCRYPT_SALT_ROUNDS);
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30); // 30 days
+
+    const tokenRecord = this.refreshTokenRepository.create({
+      userId,
+      token: hashedSecret,
+      expiresAt,
+    });
+    const savedToken = await this.refreshTokenRepository.save(tokenRecord);
+
+    const refreshToken = `${savedToken.id}:${rawSecret}`;
+
+    return { accessToken, refreshToken };
   }
 }

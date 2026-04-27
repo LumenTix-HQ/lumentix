@@ -6,6 +6,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { UsersService } from '../users/users.service';
 import {
   Horizon,
   Transaction,
@@ -35,7 +36,10 @@ export class StellarService implements OnModuleDestroy {
   private readonly networkPassphrase: string;
   private streamCloser: (() => void) | null = null;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
+  ) {
     const horizonUrl =
       this.configService.get<string>('stellar.horizonUrl') ??
       'https://horizon-testnet.stellar.org';
@@ -281,7 +285,9 @@ export class StellarService implements OnModuleDestroy {
   /**
    * Create and fund a new Stellar keypair via Friendbot (testnet only).
    */
-  async createTestnetAccount(): Promise<{ publicKey: string; secret: string }> {
+  async createTestnetAccount(
+    userId: string,
+  ): Promise<{ publicKey: string; secret: string }> {
     if (this.configService.get<string>('STELLAR_NETWORK') !== 'testnet') {
       throw new BadRequestException(
         'Account creation is only available on testnet',
@@ -294,7 +300,15 @@ export class StellarService implements OnModuleDestroy {
     if (!res.ok) {
       throw new InternalServerErrorException('Friendbot funding failed');
     }
-    return { publicKey: keypair.publicKey(), secret: keypair.secret() };
+
+    const account = { publicKey: keypair.publicKey(), secret: keypair.secret() };
+
+    // Link account to user profile if userId provided
+    if (userId) {
+      await this.usersService.updateWallet(userId, account.publicKey);
+    }
+
+    return account;
   }
 
   // ─── Path payment methods ────────────────────────────────────────────────

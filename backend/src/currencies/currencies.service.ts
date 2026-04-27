@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Currency } from './entities/currency.entity';
@@ -44,9 +44,9 @@ export class CurrenciesService {
     return records.map((c) => c.code);
   }
 
-  async toggleActive(id: string): Promise<Currency | undefined> {
-    const currency = await this.findOne(id);
-    if (!currency) return undefined;
+  async toggleActive(id: string): Promise<Currency> {
+    const currency = await this.currencyRepository.findOne({ where: { id } });
+    if (!currency) throw new NotFoundException();
     currency.isActive = !currency.isActive;
     return await this.currencyRepository.save(currency);
   }
