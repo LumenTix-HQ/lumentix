@@ -9,7 +9,7 @@ import { CurrenciesModule } from '../currencies/currencies.module';
 import { EventsModule } from '../events/events.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { AuditModule } from '../audit/audit.module';
-import { NotificationModule } from '../notification/notification.module';
+import { NotificationModule } from '../notifications/notification.module';
 
 @Module({
   imports: [
