@@ -4168,3 +4168,149 @@ fn test_multiple_withdrawals() {
     assert_eq!(client.get_escrow_balance(&event_id), 0i128);
 
 }
+
+// ============================================================================
+// ADDITIONAL TESTS (ADDED FOR ISSUES)
+// ============================================================================
+
+#[test]
+fn test_pause_and_resume_ticket_sales() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Pause sales
+    client.pause_ticket_sales(&event_id, &organizer);
+
+    let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::EventPaused)));
+
+    // Resume sales
+    client.resume_ticket_sales(&event_id);
+
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(ticket_id, 1);
+
+    // Refund works even if paused
+    client.pause_ticket_sales(&event_id, &organizer);
+    client.cancel_event(&organizer, &event_id);
+    let refund_result = client.try_refund_ticket(&ticket_id, &buyer);
+    assert!(refund_result.is_ok());
+}
+
+#[test]
+fn test_batch_purchase_tickets_capacity_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Evt"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &20u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let tids = client.batch_purchase_tickets(&buyer, &event_id, &10u32, &1000i128);
+    assert_eq!(tids.len(), 10);
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.tickets_sold, 10);
+    assert_eq!(client.get_escrow_balance(&event_id), 1000i128);
+
+    let mut map = soroban_sdk::Map::<u64, bool>::new(&env);
+    for id in tids.iter() {
+        let t = client.get_ticket_info(&id);
+        assert_eq!(t.owner, buyer);
+        map.set(id, true);
+    }
+    // ensure all 10 are distinct (mapping distinct keys)
+    assert_eq!(map.len(), 10);
+
+    // Over capacity limit (11 per batch)
+    let fail_res = client.try_batch_purchase_tickets(&buyer, &event_id, &11u32, &1100i128);
+    assert_eq!(fail_res, Err(Ok(LumentixError::CapacityExceeded)));
+}
+
+#[test]
+fn test_batch_use_tickets() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer1 = Address::generate(&env);
+    let buyer2 = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let tids1 = client.batch_purchase_tickets(&buyer1, &event_id, &4u32, &400i128);
+    let tid2 = client.purchase_ticket(&buyer2, &event_id, &100i128);
+
+    // Use 4 valid tickets
+    assert!(client.try_batch_use_tickets(&tids1, &organizer).is_ok());
+
+    for id in tids1.iter() {
+        assert!(client.get_ticket_info(&id).used);
+    }
+
+    // Test already used mixed with new ticket
+    let mut mix_ids = soroban_sdk::Vec::new(&env);
+    mix_ids.push_back(tids1.get(0).unwrap()); // already used
+    mix_ids.push_back(tid2);
+
+    let fail_res = client.try_batch_use_tickets(&mix_ids, &organizer);
+    assert_eq!(fail_res, Err(Ok(LumentixError::TicketAlreadyUsed)));
+
+    // Ensure state sync: tid2 should NOT be used since it failed
+    assert!(!client.get_ticket_info(&tid2).used);
+}
+
+#[test]
+fn test_set_event_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Evt"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &100u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    // Increase to 200
+    assert!(client.try_set_event_capacity(&organizer, &event_id, &200u32).is_ok());
+
+    // Buy 50
+    for _ in 0..5 {
+        client.batch_purchase_tickets(&buyer, &event_id, &10u32, &1000i128);
+    }
+
+    // Decrease below 50 should fail
+    let res = client.try_set_event_capacity(&organizer, &event_id, &40u32);
+    assert_eq!(res, Err(Ok(LumentixError::CapacityExceeded)));
+
+    // Decrease to 50 should succeed
+    assert!(client.try_set_event_capacity(&organizer, &event_id, &50u32).is_ok());
+}

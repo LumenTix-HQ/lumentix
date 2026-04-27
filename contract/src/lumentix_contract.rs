@@ -203,6 +203,32 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Update the maximum capacity of an event.
+    /// Can only be called by the organizer. Capacity cannot be reduced below tickets_sold.
+    pub fn set_event_capacity(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        new_capacity: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if new_capacity < event.tickets_sold {
+            return Err(LumentixError::CapacityExceeded);
+        }
+
+        event.max_tickets = new_capacity;
+        storage::set_event(&env, event_id, &event);
+
+        Ok(())
+    }
+
     /// Purchase a ticket for a published event.
     /// Checks capacity: rejects with EventSoldOut when tickets_sold >= max_tickets.
     /// Increments tickets_sold on success.
@@ -444,6 +470,33 @@ impl LumentixContract {
 
         // Emit TicketUsed event
         TicketUsed::emit(&env, ticket_id, ticket.event_id, ticket.owner, caller);
+
+        Ok(())
+    }
+
+    /// Mark multiple tickets as used in a single transaction.
+    /// Only the event organizer can use tickets. All tickets must belong to the same organizer's event.
+    pub fn batch_use_tickets(env: Env, ticket_ids: Vec<u64>, caller: Address) -> Result<(), LumentixError> {
+        caller.require_auth();
+
+        for ticket_id in ticket_ids.iter() {
+            let mut ticket = storage::get_ticket(&env, ticket_id)?;
+
+            if ticket.used {
+                return Err(LumentixError::TicketAlreadyUsed);
+            }
+
+            // Only organizer can validate tickets
+            let event = storage::get_event(&env, ticket.event_id)?;
+            if event.organizer != caller {
+                return Err(LumentixError::Unauthorized);
+            }
+
+            ticket.used = true;
+            storage::set_ticket(&env, ticket_id, &ticket);
+
+            TicketUsed::emit(&env, ticket_id, ticket.event_id, ticket.owner, caller.clone());
+        }
 
         Ok(())
     }
