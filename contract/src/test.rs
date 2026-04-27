@@ -1821,6 +1821,209 @@ fn test_get_active_events_empty() {
 }
 
 #[test]
+fn test_get_events_by_status_mixed_statuses_filters_correctly() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let draft_event = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let published_event = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Published Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &3000u64,
+        &4000u64,
+        &150i128,
+        &40u32,
+    );
+    client.update_event_status(&published_event, &EventStatus::Published, &organizer);
+
+    let cancelled_event = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Cancelled Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &5000u64,
+        &6000u64,
+        &200i128,
+        &30u32,
+    );
+    client.update_event_status(&cancelled_event, &EventStatus::Published, &organizer);
+    client.cancel_event(&organizer, &cancelled_event);
+
+    let draft_events = client.get_events_by_status(&EventStatus::Draft);
+    assert_eq!(draft_events.len(), 1);
+    assert_eq!(draft_events.get(0).unwrap().id, draft_event);
+    assert_eq!(draft_events.get(0).unwrap().status, EventStatus::Draft);
+
+    let published_events = client.get_events_by_status(&EventStatus::Published);
+    assert_eq!(published_events.len(), 1);
+    assert_eq!(published_events.get(0).unwrap().id, published_event);
+    assert_eq!(published_events.get(0).unwrap().status, EventStatus::Published);
+
+    let cancelled_events = client.get_events_by_status(&EventStatus::Cancelled);
+    assert_eq!(cancelled_events.len(), 1);
+    assert_eq!(cancelled_events.get(0).unwrap().id, cancelled_event);
+    assert_eq!(cancelled_events.get(0).unwrap().status, EventStatus::Cancelled);
+}
+
+#[test]
+fn test_get_events_by_status_empty_storage_returns_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+
+    let events = client.get_events_by_status(&EventStatus::Published);
+    assert_eq!(events.len(), 0);
+}
+
+#[test]
+fn test_get_events_by_status_no_matches_returns_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event 1"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event 2"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &3000u64,
+        &4000u64,
+        &150i128,
+        &40u32,
+    );
+
+    let completed_events = client.get_events_by_status(&EventStatus::Completed);
+    assert_eq!(completed_events.len(), 0);
+}
+
+#[test]
+fn test_get_events_by_status_all_match_returns_all() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id_1 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Published Event 1"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    client.update_event_status(&event_id_1, &EventStatus::Published, &organizer);
+
+    let event_id_2 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Published Event 2"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &3000u64,
+        &4000u64,
+        &150i128,
+        &40u32,
+    );
+    client.update_event_status(&event_id_2, &EventStatus::Published, &organizer);
+
+    let published_events = client.get_events_by_status(&EventStatus::Published);
+    assert_eq!(published_events.len(), 2);
+    assert_eq!(published_events.get(0).unwrap().id, event_id_1);
+    assert_eq!(published_events.get(1).unwrap().id, event_id_2);
+
+    for event in published_events.iter() {
+        assert_eq!(event.status, EventStatus::Published);
+    }
+}
+
+#[test]
+fn test_get_events_by_status_skips_sparse_ids() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, contract_id, client) = create_test_contract_with_id(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id_1 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Published Event 1"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    client.update_event_status(&event_id_1, &EventStatus::Published, &organizer);
+
+    let missing_event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Removed Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &3000u64,
+        &4000u64,
+        &150i128,
+        &40u32,
+    );
+    client.update_event_status(&missing_event_id, &EventStatus::Published, &organizer);
+
+    let event_id_3 = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Published Event 3"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &5000u64,
+        &6000u64,
+        &200i128,
+        &30u32,
+    );
+    client.update_event_status(&event_id_3, &EventStatus::Published, &organizer);
+
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .remove(&("EVENT_", missing_event_id));
+    });
+
+    let published_events = client.get_events_by_status(&EventStatus::Published);
+    assert_eq!(published_events.len(), 2);
+    assert_eq!(published_events.get(0).unwrap().id, event_id_1);
+    assert_eq!(published_events.get(1).unwrap().id, event_id_3);
+}
+
+#[test]
 fn test_get_events_by_organizer_empty() {
     let env = Env::default();
     env.mock_all_auths();
