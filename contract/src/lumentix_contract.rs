@@ -2,7 +2,8 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
+    AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventMetadataUpdated,
+    EventSalesPaused, EventSalesResumed, EventStatusChanged,
     EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
     TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
@@ -155,6 +156,61 @@ impl LumentixContract {
             ticket_price,
             max_tickets,
         );
+
+        Ok(())
+    }
+
+    /// Update event metadata for a published event (name, description, location, times, price, capacity).
+    /// Unlike update_event (Draft-only), this allows organizers to correct metadata on live events.
+    /// Only the event organizer can call this. Validates all inputs.
+    /// Emits EventMetadataUpdated for fast UI refresh via graph indexers.
+    pub fn update_event_metadata(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        name: String,
+        description: String,
+        location: String,
+        start_time: u64,
+        end_time: u64,
+        ticket_price: i128,
+        max_tickets: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Only published events can have metadata updated via this path
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        validation::validate_string_not_empty(&name)?;
+        validation::validate_string_not_empty(&description)?;
+        validation::validate_string_not_empty(&location)?;
+        validation::validate_positive_amount(ticket_price)?;
+        validation::validate_positive_capacity(max_tickets)?;
+        validation::validate_time_range(start_time, end_time)?;
+
+        if max_tickets < event.tickets_sold {
+            return Err(LumentixError::CapacityExceeded);
+        }
+
+        event.name = name;
+        event.description = description;
+        event.location = location;
+        event.start_time = start_time;
+        event.end_time = end_time;
+        event.ticket_price = ticket_price;
+        event.max_tickets = max_tickets;
+
+        storage::set_event(&env, event_id, &event);
+
+        EventMetadataUpdated::emit(&env, event_id, organizer, env.ledger().timestamp());
 
         Ok(())
     }
@@ -428,6 +484,9 @@ impl LumentixContract {
         event.paused = true;
         storage::set_event(&env, event_id, &event);
 
+        // Emit EventSalesPaused so front-end carts can invalidate immediately
+        EventSalesPaused::emit(&env, event_id, organizer, env.ledger().timestamp());
+
         Ok(())
     }
 
@@ -442,8 +501,12 @@ impl LumentixContract {
             return Ok(()); // Already resumed or never paused
         }
 
+        let organizer = event.organizer.clone();
         event.paused = false;
         storage::set_event(&env, event_id, &event);
+
+        // Emit EventSalesResumed so front-end carts can re-validate
+        EventSalesResumed::emit(&env, event_id, organizer, env.ledger().timestamp());
 
         Ok(())
     }

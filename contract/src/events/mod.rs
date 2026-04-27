@@ -268,3 +268,42 @@ impl FundsWithdrawn {
         );
     }
 }
+
+/// Event emitted when event metadata is updated (name, description, location, times, price, capacity).
+/// Enables front-end graph indexers to reflect changed event information dynamically without polling.
+pub struct EventMetadataUpdated;
+
+impl EventMetadataUpdated {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, time_updated: u64) {
+        env.events().publish(
+            (symbol_short!("evtmeta"),),
+            (event_id, organizer, time_updated),
+        );
+    }
+}
+
+/// Event emitted when ticket sales for an event are paused by the organizer.
+/// Informs users in real-time that an event they are purchasing has gone offline.
+pub struct EventSalesPaused;
+
+impl EventSalesPaused {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("salespaus"),),
+            (event_id, organizer, timestamp),
+        );
+    }
+}
+
+/// Event emitted when ticket sales for a paused event are resumed by the organizer.
+/// Restores UI cart validity for users waiting on the event.
+pub struct EventSalesResumed;
+
+impl EventSalesResumed {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("salesrsm"),),
+            (event_id, organizer, timestamp),
+        );
+    }
+}

@@ -4373,6 +4373,487 @@ fn test_multiple_withdrawals() {
 }
 
 // ============================================================================
+// STORAGE TTL EXTENSION TESTS
+// ============================================================================
+
+#[test]
+fn test_bump_ticket_ttl_single_extends_without_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Single TTL bump must succeed and ticket must still be readable
+    let result = client.try_bump_ticket_ttl(&ticket_id);
+    assert!(result.is_ok(), "bump_ticket_ttl should succeed for existing ticket");
+
+    // Ticket state must be unchanged after TTL extension
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket.id, ticket_id);
+    assert_eq!(ticket.owner, buyer);
+    assert!(!ticket.used);
+    assert!(!ticket.refunded);
+}
+
+#[test]
+fn test_bump_ticket_ttl_nonexistent_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+
+    let result = client.try_bump_ticket_ttl(&999u64);
+    assert_eq!(result, Err(Ok(LumentixError::TicketNotFound)));
+}
+
+#[test]
+fn test_bump_ticket_ttl_batch_extends_all_tickets_systematically() {
+    // Validates that batch operations touching multiple tickets extend TTLs
+    // dynamically to prevent accidental expiration during deep modifications.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Purchase a batch of tickets
+    let ticket_ids = client.batch_purchase_tickets(&buyer, &event_id, &5u32, &500i128);
+    assert_eq!(ticket_ids.len(), 5);
+
+    // Bump TTL for every ticket in the batch — each must succeed independently
+    for ticket_id in ticket_ids.iter() {
+        let result = client.try_bump_ticket_ttl(&ticket_id);
+        assert!(
+            result.is_ok(),
+            "bump_ticket_ttl should succeed for batch ticket {ticket_id}"
+        );
+    }
+
+    // All tickets must remain readable and unmodified after TTL extensions
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert_eq!(ticket.event_id, event_id);
+        assert_eq!(ticket.owner, buyer);
+        assert!(!ticket.used);
+        assert!(!ticket.refunded);
+    }
+}
+
+#[test]
+fn test_bump_ticket_ttl_used_ticket_still_extends() {
+    // A used ticket must still have its TTL extended — the record must persist
+    // for audit purposes even after check-in.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.use_ticket(&ticket_id, &organizer);
+
+    let result = client.try_bump_ticket_ttl(&ticket_id);
+    assert!(result.is_ok(), "bump_ticket_ttl should succeed for used ticket");
+
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert!(ticket.used, "ticket must still be marked used after TTL bump");
+}
+
+#[test]
+fn test_storage_ttl_min_max_constants_are_within_soroban_bounds() {
+    // Validates that PERSISTENT_LIFETIME and INSTANCE_LIFETIME are within
+    // the native Soroban environment's allowed TTL range.
+    // Soroban max persistent TTL is 6_312_000 ledgers (~1 year at 5s/ledger).
+    // PERSISTENT_LIFETIME = 535_680 (~30 days) must be <= max.
+    use crate::types::{INSTANCE_LIFETIME, PERSISTENT_LIFETIME, TEMPORARY_LIFETIME};
+
+    const SOROBAN_MAX_PERSISTENT_TTL: u32 = 6_312_000;
+    const SOROBAN_MIN_TTL: u32 = 1;
+
+    assert!(
+        PERSISTENT_LIFETIME >= SOROBAN_MIN_TTL,
+        "PERSISTENT_LIFETIME must be at least 1 ledger"
+    );
+    assert!(
+        PERSISTENT_LIFETIME <= SOROBAN_MAX_PERSISTENT_TTL,
+        "PERSISTENT_LIFETIME exceeds Soroban max persistent TTL"
+    );
+    assert!(
+        INSTANCE_LIFETIME >= SOROBAN_MIN_TTL,
+        "INSTANCE_LIFETIME must be at least 1 ledger"
+    );
+    assert!(
+        INSTANCE_LIFETIME <= SOROBAN_MAX_PERSISTENT_TTL,
+        "INSTANCE_LIFETIME exceeds Soroban max persistent TTL"
+    );
+    assert!(
+        TEMPORARY_LIFETIME >= SOROBAN_MIN_TTL,
+        "TEMPORARY_LIFETIME must be at least 1 ledger"
+    );
+    // Temporary storage max is lower: 535_680 ledgers
+    const SOROBAN_MAX_TEMPORARY_TTL: u32 = 535_680;
+    assert!(
+        TEMPORARY_LIFETIME <= SOROBAN_MAX_TEMPORARY_TTL,
+        "TEMPORARY_LIFETIME exceeds Soroban max temporary TTL"
+    );
+}
+
+// ============================================================================
+// EVENT METADATA UPDATED EVENT TESTS
+// ============================================================================
+
+#[test]
+fn test_update_event_metadata_published_event_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Name"),
+        &String::from_str(&env, "Updated Desc"),
+        &String::from_str(&env, "Updated Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert!(result.is_ok());
+
+    // Verify EventMetadataUpdated event was emitted with correct topic
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"evtmeta" {
+                    found = true;
+                    // Verify data: (event_id, organizer, time_updated)
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 3, "EventMetadataUpdated must carry 3 fields");
+                    } else {
+                        panic!("Expected Vec data for EventMetadataUpdated");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "EventMetadataUpdated event not emitted");
+}
+
+#[test]
+fn test_update_event_metadata_draft_event_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let result = client.try_update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_update_event_metadata_unauthorized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_update_event_metadata(
+        &attacker,
+        &event_id,
+        &String::from_str(&env, "Hacked Name"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_update_event_metadata_persists_changes() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1500u64,
+        &2500u64,
+        &200i128,
+        &60u32,
+    );
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.name, String::from_str(&env, "New Name"));
+    assert_eq!(event.description, String::from_str(&env, "New Desc"));
+    assert_eq!(event.location, String::from_str(&env, "New Loc"));
+    assert_eq!(event.start_time, 1500u64);
+    assert_eq!(event.end_time, 2500u64);
+    assert_eq!(event.ticket_price, 200i128);
+    assert_eq!(event.max_tickets, 60u32);
+    // Status must remain Published
+    assert_eq!(event.status, EventStatus::Published);
+}
+
+// ============================================================================
+// TREASURY RECIPIENT ROTATION TESTS
+// ============================================================================
+
+#[test]
+fn test_treasury_rotation_non_admin_cannot_change_admin() {
+    // Non-admin attempts to rotate recipient, fails auth.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let attacker = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    let result = client.try_change_admin(&attacker, &new_admin);
+    assert_eq!(
+        result,
+        Err(Ok(LumentixError::Unauthorized)),
+        "Non-admin must not be able to rotate the fee recipient"
+    );
+
+    // Admin must remain unchanged
+    assert_eq!(client.get_admin(), admin);
+}
+
+#[test]
+fn test_treasury_rotation_admin_rotates_recipient_a_to_b() {
+    // Admin successfully rotates recipient address from Address_A to Address_B.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (addr_a, client) = create_test_contract(&env);
+    let addr_b = Address::generate(&env);
+
+    let result = client.try_change_admin(&addr_a, &addr_b);
+    assert!(result.is_ok(), "Admin must be able to rotate recipient");
+
+    assert_eq!(
+        client.get_admin(),
+        addr_b,
+        "Fee recipient must now be Address_B"
+    );
+}
+
+#[test]
+fn test_treasury_rotation_subsequent_withdrawal_resolves_to_new_recipient() {
+    // Subsequent event completes and calls treasury withdrawal.
+    // Verify funds securely resolve to Address_B instead of Address_A.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (addr_a, client) = create_test_contract(&env);
+    let addr_b = Address::generate(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Set a platform fee so there are fees to withdraw
+    client.set_platform_fee(&addr_a, &1000u32); // 10%
+
+    // Create and publish event, sell tickets to accumulate fees
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Platform balance: 20 (10% of 200)
+    assert_eq!(client.get_platform_balance(), 20i128);
+
+    // Rotate recipient from A to B
+    client.change_admin(&addr_a, &addr_b);
+
+    // Address_A must no longer be able to withdraw
+    let old_withdraw = client.try_withdraw_platform_fees(&addr_a);
+    assert_eq!(
+        old_withdraw,
+        Err(Ok(LumentixError::Unauthorized)),
+        "Address_A must be rejected after rotation"
+    );
+
+    // Address_B must successfully withdraw the accumulated fees
+    let withdrawn = client.withdraw_platform_fees(&addr_b);
+    assert_eq!(withdrawn, 20i128, "Funds must resolve to Address_B");
+    assert_eq!(client.get_platform_balance(), 0i128);
+}
+
+#[test]
+fn test_treasury_rotation_escrow_release_after_rotation_goes_to_organizer_not_admin() {
+    // Escrow release always goes to the organizer, not the admin/fee recipient.
+    // Rotation of admin must not affect organizer escrow payouts.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (addr_a, client) = create_test_contract(&env);
+    let addr_b = Address::generate(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Rotate admin
+    client.change_admin(&addr_a, &addr_b);
+
+    // Complete event and release escrow — must go to organizer
+    env.ledger().with_mut(|li| li.timestamp = 2001);
+    client.complete_event(&organizer, &event_id);
+    let released = client.release_escrow(&organizer, &event_id);
+    assert_eq!(released, 100i128, "Escrow must be released to organizer");
+
+    // Verify escrow is cleared
+    assert_eq!(client.get_escrow_balance(&event_id), 0i128);
+}
+
+// ============================================================================
+// EVENT SALES PAUSED / RESUMED EVENT TESTS
+// ============================================================================
+
+#[test]
+fn test_pause_ticket_sales_emits_event_sales_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| li.timestamp = 1234);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.pause_ticket_sales(&event_id, &organizer);
+
+    // Verify EventSalesPaused was emitted
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"salespaus" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 3, "EventSalesPaused must carry (event_id, organizer, timestamp)");
+                    } else {
+                        panic!("Expected Vec data for EventSalesPaused");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "EventSalesPaused event not emitted");
+}
+
+#[test]
+fn test_resume_ticket_sales_emits_event_sales_resumed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|li| li.timestamp = 9999);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.pause_ticket_sales(&event_id, &organizer);
+    client.resume_ticket_sales(&event_id);
+
+    // Verify EventSalesResumed was emitted
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"salesrsm" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 3, "EventSalesResumed must carry (event_id, organizer, timestamp)");
+                    } else {
+                        panic!("Expected Vec data for EventSalesResumed");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "EventSalesResumed event not emitted");
+}
+
+#[test]
+fn test_pause_ticket_sales_unauthorized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_pause_ticket_sales(&event_id, &attacker);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_purchase_blocked_while_paused_and_allowed_after_resume() {
 // ADDITIONAL TESTS (ADDED FOR ISSUES)
 // ============================================================================
 

@@ -240,7 +240,7 @@ mod withdraw_platform_fees_test;
 
 pub use contract::TicketContract;
 pub use error::LumentixError;
-pub use events::{CheckInEvent, EventCancelled, TransferEvent};
+pub use events::{CheckInEvent, EventCancelled, EventMetadataUpdated, EventSalesPaused, EventSalesResumed, TransferEvent};
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
 pub use types::{Event, EventStatus, Ticket as LumentixTicket};
