@@ -79,6 +79,8 @@ export class AdminController {
   @ApiOperation({ summary: 'Get all events (admin only)' })
   listAllEvents(@Query() dto: ListAdminEventsDto) {
     return this.adminService.listAllEvents(dto);
+  }
+
   // ── Role Requests ─────────────────────────────────────────────────────────
 
   @Get('role-requests')
