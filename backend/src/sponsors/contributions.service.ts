@@ -288,6 +288,7 @@ export class ContributionsService {
     if (!sponsor || !event) return;
 
     await this.notificationService.queueSponsorConfirmedEmail({
+      userId: sponsor.id,
       email: sponsor.email,
       sponsorName: sponsor.email,
       eventTitle: event.title,

@@ -1,12 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { Event, EventStatus } from '../events/entities/event.entity';
 
 @Injectable()
 export class NotificationService {
   constructor(
     @InjectQueue('notifications') private readonly notificationQueue: Queue,
-  ) {}
+    @InjectRepository(TicketEntity)
+    private readonly ticketRepo: Repository<TicketEntity>,
+  ) { }
 
   async queueTicketEmail(data: {
     userId: string;
@@ -49,6 +55,7 @@ export class NotificationService {
   }
 
   async queueSponsorConfirmedEmail(data: {
+    userId: string;
     email: string;
     sponsorName: string;
     eventTitle: string;
@@ -60,6 +67,7 @@ export class NotificationService {
   }
 
   async queuePaymentFailedEmail(data: {
+    userId: string;
     email: string;
     eventTitle: string;
     amount: number;
@@ -89,5 +97,48 @@ export class NotificationService {
     eventTitle: string;
   }) {
     await this.notificationQueue.add('sendEventCompletedEmail', data, { attempts: 3 });
+  }
+
+  async queueLifecycleEmail(event: Event): Promise<void> {
+    switch (event.status) {
+      case EventStatus.PUBLISHED:
+        // Email to organizer: "Your event is live"
+        await this.notificationQueue.add('sendEventPublishedEmail', {
+          organizerId: event.organizerId,
+          eventTitle: event.title,
+          eventId: event.id,
+        });
+        break;
+
+      case EventStatus.CANCELLED:
+        // Fetch all ticket holders and email each one
+        // This is a batch operation — queue one job per ticket holder
+        const ticketHolderIds = await this.getTicketHolderIds(event.id);
+        for (const userId of ticketHolderIds) {
+          await this.notificationQueue.add('sendEventCancelledEmail', {
+            userId,
+            eventTitle: event.title,
+            eventId: event.id,
+          });
+        }
+        break;
+
+      case EventStatus.COMPLETED:
+        // Email to organizer: "Your event has completed"
+        await this.notificationQueue.add('sendEventCompletedEmail', {
+          organizerId: event.organizerId,
+          eventTitle: event.title,
+          eventId: event.id,
+        });
+        break;
+    }
+  }
+
+  private async getTicketHolderIds(eventId: string): Promise<string[]> {
+    const tickets = await this.ticketRepo.find({
+      select: ['ownerId'],
+      where: { eventId, status: 'valid' },
+    });
+    return [...new Set(tickets.map((t) => t.ownerId))];
   }
 }

@@ -60,7 +60,7 @@ export class EventsService {
     private readonly escrowService: EscrowService,
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
-  ) {}
+  ) { }
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
     const event = this.eventRepository.create({
@@ -333,43 +333,6 @@ export class EventsService {
   }
 
   private async queueLifecycleEmail(event: Event): Promise<void> {
-    if (event.status === EventStatus.CANCELLED) {
-      const tickets = await this.ticketRepository.find({
-        where: { eventId: event.id },
-      });
-
-      const ownerIds = [...new Set(tickets.map((t) => t.ownerId))];
-      if (ownerIds.length === 0) return;
-
-      const users = await this.userRepository.findByIds(ownerIds);
-      const emails = users.map((u) => u.email).filter(Boolean);
-      if (emails.length === 0) return;
-
-      await this.notificationService.queueEventCancelledEmail({
-        emails,
-        eventTitle: event.title,
-        refundInfo: 'A refund will be processed for eligible tickets.',
-      });
-    } else if (event.status === EventStatus.PUBLISHED) {
-      const organizer = await this.userRepository.findOne({
-        where: { id: event.organizerId },
-      });
-      if (!organizer) return;
-
-      await this.notificationService.queueEventPublishedEmail({
-        email: organizer.email,
-        eventTitle: event.title,
-      });
-    } else if (event.status === EventStatus.COMPLETED) {
-      const organizer = await this.userRepository.findOne({
-        where: { id: event.organizerId },
-      });
-      if (!organizer) return;
-
-      await this.notificationService.queueEventCompletedEmail({
-        email: organizer.email,
-        eventTitle: event.title,
-      });
-    }
+    await this.notificationService.queueLifecycleEmail(event);
   }
 }

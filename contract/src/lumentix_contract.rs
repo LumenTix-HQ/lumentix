@@ -3,13 +3,13 @@
 use crate::error::LumentixError;
 use crate::events::{
     AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventStatusChanged,
-    EventUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, TicketPurchased, TicketRefunded,
-    TicketTransferred, TicketUsed,
+    EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
-use crate::types::{Event, EventStatus, Ticket, PERSISTENT_LIFETIME};
+use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
 use crate::validation;
-use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec, Map};
 
 #[contract]
 pub struct LumentixContract;
@@ -67,6 +67,7 @@ impl LumentixContract {
             max_tickets,
             tickets_sold: 0,
             status: EventStatus::Draft,
+            paused: false,
         };
 
         storage::set_event(&env, event_id, &event);
@@ -220,6 +221,11 @@ impl LumentixContract {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
+        // Event must not be paused
+        if event.paused {
+            return Err(LumentixError::EventPaused);
+        }
+
         // Check capacity — reject when sold out
         if event.tickets_sold >= event.max_tickets {
             return Err(LumentixError::EventSoldOut);
@@ -228,6 +234,12 @@ impl LumentixContract {
         // Validate payment amount
         if amount < event.ticket_price {
             return Err(LumentixError::InsufficientFunds);
+        }
+
+        // Process token transfer if token is set
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&buyer, &env.current_contract_address(), &amount);
         }
 
         // Calculate platform fee
@@ -280,10 +292,9 @@ impl LumentixContract {
     /// Batch size is capped at 10 tickets per transaction.
     pub fn batch_purchase_tickets(
         env: Env,
-        buyer: Address,
         event_id: u64,
         quantity: u32,
-        total_amount: i128,
+        buyer: Address,
     ) -> Result<Vec<u64>, LumentixError> {
         buyer.require_auth();
 
@@ -302,16 +313,24 @@ impl LumentixContract {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
-        // Validate total_amount matches expected price
-        let expected_amount = event.ticket_price * quantity as i128;
-        if total_amount != expected_amount {
-            return Err(LumentixError::InsufficientFunds);
+        // Event must not be paused
+        if event.paused {
+            return Err(LumentixError::EventPaused);
         }
 
         // Check availability for the requested quantity
         let available = event.max_tickets.saturating_sub(event.tickets_sold);
         if available < quantity {
             return Err(LumentixError::EventSoldOut);
+        }
+
+        // Calculate total amount
+        let total_amount = event.ticket_price * quantity as i128;
+
+        // Process token transfer if token is set
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&buyer, &env.current_contract_address(), &total_amount);
         }
 
         // Calculate platform fee for total amount
@@ -364,6 +383,43 @@ impl LumentixContract {
         }
 
         Ok(ticket_ids)
+    }
+
+    /// Pause ticket sales for an event. Only the organizer can pause.
+    pub fn pause_ticket_sales(env: Env, event_id: u64, organizer: Address) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        event.paused = true;
+        storage::set_event(&env, event_id, &event);
+
+        Ok(())
+    }
+
+    /// Resume ticket sales for a paused event. Only the organizer can resume.
+    pub fn resume_ticket_sales(env: Env, event_id: u64) -> Result<(), LumentixError> {
+        let mut event = storage::get_event(&env, event_id)?;
+        
+        // Enforce organizer auth as requested
+        event.organizer.require_auth();
+
+        if !event.paused {
+            return Ok(()); // Already resumed or never paused
+        }
+
+        event.paused = false;
+        storage::set_event(&env, event_id, &event);
+
+        Ok(())
     }
 
     /// Mark a ticket as used (check-in at event).
@@ -432,10 +488,34 @@ impl LumentixContract {
         ticket.owner = to.clone();
         storage::set_ticket(&env, ticket_id, &ticket);
 
+        // Record transfer in history
+        storage::append_ticket_transfer_history(
+            &env,
+            ticket_id,
+            TicketTransferRecord {
+                from: from.clone(),
+                to: to.clone(),
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
         // Emit TicketTransferred event
-        TicketTransferred::emit(&env, ticket_id, from, to, ticket.event_id);
+        TicketTransferred::emit(&env, ticket_id, ticket.event_id, from, to);
 
         Ok(())
+    }
+
+    /// Return the full ownership transfer history for a ticket.
+    /// Each entry records the previous owner, new owner, and ledger timestamp of the transfer.
+    /// Returns an empty Vec if the ticket exists but has never been transferred.
+    /// Returns TicketNotFound if the ticket does not exist.
+    pub fn get_ticket_transfer_history(
+        env: Env,
+        ticket_id: u64,
+    ) -> Result<Vec<TicketTransferRecord>, LumentixError> {
+        // Verify the ticket exists before returning history
+        storage::get_ticket(&env, ticket_id)?;
+        Ok(storage::get_ticket_transfer_history(&env, ticket_id))
     }
 
     /// Refund a ticket for a cancelled event.
@@ -469,7 +549,16 @@ impl LumentixContract {
         }
 
         // Deduct from escrow
-        storage::deduct_escrow(&env, ticket.event_id, event.ticket_price)?;
+        let fee_bps = storage::get_platform_fee_bps(&env);
+        let platform_fee = (event.ticket_price * fee_bps as i128) / 10000;
+        let escrow_amount = event.ticket_price - platform_fee;
+        storage::deduct_escrow(&env, ticket.event_id, escrow_amount)?;
+
+        // Transfer tokens back to buyer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &buyer, &event.ticket_price);
+        }
 
         // Mark ticket as refunded
         ticket.refunded = true;
@@ -564,6 +653,12 @@ impl LumentixContract {
 
         storage::clear_escrow(&env, event_id);
 
+        // Transfer tokens to organizer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &organizer, &escrow_balance);
+        }
+
         // Emit EscrowReleased event
         EscrowReleased::emit(&env, event_id, organizer, escrow_balance);
 
@@ -628,6 +723,7 @@ impl LumentixContract {
     /// Returns an empty vector if no matching events exist.
     /// No auth required.
     pub fn get_events_by_status(env: Env, status: EventStatus) -> Vec<Event> {
+
         let mut events = Vec::new(&env);
         let next_event_id = storage::get_next_event_id(&env);
         let mut event_id: u64 = 1;
@@ -635,6 +731,30 @@ impl LumentixContract {
         while event_id < next_event_id {
             if let Ok(event) = storage::get_event(&env, event_id) {
                 if event.status == status {
+                    events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        events
+    }
+
+    /// Get all events created by a specific organizer with a specific status.
+    /// Returns an empty vector if no events match.
+    /// No auth required.
+    pub fn get_events_by_org_and_status(
+        env: Env,
+        organizer: Address,
+        status: EventStatus,
+    ) -> Vec<Event> {
+        let mut events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.organizer == organizer && event.status == status {
                     events.push_back(event);
                 }
             }
@@ -663,6 +783,147 @@ impl LumentixContract {
         }
 
         active_events
+    }
+
+    /// Get events whose end time has passed.
+    /// Excludes cancelled events. Acts as a historical archive.
+    pub fn get_past_events(env: Env, current_time: u64) -> Vec<Event> {
+        let mut past_events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.end_time < current_time && event.status != EventStatus::Cancelled {
+                    past_events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        past_events
+    }
+
+    /// List all cancelled events platform-wide.
+    /// Administrators and automated indexers need this feed.
+    pub fn get_cancelled_events(env: Env) -> Vec<Event> {
+        let mut cancelled_events = Vec::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.status == EventStatus::Cancelled {
+                    cancelled_events.push_back(event);
+                }
+            }
+            event_id += 1;
+        }
+
+        cancelled_events
+    }
+
+    /// Implement batch_transfer_tickets write function for transferring multiple tickets in one call.
+    /// Iterate and enforce auth on from once, verifying from owns all tickets, updating paths to to.
+    pub fn batch_transfer_tickets(
+        env: Env,
+        ticket_ids: Vec<u64>,
+        to: Address,
+        from: Address,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+
+        for ticket_id in ticket_ids.iter() {
+            // Read the ticket
+            let mut ticket = storage::get_ticket(&env, ticket_id)?;
+
+            // Verify the caller is the current owner
+            if ticket.owner != from {
+                return Err(LumentixError::Unauthorized);
+            }
+
+            // Verify ticket is not used
+            if ticket.used {
+                return Err(LumentixError::TicketAlreadyUsed);
+            }
+
+            // Verify ticket is not refunded
+            if ticket.refunded {
+                return Err(LumentixError::RefundNotAllowed);
+            }
+
+            // Read the event and verify it's published
+            let event = storage::get_event(&env, ticket.event_id)?;
+            if event.status != EventStatus::Published {
+                return Err(LumentixError::InvalidStatusTransition);
+            }
+
+            // Update ticket owner
+            ticket.owner = to.clone();
+            storage::set_ticket(&env, ticket_id, &ticket);
+
+            // Record transfer in history
+            storage::append_ticket_transfer_history(
+                &env,
+                ticket_id,
+                TicketTransferRecord {
+                    from: from.clone(),
+                    to: to.clone(),
+                    timestamp: env.ledger().timestamp(),
+                },
+            );
+
+            // Emit TicketTransferred event
+            TicketTransferred::emit(&env, ticket_id, ticket.event_id, from.clone(), to.clone());
+        }
+
+        Ok(())
+    }
+
+    /// Implement get_most_active_organizers read function to list top event creators.
+    /// Analyze the complete event dataset, grouping and counting events by organizer,
+    /// sorting them by count descending, and returning the top 10 organizers.
+    pub fn get_most_active_organizers(env: Env) -> Vec<(Address, u32)> {
+        let mut organizer_counts = Map::<Address, u32>::new(&env);
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                let count = organizer_counts.get(event.organizer.clone()).unwrap_or(0);
+                organizer_counts.set(event.organizer, count + 1);
+            }
+            event_id += 1;
+        }
+
+        // Convert Map to Vec of tuples for sorting
+        let mut result = Vec::<(Address, u32)>::new(&env);
+        for entry in organizer_counts.iter() {
+            result.push_back(entry);
+        }
+
+        // Simple bubble sort for descending order (top organizers first)
+        let len = result.len();
+        if len > 1 {
+            for i in 0..len {
+                for j in 0..len - 1 - i {
+                    let a = result.get(j).unwrap();
+                    let b = result.get(j + 1).unwrap();
+                    if a.1 < b.1 {
+                        result.set(j, b);
+                        result.set(j + 1, a);
+                    }
+                }
+            }
+        }
+
+        // Return top 10
+        let mut top_10 = Vec::<(Address, u32)>::new(&env);
+        for entry in result.iter().take(10) {
+            top_10.push_back(entry);
+        }
+
+        top_10
     }
 
     /// Get ticket data by ID.
@@ -702,6 +963,33 @@ impl LumentixContract {
         Ok(tickets)
     }
 
+    /// Get all refunded tickets for a given event.
+    /// Returns EventNotFound if the event does not exist.
+    /// Returns an empty vector if the event has no refunded tickets.
+    /// No auth required.
+    pub fn get_refunded_tickets_by_event(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<Ticket>, LumentixError> {
+        // Ensure the event exists.
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut tickets = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id && ticket.refunded {
+                    tickets.push_back(ticket);
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(tickets)
+    }
+
     pub fn get_tickets_by_buyer(env: Env, buyer: Address) -> Vec<Ticket> {
         let mut tickets = Vec::new(&env);
         let next_ticket_id = storage::get_next_ticket_id(&env);
@@ -719,33 +1007,7 @@ impl LumentixContract {
         tickets
     }
 
-    /// Get all refunded tickets for a specific event.
-    /// Useful for organizers to track refund activity and for auditing after event cancellation.
-    /// Returns an empty Vec if no refunded tickets exist for the event.
-    pub fn get_refunded_tickets_by_event(
-        env: Env,
-        event_id: u64,
-    ) -> Result<Vec<Ticket>, LumentixError> {
-        // Verify the event exists
-        let _ = storage::get_event(&env, event_id)?;
 
-        let mut refunded_tickets = Vec::new(&env);
-        let next_ticket_id = storage::get_next_ticket_id(&env);
-        let mut ticket_id: u64 = 1;
-
-        // Iterate through all tickets
-        while ticket_id < next_ticket_id {
-            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
-                // Check if ticket belongs to this event and is refunded
-                if ticket.event_id == event_id && ticket.refunded {
-                    refunded_tickets.push_back(ticket);
-                }
-            }
-            ticket_id += 1;
-        }
-
-        Ok(refunded_tickets)
-    }
 
     /// Extend the TTL of an event. Only the organizer can call this.
     pub fn bump_event_ttl(env: Env, event_id: u64) -> Result<(), LumentixError> {
@@ -805,6 +1067,51 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Returns the configured **protocol (platform) fee** and the **fee recipient** used for ticket flows.
+    ///
+    /// The fee is expressed in **basis points** (bps): `1_000` bps = 10%, `10_000` bps = 100%. The recipient is
+    /// always the contract **admin** address (the same account that receives accrued fees when
+    /// [`Self::withdraw_platform_fees`] is called). This query is read-only aside from emitting a diagnostic event.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` — Soroban [`Env`]: host, storage, and event interface. No caller identity is read; there is no
+    ///   `Address` parameter and **no authentication** is required.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((fee_bps, fee_recipient))` — `fee_bps` is the current platform fee in \[0, 10_000\] (enforced on
+    ///   [`Self::set_platform_fee`]). `fee_recipient` is the admin [`Address`] from instance storage.
+    ///
+    /// # Errors
+    ///
+    /// * [`LumentixError::NotInitialized`] — returned before any storage reads if the contract has not been
+    ///   initialized via [`Self::initialize`].
+    ///
+    /// # Events
+    ///
+    /// On success, emits [`ProtocolFeeQueried`] (`feequery` topic) with `(fee_bps, fee_recipient)` for indexing
+    /// and analytics. **Every successful call emits this event**, including repeated reads with the same values.
+    ///
+    /// # Panics
+    ///
+    /// This entrypoint does not use `panic!` for control flow. A panic could still occur only if underlying
+    /// Soroban storage or the event subsystem encounters an unrecoverable host error, or if instance storage is
+    /// in an inconsistent state (for example, initialized without a valid admin record—should not happen when
+    /// only using the public API).
+    pub fn get_protocol_fee(env: Env) -> Result<(u32, Address), LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        let fee_bps = storage::get_platform_fee_bps(&env);
+        let fee_recipient = storage::get_admin(&env);
+
+        // Emit diagnostic event for off-chain analytics tracking
+        ProtocolFeeQueried::emit(&env, fee_bps, fee_recipient.clone());
+
+        Ok((fee_bps, fee_recipient))
+    }
+
     /// Get the current platform fee in basis points.
     pub fn get_platform_fee(env: Env) -> u32 {
         storage::get_platform_fee_bps(&env)
@@ -825,6 +1132,112 @@ impl LumentixContract {
         Ok(revenue)
     }
 
+    /// Deposit funds into a group's (event's) treasury for future distributions.
+    /// The depositor must be the event organizer or the admin.
+    /// The event must exist and not be cancelled.
+    /// Amount must be positive.
+    pub fn deposit_funds(
+        env: Env,
+        depositor: Address,
+        event_id: u64,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        depositor.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Only the organizer or admin may deposit into an event treasury
+        let admin = storage::get_admin(&env);
+        if event.organizer != depositor && admin != depositor {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Cannot deposit into a cancelled event
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Add to escrow (treasury)
+        storage::add_escrow(&env, event_id, amount);
+        let new_balance = storage::get_escrow(&env, event_id)?;
+
+        // Process token transfer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&depositor, &env.current_contract_address(), &amount);
+        }
+
+        // Emit FundsDeposited event
+        FundsDeposited::emit(&env, event_id, depositor, amount, new_balance);
+
+        Ok(new_balance)
+    }
+
+    /// Withdraw allocated funds from a group's (event's) treasury.
+    /// The withdrawer must be the event organizer or the admin.
+    /// The event must exist and not be cancelled.
+    /// Amount must be positive and not exceed available escrow balance.
+    pub fn withdraw_funds(
+        env: Env,
+        withdrawer: Address,
+        event_id: u64,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        withdrawer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        // Validate amount
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Only the organizer or admin may withdraw from an event treasury
+        let admin = storage::get_admin(&env);
+        if event.organizer != withdrawer && admin != withdrawer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Cannot withdraw from a cancelled event
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // Check available escrow balance
+        let current_balance = storage::get_escrow(&env, event_id)?;
+        if current_balance < amount {
+            return Err(LumentixError::InsufficientEscrow);
+        }
+
+        // Deduct from escrow (treasury)
+        storage::deduct_escrow(&env, event_id, amount)?;
+        let new_balance = storage::get_escrow(&env, event_id)?;
+
+        // Transfer tokens to withdrawer
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &withdrawer, &amount);
+        }
+
+        // Emit FundsWithdrawn event
+        FundsWithdrawn::emit(&env, event_id, withdrawer, amount, new_balance);
+
+        Ok(new_balance)
+    }
+
     /// Withdraw all accumulated platform fees. Only the admin can withdraw.
     pub fn withdraw_platform_fees(env: Env, admin: Address) -> Result<i128, LumentixError> {
         admin.require_auth();
@@ -840,6 +1253,12 @@ impl LumentixContract {
         }
 
         storage::clear_platform_balance(&env);
+
+        // Transfer tokens to admin
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&env.current_contract_address(), &admin, &balance);
+        }
 
         // Emit PlatformFeesWithdrawn event
         PlatformFeesWithdrawn::emit(&env, admin, balance);
@@ -921,5 +1340,79 @@ impl LumentixContract {
     /// No auth required - useful for frontends and deployment scripts.
     pub fn get_is_initialized(env: Env) -> bool {
         storage::is_initialized(&env)
+    }
+
+    /// Get total revenue for an organizer across all events.
+    /// Iterates through all event IDs from 1 to EVENT_CTR, calculates gross revenue, and sums it up.
+    /// Returns 0 if the organizer has no events or no sales. No auth required.
+    pub fn get_organizer_total_revenue(env: Env, organizer: Address) -> i128 {
+        let mut total_revenue: i128 = 0;
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                if event.organizer == organizer {
+                    total_revenue += event.tickets_sold as i128 * event.ticket_price;
+                }
+            }
+            event_id += 1;
+        }
+
+        total_revenue
+    }
+
+    /// Get total tickets sold across all events on the platform.
+    /// Iterates through all events from 1 to EVENT_CTR and sums up the tickets_sold field.
+    /// No auth required.
+    pub fn get_total_tickets_sold(env: Env) -> u64 {
+        let mut total_tickets: u64 = 0;
+        let next_event_id = storage::get_next_event_id(&env);
+        let mut event_id: u64 = 1;
+
+        while event_id < next_event_id {
+            if let Ok(event) = storage::get_event(&env, event_id) {
+                total_tickets += event.tickets_sold as u64;
+            }
+            event_id += 1;
+        }
+
+        total_tickets
+    }
+
+    /// Get the addresses of all checked-in (used ticket) attendees for an event.
+    /// Verifies the event exists, then iterates all tickets collecting owners of
+    /// used tickets matching event_id. Deduplicates so each address appears once.
+    pub fn get_event_attendees(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<Address>, LumentixError> {
+        // Verify event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        let mut attendees: Vec<Address> = Vec::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id && ticket.used {
+                    // Deduplicate: only add if not already present
+                    let mut already_added = false;
+                    for i in 0..attendees.len() {
+                        if attendees.get(i).unwrap() == ticket.owner {
+                            already_added = true;
+                            break;
+                        }
+                    }
+                    if !already_added {
+                        attendees.push_back(ticket.owner);
+                    }
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(attendees)
     }
 }
