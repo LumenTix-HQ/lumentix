@@ -71,6 +71,7 @@ describe('AuthService', () => {
         },
         {
           provide: getRepositoryToken(RefreshToken),
+          useValue: { create: jest.fn(), save: jest.fn(), find: jest.fn() },
           useValue: refreshTokenRepository,
         },
       ],
@@ -172,6 +173,8 @@ describe('AuthService', () => {
 
       const result = await authService.login(loginDto);
 
+      expect(result.access_token).toBe('token');
+      expect(result).toHaveProperty('refresh_token');
       expect(result).toHaveProperty('accessToken', 'token');
       expect(result).toHaveProperty('refreshToken');
       expect(usersService.findByEmail).toHaveBeenCalledWith(loginDto.email);

@@ -74,6 +74,7 @@ export class PaymentsService {
       throw new BadRequestException('Event is not available for purchase');
     }
     if (!event.escrowPublicKey) {
+      throw new ConflictException('Event does not have an escrow wallet configured');
       throw new BadRequestException('Event does not have an escrow wallet configured');
     }
 
