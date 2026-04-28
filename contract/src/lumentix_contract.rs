@@ -5,7 +5,7 @@ use crate::events::{
     AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventMetadataUpdated,
     EventSalesPaused, EventSalesResumed, EventStatusChanged,
     EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
-    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
+    BatchTicketsUsed, TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
@@ -542,6 +542,8 @@ impl LumentixContract {
     pub fn batch_use_tickets(env: Env, ticket_ids: Vec<u64>, caller: Address) -> Result<(), LumentixError> {
         caller.require_auth();
 
+        let mut by_event = Map::<u64, Vec<u64>>::new(&env);
+
         for ticket_id in ticket_ids.iter() {
             let mut ticket = storage::get_ticket(&env, ticket_id)?;
 
@@ -558,7 +560,15 @@ impl LumentixContract {
             ticket.used = true;
             storage::set_ticket(&env, ticket_id, &ticket);
 
-            TicketUsed::emit(&env, ticket_id, ticket.event_id, ticket.owner, caller.clone());
+            let eid = ticket.event_id;
+            let mut ids = by_event.get(eid).unwrap_or_else(|| Vec::new(&env));
+            ids.push_back(ticket_id);
+            by_event.set(eid, ids);
+        }
+
+        for entry in by_event.iter() {
+            let (event_id, ids) = entry;
+            BatchTicketsUsed::emit(&env, event_id, ids.len(), ids);
         }
 
         Ok(())
