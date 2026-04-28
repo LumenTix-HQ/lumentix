@@ -42,6 +42,8 @@ pub struct Ticket {
     pub purchase_time: u64,
     pub used: bool,
     pub refunded: bool,
+    /// Set by admin via [`crate::lumentix_contract::LumentixContract::revoke_ticket`]; invalidates the ticket.
+    pub revoked: bool,
 }
 
 /// A single record in a ticket's transfer history

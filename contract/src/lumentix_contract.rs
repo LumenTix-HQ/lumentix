@@ -352,6 +352,7 @@ impl LumentixContract {
             purchase_time: env.ledger().timestamp(),
             used: false,
             refunded: false,
+            revoked: false,
         };
 
         storage::set_ticket(&env, ticket_id, &ticket);
@@ -447,6 +448,7 @@ impl LumentixContract {
                 purchase_time,
                 used: false,
                 refunded: false,
+                revoked: false,
             };
 
             storage::set_ticket(&env, ticket_id, &ticket);
@@ -518,6 +520,10 @@ impl LumentixContract {
 
         let mut ticket = storage::get_ticket(&env, ticket_id)?;
 
+        if ticket.revoked {
+            return Err(LumentixError::RevokedTicket);
+        }
+
         if ticket.used {
             return Err(LumentixError::TicketAlreadyUsed);
         }
@@ -537,6 +543,29 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Administratively revoke a ticket. Only the contract admin may call this.
+    /// The ticket must exist, not already be revoked, used, or refunded.
+    pub fn revoke_ticket(env: Env, admin: Address, ticket_id: u64) -> Result<(), LumentixError> {
+        admin.require_auth();
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        let mut ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.revoked {
+            return Err(LumentixError::RevokedTicket);
+        }
+        if ticket.used {
+            return Err(LumentixError::TicketAlreadyUsed);
+        }
+        if ticket.refunded {
+            return Err(LumentixError::RefundNotAllowed);
+        }
+        ticket.revoked = true;
+        storage::set_ticket(&env, ticket_id, &ticket);
+        Ok(())
+    }
+
     /// Mark multiple tickets as used in a single transaction.
     /// Only the event organizer can use tickets. All tickets must belong to the same organizer's event.
     pub fn batch_use_tickets(env: Env, ticket_ids: Vec<u64>, caller: Address) -> Result<(), LumentixError> {
@@ -544,6 +573,10 @@ impl LumentixContract {
 
         for ticket_id in ticket_ids.iter() {
             let mut ticket = storage::get_ticket(&env, ticket_id)?;
+
+            if ticket.revoked {
+                return Err(LumentixError::RevokedTicket);
+            }
 
             if ticket.used {
                 return Err(LumentixError::TicketAlreadyUsed);
@@ -582,6 +615,10 @@ impl LumentixContract {
         // Verify the caller is the current owner
         if ticket.owner != from {
             return Err(LumentixError::Unauthorized);
+        }
+
+        if ticket.revoked {
+            return Err(LumentixError::RevokedTicket);
         }
 
         // Verify ticket is not used
@@ -645,6 +682,10 @@ impl LumentixContract {
         // Only the ticket owner can request a refund
         if ticket.owner != buyer {
             return Err(LumentixError::Unauthorized);
+        }
+
+        if ticket.revoked {
+            return Err(LumentixError::RevokedTicket);
         }
 
         // Cannot refund used tickets
@@ -958,6 +999,10 @@ impl LumentixContract {
                 return Err(LumentixError::Unauthorized);
             }
 
+            if ticket.revoked {
+                return Err(LumentixError::RevokedTicket);
+            }
+
             // Verify ticket is not used
             if ticket.used {
                 return Err(LumentixError::TicketAlreadyUsed);
@@ -1048,13 +1093,16 @@ impl LumentixContract {
     }
 
     /// Check whether a ticket is currently valid for entry.
-    /// A ticket is valid only when it exists, has not been used or refunded,
+    /// A ticket is valid only when it exists, has not been used, refunded, or revoked,
     /// and its event is still published.
     pub fn get_ticket_validity(env: Env, ticket_id: u64) -> Result<bool, LumentixError> {
         let ticket = storage::get_ticket(&env, ticket_id)?;
         let event = storage::get_event(&env, ticket.event_id)?;
 
-        Ok(!ticket.used && !ticket.refunded && event.status == EventStatus::Published)
+        Ok(!ticket.used
+            && !ticket.refunded
+            && !ticket.revoked
+            && event.status == EventStatus::Published)
     }
 
     /// Get all tickets sold for a given event.
