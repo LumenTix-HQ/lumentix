@@ -2,10 +2,11 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AdminChanged, EscrowReleased, EventCancelled, EventCompleted, EventCreated, EventMetadataUpdated,
-    EventSalesPaused, EventSalesResumed, EventStatusChanged,
-    EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
-    BatchTicketsUsed, TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
+    AdminChanged, BatchTicketsPurchased, BatchTicketsTransferred, EscrowReleased, EventCancelled,
+    EventCompleted, EventCreated, EventMetadataUpdated, EventSalesPaused, EventSalesResumed,
+    EventStatusChanged, EventUpdated, FundsDeposited, FundsWithdrawn, PlatformFeeRecipientUpdated,
+    PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried, BatchTicketsUsed,
+    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
@@ -481,6 +482,7 @@ impl LumentixContract {
         // Create tickets and collect IDs
         let mut ticket_ids = Vec::new(&env);
         let purchase_time = env.ledger().timestamp();
+        let starting_ticket_id = storage::get_next_ticket_id(&env);
 
         for _ in 0..quantity {
             let ticket_id = storage::get_next_ticket_id(&env);
@@ -498,18 +500,17 @@ impl LumentixContract {
 
             storage::set_ticket(&env, ticket_id, &ticket);
             ticket_ids.push_back(ticket_id);
-
-            // Emit event for each ticket
-            TicketPurchased::emit(
-                &env,
-                ticket_id,
-                event_id,
-                buyer.clone(),
-                event.ticket_price,
-                platform_fee / quantity as i128,
-                escrow_amount / quantity as i128,
-            );
         }
+
+        // Emit BatchTicketsPurchased event for indexer efficiency
+        BatchTicketsPurchased::emit(
+            &env,
+            event_id,
+            buyer.clone(),
+            quantity,
+            total_amount,
+            starting_ticket_id,
+        );
 
         Ok(ticket_ids)
     }
@@ -1142,6 +1143,9 @@ impl LumentixContract {
             TicketTransferred::emit(&env, ticket_id, ticket.event_id, from.clone(), to.clone());
         }
 
+        // Emit BatchTicketsTransferred event for indexer efficiency
+        BatchTicketsTransferred::emit(&env, from.clone(), to.clone(), ticket_ids.clone());
+
         Ok(())
     }
 
@@ -1597,8 +1601,11 @@ impl LumentixContract {
         let old_admin = current_admin;
         storage::set_admin(&env, &new_admin);
 
-        // Emit AdminChanged event
-        AdminChanged::emit(&env, admin, old_admin, new_admin);
+        // Emit AdminChanged event for backward compatibility
+        AdminChanged::emit(&env, admin.clone(), old_admin.clone(), new_admin.clone());
+
+        // Emit PlatformFeeRecipientUpdated for Dapp indexing solutions
+        PlatformFeeRecipientUpdated::emit(&env, admin, old_admin, new_admin);
 
         Ok(())
     }
