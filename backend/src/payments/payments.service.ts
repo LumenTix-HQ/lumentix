@@ -75,6 +75,7 @@ export class PaymentsService {
     }
     if (!event.escrowPublicKey) {
       throw new ConflictException('Event does not have an escrow wallet configured');
+      throw new BadRequestException('Event does not have an escrow wallet configured');
     }
 
     const SUPPORTED = ['XLM', 'USDC'];
