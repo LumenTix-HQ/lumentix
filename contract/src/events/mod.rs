@@ -320,3 +320,67 @@ impl EventSalesResumed {
         );
     }
 }
+
+/// Universal event emitted anytime an EventStatus switches (e.g. Draft -> Published, Active -> Cancelled).
+/// Standardizes indexer states minimizing specific listener configuration.
+pub struct GenericEventStateTransition;
+
+impl GenericEventStateTransition {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        caller: Address,
+        old_status: crate::types::EventStatus,
+        new_status: crate::types::EventStatus,
+    ) {
+        env.events().publish(
+            (symbol_short!("genstsch"),),
+            (event_id, caller, old_status, new_status),
+        );
+    }
+}
+
+/// Event emitted when an event's capacity is changed.
+/// Alerts scalpers, waitlists, and potential buyers of capacity changes immediately.
+pub struct EventCapacityChanged;
+
+impl EventCapacityChanged {
+    pub fn emit(env: &Env, event_id: u64, old_capacity: u32, new_capacity: u32) {
+        env.events().publish(
+            (symbol_short!("capchng"),),
+            (event_id, old_capacity, new_capacity),
+        );
+    }
+}
+
+/// Event emitted when a ticket is revoked by an admin.
+/// Provides audit trail for admin tampering actions and builds off-chain trust graphs.
+pub struct TicketRevoked;
+
+impl TicketRevoked {
+    pub fn emit(
+        env: &Env,
+        admin_address: Address,
+        ticket_id: u64,
+        event_id: u64,
+        reason: Option<String>,
+    ) {
+        env.events().publish(
+            (symbol_short!("tktrevok"),),
+            (admin_address, ticket_id, event_id, reason),
+        );
+    }
+}
+
+/// Event emitted when an event's end time is extended.
+/// Notifies attendees of prolonged event times for mobile push alerts.
+pub struct EventTimeExtended;
+
+impl EventTimeExtended {
+    pub fn emit(env: &Env, event_id: u64, previous_end_time: u64, new_end_time: u64) {
+        env.events().publish(
+            (symbol_short!("timeext"),),
+            (event_id, previous_end_time, new_end_time),
+        );
+    }
+}

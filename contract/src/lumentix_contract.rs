@@ -254,7 +254,10 @@ impl LumentixContract {
         storage::set_event(&env, event_id, &event);
 
         // Emit EventStatusChanged event
-        EventStatusChanged::emit(&env, event_id, caller, old_status, new_status);
+        EventStatusChanged::emit(&env, event_id, caller.clone(), old_status.clone(), new_status.clone());
+
+        // Emit GenericEventStateTransition event for universal state transition tracking
+        GenericEventStateTransition::emit(&env, event_id, caller, old_status, new_status);
 
         Ok(())
     }
@@ -279,8 +282,50 @@ impl LumentixContract {
             return Err(LumentixError::CapacityExceeded);
         }
 
+        let old_capacity = event.max_tickets;
         event.max_tickets = new_capacity;
         storage::set_event(&env, event_id, &event);
+
+        // Emit EventCapacityChanged event
+        EventCapacityChanged::emit(&env, event_id, old_capacity, new_capacity);
+
+        Ok(())
+    }
+
+    /// Extend the end time of an event.
+    /// Only the organizer can extend the event end time.
+    /// New end time must be after the current end time.
+    /// Emits EventTimeExtended event for mobile push alerts.
+    pub fn extend_event_end_time(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        new_end_time: u64,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Only published events can have end time extended
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        // New end time must be after current end time
+        if new_end_time <= event.end_time {
+            return Err(LumentixError::InvalidTimeRange);
+        }
+
+        let previous_end_time = event.end_time;
+        event.end_time = new_end_time;
+        storage::set_event(&env, event_id, &event);
+
+        // Emit EventTimeExtended event
+        EventTimeExtended::emit(&env, event_id, previous_end_time, new_end_time);
 
         Ok(())
     }
@@ -741,6 +786,47 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Revoke a ticket by admin action.
+    /// Marks the ticket as refunded and used to prevent entry.
+    /// Emits TicketRevoked event for audit trail and off-chain trust graphs.
+    pub fn revoke_ticket(
+        env: Env,
+        admin: Address,
+        ticket_id: u64,
+        reason: Option<String>,
+    ) -> Result<(), LumentixError> {
+        admin.require_auth();
+
+        // Verify caller is the admin
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let mut ticket = storage::get_ticket(&env, ticket_id)?;
+
+        // Already revoked/refunded tickets cannot be revoked again
+        if ticket.refunded {
+            return Err(LumentixError::RefundNotAllowed);
+        }
+
+        let mut event = storage::get_event(&env, ticket.event_id)?;
+
+        // Mark ticket as refunded and used to prevent entry
+        ticket.refunded = true;
+        ticket.used = true;
+        storage::set_ticket(&env, ticket_id, &ticket);
+
+        // Decrement tickets_sold to free up capacity
+        event.tickets_sold = event.tickets_sold.saturating_sub(1);
+        storage::set_event(&env, ticket.event_id, &event);
+
+        // Emit TicketRevoked event for audit trail
+        TicketRevoked::emit(&env, admin, ticket_id, ticket.event_id, reason);
+
+        Ok(())
+    }
+
     /// Cancel a published event. Only the organizer can cancel.
     pub fn cancel_event(env: Env, organizer: Address, event_id: u64) -> Result<(), LumentixError> {
         organizer.require_auth();
@@ -755,9 +841,13 @@ impl LumentixContract {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
+        let old_status = event.status.clone();
         event.status = EventStatus::Cancelled;
         storage::set_event(&env, event_id, &event);
-        EventCancelled::emit(&env, event_id, organizer, event.tickets_sold);
+        EventCancelled::emit(&env, event_id, organizer.clone(), event.tickets_sold);
+
+        // Emit GenericEventStateTransition event for universal state transition tracking
+        GenericEventStateTransition::emit(&env, event_id, organizer, old_status, EventStatus::Cancelled);
 
         Ok(())
     }
@@ -785,11 +875,15 @@ impl LumentixContract {
             return Err(LumentixError::InvalidStatusTransition);
         }
 
+        let old_status = event.status.clone();
         event.status = EventStatus::Completed;
         storage::set_event(&env, event_id, &event);
 
         // Emit EventCompleted event
-        EventCompleted::emit(&env, event_id, organizer, event.tickets_sold);
+        EventCompleted::emit(&env, event_id, organizer.clone(), event.tickets_sold);
+
+        // Emit GenericEventStateTransition event for universal state transition tracking
+        GenericEventStateTransition::emit(&env, event_id, organizer, old_status, EventStatus::Completed);
 
         Ok(())
     }
