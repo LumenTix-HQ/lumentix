@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { AuditLog } from './entities/audit-log.entity';
 
 export interface AuditLogEntry {
@@ -19,7 +19,7 @@ export class AuditService {
     public readonly auditLogRepository: Repository<AuditLog>,
   ) {}
 
-  getQueryBuilder() {
+  getQueryBuilder(): SelectQueryBuilder<AuditLog> {
     return this.auditLogRepository.createQueryBuilder('audit');
   }
 

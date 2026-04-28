@@ -175,11 +175,15 @@ pub fn add_escrow(env: &Env, event_id: u64, amount: i128) {
 /// Get escrow balance for an event
 pub fn get_escrow(env: &Env, event_id: u64) -> Result<i128, LumentixError> {
     let key = (ESCROW_PREFIX, event_id);
-    let bal: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(bal)
+    if env.storage().persistent().has(&key) {
+        let bal: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+        Ok(bal)
+    } else {
+        Ok(0)
+    }
 }
 
 /// Deduct amount from escrow

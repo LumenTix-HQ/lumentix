@@ -1,6 +1,6 @@
 #![allow(deprecated)]
 
-use soroban_sdk::{symbol_short, Address, Env, String, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
 
 /// A type for transfer of event
 pub struct TransferEvent;
@@ -208,6 +208,19 @@ impl TicketUsed {
         env.events().publish(
             (symbol_short!("tktused"),),
             (ticket_id, event_id, owner, caller),
+        );
+    }
+}
+
+/// Event emitted when multiple tickets are checked in via [`crate::lumentix_contract::LumentixContract::batch_use_tickets`].
+/// Carries `event_id`, `quantity`, and the list of `ticket_ids` so indexers can update headcounts without one log line per ticket.
+pub struct BatchTicketsUsed;
+
+impl BatchTicketsUsed {
+    pub fn emit(env: &Env, event_id: u64, quantity: u32, ticket_ids: Vec<u64>) {
+        env.events().publish(
+            (symbol_short!("batchuse"),),
+            (event_id, quantity, ticket_ids),
         );
     }
 }
