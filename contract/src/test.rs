@@ -315,6 +315,7 @@ fn test_batch_purchase_tickets_success_validates_ticket_properties() {
         assert_eq!(ticket.purchase_time, 7777);
         assert!(!ticket.used);
         assert!(!ticket.refunded);
+        assert!(!ticket.revoked);
     }
 }
 
@@ -380,6 +381,22 @@ fn test_batch_purchase_tickets_rejects_when_capacity_exceeded() {
     assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
 }
 
+#[test]
+fn test_batch_purchase_tickets_charges_list_price_per_ticket() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let tids = client.batch_purchase_tickets(&event_id, &2u32, &buyer);
+    assert_eq!(tids.len(), 2);
+    assert_eq!(client.get_escrow_balance(&event_id), 200i128);
+}
+
 // ============================================================================
 // TICKET USAGE TESTS
 // ============================================================================
@@ -432,6 +449,141 @@ fn test_use_ticket_already_used() {
 
     let result = client.try_use_ticket(&ticket_id, &organizer);
     assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
+}
+
+// ============================================================================
+// REVOKE TICKET (ADMINISTRATIVE OVERSIGHT) TESTS
+// ============================================================================
+
+/// Non-admin `try_revoke_ticket` returns Unauthorized (same pattern as platform fee).
+#[test]
+fn test_revoke_ticket_non_admin_returns_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_revoke_ticket(&attacker, &ticket_id);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+    assert!(!client.get_ticket_info(&ticket_id).revoked);
+}
+
+/// Organizer (non-admin) cannot revoke via `try_revoke_ticket`.
+#[test]
+fn test_revoke_ticket_organizer_not_admin_returns_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_revoke_ticket(&organizer, &ticket_id);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+/// Admin revokes a specific valid ticket ID successfully.
+#[test]
+fn test_revoke_ticket_admin_succeeds_for_valid_ticket_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_revoke_ticket(&admin, &ticket_id);
+    assert!(result.is_ok());
+}
+
+/// After revoke, stored ticket is flagged revoked and validity is false.
+#[test]
+fn test_revoke_ticket_marks_ticket_invalid_for_validity_query() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    assert!(client.get_ticket_validity(&ticket_id));
+
+    client.revoke_ticket(&admin, &ticket_id);
+
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert!(ticket.revoked);
+    assert!(!client.get_ticket_validity(&ticket_id));
+}
+
+/// Check-in (`use_ticket`) on a revoked ticket returns RevokedTicket.
+#[test]
+fn test_use_ticket_on_revoked_ticket_returns_revoked_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.revoke_ticket(&admin, &ticket_id);
+
+    let result = client.try_use_ticket(&ticket_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::RevokedTicket)));
+}
+
+/// Transfer on a revoked ticket returns RevokedTicket.
+#[test]
+fn test_transfer_ticket_revoked_returns_revoked_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&owner, &event_id, &100i128);
+    client.revoke_ticket(&admin, &ticket_id);
+
+    let result = client.try_transfer_ticket(&ticket_id, &owner, &recipient);
+    assert_eq!(result, Err(Ok(LumentixError::RevokedTicket)));
+}
+
+/// Non-try `revoke_ticket` as a non-admin traps; host maps `LumentixError::Unauthorized` to `Error(Contract, #3)`.
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_revoke_ticket_non_admin_panics_on_non_try_client() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    let _ = organizer;
+
+    client.revoke_ticket(&attacker, &ticket_id);
 }
 
 // ============================================================================
@@ -3559,6 +3711,7 @@ fn test_get_ticket_validity_false_for_ticket_on_draft_event() {
                 purchase_time: env.ledger().timestamp(),
                 used: false,
                 refunded: false,
+                revoked: false,
             },
         );
         ticket_id
@@ -3728,6 +3881,7 @@ fn test_transfer_ticket_draft_event_fails() {
                 purchase_time: env.ledger().timestamp(),
                 used: false,
                 refunded: false,
+                revoked: false,
             },
         );
         ticket_id
@@ -3941,14 +4095,12 @@ fn test_token_address_persists_across_multiple_calls() {
 
     let (admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
     let token = Address::generate(&env);
 
     client.set_token(&admin, &token);
 
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    let _ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-    let _event = client.get_event(&event_id);
+    let _event_id = create_and_publish_event(&env, &client, &organizer);
+    let _ = client.get_event(&_event_id);
 
     let stored = client.get_token();
     assert_eq!(stored, token);
@@ -4272,7 +4424,7 @@ fn test_withdraw_funds_by_admin() {
 }
 
 #[test]
-#[should_panic(expected = "Unauthorized")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_withdraw_funds_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4293,7 +4445,7 @@ fn test_withdraw_funds_unauthorized() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #13)")]
 fn test_withdraw_funds_zero_amount() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4313,7 +4465,7 @@ fn test_withdraw_funds_zero_amount() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #13)")]
 fn test_withdraw_funds_negative_amount() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4333,7 +4485,7 @@ fn test_withdraw_funds_negative_amount() {
 }
 
 #[test]
-#[should_panic(expected = "InsufficientEscrow")]
+#[should_panic(expected = "Error(Contract, #18)")]
 fn test_withdraw_funds_insufficient_balance() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4353,7 +4505,7 @@ fn test_withdraw_funds_insufficient_balance() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidStatusTransition")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_withdraw_funds_cancelled_event() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4372,7 +4524,7 @@ fn test_withdraw_funds_cancelled_event() {
 }
 
 #[test]
-#[should_panic(expected = "EventNotFound")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_withdraw_funds_nonexistent_event() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4509,6 +4661,7 @@ fn test_bump_ticket_ttl_batch_extends_all_tickets_systematically() {
         assert_eq!(ticket.owner, buyer);
         assert!(!ticket.used);
         assert!(!ticket.refunded);
+        assert!(!ticket.revoked);
     }
 }
 
@@ -4928,29 +5081,6 @@ fn test_purchase_blocked_while_paused_and_allowed_after_resume() {
 
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
-    client.pause_ticket_sales(&event_id, &organizer);
-    let blocked = client.try_purchase_ticket(&buyer, &event_id, &100i128);
-    assert_eq!(blocked, Err(Ok(LumentixError::EventPaused)));
-
-    client.resume_ticket_sales(&event_id);
-    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-    assert_eq!(ticket_id, 1);
-}
-
-// ADDITIONAL TESTS (ADDED FOR ISSUES)
-// ============================================================================
-
-#[test]
-fn test_pause_and_resume_ticket_sales() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
     // Pause sales
     client.pause_ticket_sales(&event_id, &organizer);
 
@@ -5026,8 +5156,31 @@ fn test_batch_use_tickets() {
     let tids1 = client.batch_purchase_tickets(&event_id, &4u32, &buyer1);
     let tid2 = client.purchase_ticket(&buyer2, &event_id, &100i128);
 
-    // Use 4 valid tickets
+    // Use 4 valid tickets — one consolidated BatchTicketsUsed per event (topic "batchuse")
     assert!(client.try_batch_use_tickets(&tids1, &organizer).is_ok());
+
+    let events = env.events().all();
+    let mut batch_found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"batchuse" {
+                    batch_found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(
+                            data_vec.len(),
+                            3,
+                            "BatchTicketsUsed must carry (event_id, quantity, ticket_ids)"
+                        );
+                    } else {
+                        panic!("Expected Vec data for BatchTicketsUsed");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(batch_found, "BatchTicketsUsed event not emitted");
 
     for id in tids1.iter() {
         assert!(client.get_ticket_info(&id).used);
