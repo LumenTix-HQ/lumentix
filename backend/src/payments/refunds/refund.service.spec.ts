@@ -292,6 +292,171 @@ describe('RefundService', () => {
     });
   });
 
+  // ─── processSingleRefund — via refundSinglePayment ────────────────────────
+
+  describe('processSingleRefund() — via refundSinglePayment()', () => {
+    const CONFIRMED_PAYMENT_WITH_EVENT = {
+      ...CONFIRMED_PAYMENT,
+      eventId: 'event-1',
+      createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1h ago
+    } as Payment;
+
+    const EVENT_WITH_ESCROW = {
+      ...CANCELLED_EVENT,
+      status: EventStatus.PUBLISHED,
+      startDate: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48h from now
+    } as Event;
+
+    it('throws NotFoundException when payment not found', async () => {
+      paymentsRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.refundSinglePayment('missing-pay')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws NotFoundException when event not found', async () => {
+      paymentsRepo.findOne.mockResolvedValue(CONFIRMED_PAYMENT_WITH_EVENT);
+      eventsRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.refundSinglePayment('pay-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws BadRequestException when event has no escrow', async () => {
+      paymentsRepo.findOne.mockResolvedValue(CONFIRMED_PAYMENT_WITH_EVENT);
+      eventsRepo.findOne.mockResolvedValue({
+        ...EVENT_WITH_ESCROW,
+        escrowPublicKey: null,
+        escrowSecretEncrypted: null,
+      } as Event);
+
+      await expect(service.refundSinglePayment('pay-1')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('returns failure result when user has no stellarPublicKey', async () => {
+      paymentsRepo.findOne
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT) // refundSinglePayment lookup
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT); // checkRefundEligibility lookup
+      eventsRepo.findOne.mockResolvedValue(EVENT_WITH_ESCROW);
+      escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
+      usersRepo.findOne.mockResolvedValue({ ...USER_WITH_KEY, stellarPublicKey: null });
+
+      const result = await service.refundSinglePayment('pay-1');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/no Stellar public key/i);
+      expect(stellarService.sendPayment).not.toHaveBeenCalled();
+    });
+
+    it('calls StellarService.sendPayment with correct args on success', async () => {
+      paymentsRepo.findOne
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT)
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT);
+      eventsRepo.findOne.mockResolvedValue(EVENT_WITH_ESCROW);
+      escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+      stellarService.sendPayment.mockResolvedValue({ hash: 'tx-abc' } as any);
+      paymentsRepo.save.mockResolvedValue({
+        ...CONFIRMED_PAYMENT_WITH_EVENT,
+        status: PaymentStatus.REFUNDED,
+      } as Payment);
+      ticketsRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      const result = await service.refundSinglePayment('pay-1');
+
+      expect(result.success).toBe(true);
+      expect(result.transactionHash).toBe('tx-abc');
+      expect(stellarService.sendPayment).toHaveBeenCalledWith(
+        'raw-secret',
+        USER_WITH_KEY.stellarPublicKey,
+        expect.any(String),
+        'XLM',
+      );
+    });
+
+    it('sets payment.status to REFUNDED on success', async () => {
+      paymentsRepo.findOne
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT)
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT);
+      eventsRepo.findOne.mockResolvedValue(EVENT_WITH_ESCROW);
+      escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+      stellarService.sendPayment.mockResolvedValue({ hash: 'tx-abc' } as any);
+      paymentsRepo.save.mockResolvedValue({
+        ...CONFIRMED_PAYMENT_WITH_EVENT,
+        status: PaymentStatus.REFUNDED,
+      } as Payment);
+      ticketsRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.refundSinglePayment('pay-1');
+
+      expect(paymentsRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: PaymentStatus.REFUNDED }),
+      );
+    });
+
+    it('sets ticket.status to refunded on success', async () => {
+      paymentsRepo.findOne
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT)
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT);
+      eventsRepo.findOne.mockResolvedValue(EVENT_WITH_ESCROW);
+      escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+      stellarService.sendPayment.mockResolvedValue({ hash: 'tx-abc' } as any);
+      paymentsRepo.save.mockResolvedValue(CONFIRMED_PAYMENT_WITH_EVENT as Payment);
+      ticketsRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.refundSinglePayment('pay-1');
+
+      expect(ticketsRepo.update).toHaveBeenCalledWith(
+        { eventId: 'event-1', ownerId: 'user-1' },
+        { status: 'refunded' },
+      );
+    });
+
+    it('queues refund notification email on success', async () => {
+      paymentsRepo.findOne
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT)
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT);
+      eventsRepo.findOne.mockResolvedValue(EVENT_WITH_ESCROW);
+      escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
+      usersRepo.findOne.mockResolvedValue({ ...USER_WITH_KEY, email: 'user@test.com' });
+      stellarService.sendPayment.mockResolvedValue({ hash: 'tx-abc' } as any);
+      paymentsRepo.save.mockResolvedValue(CONFIRMED_PAYMENT_WITH_EVENT as Payment);
+      ticketsRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      // NotificationService mock is injected — verify queueRefundEmail was called
+      const notifMock = (service as any).notificationService;
+      await service.refundSinglePayment('pay-1');
+
+      expect(notifMock.queueRefundEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'user@test.com' }),
+      );
+    });
+
+    it('logs REFUND_ISSUED to audit on success', async () => {
+      paymentsRepo.findOne
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT)
+        .mockResolvedValueOnce(CONFIRMED_PAYMENT_WITH_EVENT);
+      eventsRepo.findOne.mockResolvedValue(EVENT_WITH_ESCROW);
+      escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+      stellarService.sendPayment.mockResolvedValue({ hash: 'tx-abc' } as any);
+      paymentsRepo.save.mockResolvedValue(CONFIRMED_PAYMENT_WITH_EVENT as Payment);
+      ticketsRepo.update.mockResolvedValue({ affected: 1 } as any);
+
+      await service.refundSinglePayment('pay-1');
+
+      expect(auditService.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'REFUND_ISSUED' }),
+      );
+    });
+  });
+
   // ─── checkRefundEligibility — 24h cutoff ──────────────────────────────────
 
   describe('checkRefundEligibility() — 24h cutoff', () => {
