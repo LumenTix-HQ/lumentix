@@ -5073,8 +5073,31 @@ fn test_batch_use_tickets() {
     let tids1 = client.batch_purchase_tickets(&event_id, &4u32, &buyer1);
     let tid2 = client.purchase_ticket(&buyer2, &event_id, &100i128);
 
-    // Use 4 valid tickets
+    // Use 4 valid tickets — one consolidated BatchTicketsUsed per event (topic "batchuse")
     assert!(client.try_batch_use_tickets(&tids1, &organizer).is_ok());
+
+    let events = env.events().all();
+    let mut batch_found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"batchuse" {
+                    batch_found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(
+                            data_vec.len(),
+                            3,
+                            "BatchTicketsUsed must carry (event_id, quantity, ticket_ids)"
+                        );
+                    } else {
+                        panic!("Expected Vec data for BatchTicketsUsed");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(batch_found, "BatchTicketsUsed event not emitted");
 
     for id in tids1.iter() {
         assert!(client.get_ticket_info(&id).used);
