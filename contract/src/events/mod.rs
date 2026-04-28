@@ -66,6 +66,21 @@ impl PlatformFeeUpdated {
     }
 }
 
+/// Event emitted when the platform fee recipient (admin) is changed via
+/// [`crate::lumentix_contract::LumentixContract::change_admin`].
+/// Carries `admin_executor`, `old_recipient`, and `new_recipient`
+/// so Dapp indexing solutions can detect treasury restructuring transparently.
+pub struct PlatformFeeRecipientUpdated;
+
+impl PlatformFeeRecipientUpdated {
+    pub fn emit(env: &Env, admin_executor: Address, old_recipient: Address, new_recipient: Address) {
+        env.events().publish(
+            (symbol_short!("feerecip"),),
+            (admin_executor, old_recipient, new_recipient),
+        );
+    }
+}
+
 /// Event emitted when an organizer cancels a published event.
 pub struct EventCancelled;
 
@@ -188,6 +203,28 @@ impl TicketPurchased {
     }
 }
 
+/// Event emitted when multiple tickets are purchased in a single batch via
+/// [`crate::lumentix_contract::LumentixContract::batch_purchase_tickets`].
+/// Exposes `event_id`, `buyer`, `quantity`, `total_price`, and `starting_ticket_id`
+/// so indexers can track bulk purchases without per-ticket event bloat.
+pub struct BatchTicketsPurchased;
+
+impl BatchTicketsPurchased {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        buyer: Address,
+        quantity: u32,
+        total_price: i128,
+        starting_ticket_id: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("batchbuy"),),
+            (event_id, buyer, quantity, total_price, starting_ticket_id),
+        );
+    }
+}
+
 /// Event emitted when a ticket is transferred from one owner to another
 pub struct TicketTransferred;
 
@@ -196,6 +233,21 @@ impl TicketTransferred {
         env.events().publish(
             (symbol_short!("tkttrans"), ticket_id, event_id),
             (ticket_id, event_id, from, to),
+        );
+    }
+}
+
+/// Event emitted when multiple tickets are transferred in a single batch via
+/// [`crate::lumentix_contract::LumentixContract::batch_transfer_tickets`].
+/// Carries `from`, `to`, and the full `Vec<u64>` of transferred ticket IDs
+/// so indexers can update ownership in one operation without per-ticket noise.
+pub struct BatchTicketsTransferred;
+
+impl BatchTicketsTransferred {
+    pub fn emit(env: &Env, from: Address, to: Address, ticket_ids: Vec<u64>) {
+        env.events().publish(
+            (symbol_short!("batchtrn"),),
+            (from, to, ticket_ids),
         );
     }
 }
