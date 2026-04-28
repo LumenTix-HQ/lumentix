@@ -13,7 +13,6 @@ import { RoleRequest, RoleRequestStatus } from '../users/entities/role-request.e
 import { UserStatus } from '../users/enums/user-status.enum';
 import { ListAdminUsersDto } from './dto/list-admin-users.dto';
 import { ListAdminEventsDto } from './dto/list-admin-events.dto';
-import { paginate } from '../common/pagination/pagination.helper';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 
 @Injectable()
@@ -160,6 +159,8 @@ export class AdminService {
     }
 
     return paginate(qb, dto, 'event');
+  }
+
   // ── Role Requests ─────────────────────────────────────────────────────────
 
   async listRoleRequests(dto: PaginationDto & { status?: RoleRequestStatus }) {
