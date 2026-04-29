@@ -115,6 +115,24 @@ contract/
 - `get_event_registrations(event_id)` - Get event registrations
 - `get_user_registrations(user)` - Get user's registrations
 
+### Protocol fee query and platform withdrawal (Soroban)
+
+The ticketing contract exposes read-only **protocol (platform) fee** introspection and an admin-only withdrawal of
+the **accrued platform fee pool** (separate from per-event escrow paid to organizers after completion).
+
+| Entrypoint | Role | Auth | Primary return | Events |
+|------------|------|------|----------------|--------|
+| `get_protocol_fee` | Anyone | None | `Ok((fee_bps, fee_recipient))` where `fee_recipient` is the admin; `Err(NotInitialized)` if never initialized | Emits **ProtocolFeeQueried** (`feequery`) on every successful call for analytics |
+| `withdraw_platform_fees` | Admin | `admin.require_auth()` | `Ok(amount)` — full prior platform balance, then cleared to zero; `Unauthorized` if not admin; `NoPlatformFees` if balance is zero | Emits **PlatformFeesWithdrawn** (`feewith`) with `(admin, amount)` |
+
+**Panics:** Neither entrypoint uses `panic!` for normal validation. `get_protocol_fee` returns `NotInitialized` before
+reading admin. `withdraw_platform_fees` reads the admin from instance storage without an explicit initialized guard; if
+the contract were invoked in a corrupted state (initialized flag without admin), underlying storage access could panic.
+Use the public `initialize` path only.
+
+**Related:** Organizer “withdrawal” of event proceeds is modeled as **`release_escrow`** after the event reaches a
+completed state, not `withdraw_platform_fees`.
+
 ## Deployment Guide
 
 ### 1. Local Development

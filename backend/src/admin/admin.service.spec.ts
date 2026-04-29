@@ -25,7 +25,22 @@ const makeUser = (): User =>
 describe('AdminService', () => {
   let service: AdminService;
   let eventRepo: { findOne: jest.Mock; save: jest.Mock };
-  let userRepo: { findOne: jest.Mock; save: jest.Mock };
+  let userRepo: {
+    findOne: jest.Mock;
+    save: jest.Mock;
+    createQueryBuilder?: jest.Mock;
+  };
+
+  const makeUserQueryBuilder = (result: User | null) => ({
+    select: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(result),
+    getCount: jest.fn().mockResolvedValue(result ? 1 : 0),
+    skip: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(result ? [result] : []),
+  });
 
   beforeEach(async () => {
     eventRepo = { findOne: jest.fn(), save: jest.fn() };
@@ -119,6 +134,58 @@ describe('AdminService', () => {
     it('throws NotFoundException for unknown user', async () => {
       userRepo.findOne.mockResolvedValue(null);
       await expect(service.blockUser('bad-id')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  // ── unblockUser ───────────────────────────────────────────────────────────
+
+  describe('unblockUser', () => {
+    it('unblocks a blocked user', async () => {
+      const user = { ...makeUser(), status: UserStatus.BLOCKED };
+      userRepo.findOne.mockResolvedValue(user);
+      userRepo.save.mockImplementation(async (u: User) => u);
+
+      const result = await service.unblockUser('user-uuid');
+      expect(result.status).toBe(UserStatus.ACTIVE);
+    });
+
+    it('throws if user is not blocked', async () => {
+      const user = makeUser();
+      userRepo.findOne.mockResolvedValue(user);
+      await expect(service.unblockUser('user-uuid')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws NotFoundException for unknown user', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+      await expect(service.unblockUser('bad-id')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  // ── getUserById ───────────────────────────────────────────────────────────
+
+  describe('getUserById', () => {
+    it('returns a user record without passwordHash', async () => {
+      const user = makeUser();
+      userRepo.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(makeUserQueryBuilder(user));
+
+      const result = await service.getUserById('user-uuid');
+      expect(result).toEqual(user);
+    });
+
+    it('throws NotFoundException when user missing', async () => {
+      userRepo.createQueryBuilder = jest
+        .fn()
+        .mockReturnValue(makeUserQueryBuilder(null));
+
+      await expect(service.getUserById('bad-id')).rejects.toThrow(
         NotFoundException,
       );
     });

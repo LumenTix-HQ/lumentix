@@ -1,156 +1,159 @@
 import {
   BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
+  ConflictException,
   ForbiddenException,
-  Inject,
-  forwardRef,
+  Injectable,
+  NotFoundException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
+import { Payment, PaymentStatus } from './entities/payment.entity';
+import { PaginationDto } from '../common/pagination/dto/pagination.dto';
+import { paginate } from '../common/pagination/pagination.helper';
+import { LessThan, Repository } from 'typeorm';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { AuditService } from '../audit/audit.service';
+import { PaginationDto } from '../common/pagination/pagination.dto';
+import { paginate } from '../common/pagination/pagination.helper';
+import { CurrenciesService } from '../currencies/currencies.service';
 import { EventStatus } from '../events/entities/event.entity';
 import { EventsService } from '../events/events.service';
+import { NotificationService } from '../notifications/notification.service';
 import { StellarService } from '../stellar/stellar.service';
-import { Payment, PaymentStatus } from './entities/payment.entity';
+import { AuditService } from '../audit/audit.service';
 import { NotificationService } from '../notifications/notification.service';
 import { User } from '../users/entities/user.entity';
-
-/** Supported on-chain asset codes */
-const SUPPORTED_ASSETS = ['XLM', 'USDC'] as const;
-type SupportedAsset = (typeof SUPPORTED_ASSETS)[number];
-
-export interface PaymentIntent {
-  paymentId: string;
-  escrowWallet: string;
-  amount: number;
-  currency: string;
-  memo: string;
-  expiresAt: string | Date;
-}
+import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
+import { Payment, PaymentStatus } from './entities/payment.entity';
 
 @Injectable()
 export class PaymentsService {
-  private readonly logger = new Logger(PaymentsService.name);
-
   constructor(
     @InjectRepository(Payment)
     private readonly paymentsRepository: Repository<Payment>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @Inject(forwardRef(() => EventsService))
     private readonly eventsService: EventsService,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
-    private readonly configService: ConfigService,
     private readonly notificationService: NotificationService,
   ) {}
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // STEP 1 — Create payment intent
-  // ─────────────────────────────────────────────────────────────────────────
+  async getPaymentById(id: string): Promise<Payment> {
+    const payment = await this.paymentsRepository.findOne({ where: { id } });
+    if (!payment) throw new NotFoundException(`Payment ${id} not found`);
+    return payment;
+  }
 
+  async getHistory(userId: string, dto: PaginationDto) {
+    const qb = this.paymentsRepository
+      .createQueryBuilder('payment')
+      .where('payment.userId = :userId', { userId })
+      .orderBy('payment.createdAt', 'DESC');
+
+    return paginate(qb, dto, 'payment');
+  }
+
+  async getPending(userId: string, dto: PaginationDto) {
+    const qb = this.paymentsRepository
+      .createQueryBuilder('payment')
+      .where('payment.userId = :userId', { userId })
+      .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
+      .orderBy('payment.createdAt', 'DESC');
+
+    return paginate(qb, dto, 'payment');
+  }
+
+  async createPaymentIntent(eventId: string, userId: string) {
+    const event = await this.eventsService.getEventById(eventId);
+
+    if (event.status === 'cancelled' as any) {
+      throw new BadRequestException('Event is suspended');
+    }
+    if ((event as any).status !== 'published') {
+      throw new BadRequestException('Event is not available for purchase');
+    }
+    if (!event.escrowPublicKey) {
+      throw new ConflictException('Event does not have an escrow wallet configured');
+      throw new BadRequestException('Event does not have an escrow wallet configured');
+    }
+
+    const SUPPORTED = ['XLM', 'USDC'];
+    if (!SUPPORTED.includes(event.currency?.toUpperCase())) {
+      throw new BadRequestException(`Unsupported asset: ${event.currency}`);
+    }
+
+    if (event.maxAttendees !== null) {
+      const sold = await this.paymentsRepository.count({
+        where: { eventId, status: PaymentStatus.CONFIRMED },
+      });
+      if (sold >= event.maxAttendees) {
+        throw new BadRequestException('Event has reached maximum capacity');
+      }
   async createPaymentIntent(
     eventId: string,
     userId: string,
-  ): Promise<PaymentIntent> {
-    // 1. Validate event exists
+    currency?: string,
+    _usePathPayment?: boolean,
+    _sourceAsset?: string,
+  ) {
     const event = await this.eventsService.getEventById(eventId);
 
-    // 2. Validate event status
     if (event.status === EventStatus.CANCELLED) {
-      throw new BadRequestException(
-        `Event "${event.title}" has been suspended and is no longer available for purchase.`,
-      );
+      throw new BadRequestException('This event is suspended.');
     }
 
     if (event.status !== EventStatus.PUBLISHED) {
-      throw new BadRequestException(
-        `Event "${event.title}" is not available for purchase (status: ${event.status}).`,
+      throw new BadRequestException('This event is not available for purchase.');
+    }
+
+    if (!event.escrowPublicKey) {
+      throw new ConflictException(
+        'This event does not have an escrow wallet configured.',
       );
     }
 
-    const escrowWallet = this.getEventEscrowWallet(event);
+    const selectedCurrency = currency?.toUpperCase() ?? event.currency;
+    const activeCodes = await this.currenciesService.findActiveCodes();
 
-    // 3. Validate asset type
-    const currency = event.currency.toUpperCase() as SupportedAsset;
-    if (!SUPPORTED_ASSETS.includes(currency)) {
+    if (!activeCodes.includes(selectedCurrency)) {
       throw new BadRequestException(
-        `Unsupported asset "${event.currency}". Supported assets: ${SUPPORTED_ASSETS.join(', ')}.`,
+        `Currency "${selectedCurrency}" is not supported. Supported: ${activeCodes.join(', ')}`,
       );
     }
 
-    // 4. ── Capacity check ────────────────────────────────────────────────────
-    //    Count PENDING + CONFIRMED payments to prevent overselling.
-    //    NOTE: For events with very high concurrency (flash sales etc.) consider
-    //    wrapping this block and the payment INSERT in a serializable transaction
-    //    with a pessimistic write-lock on the event row:
-    //      await this.paymentsRepository.manager.transaction(
-    //        'SERIALIZABLE', async (em) => { ... }
-    //      );
-    if (event.maxAttendees !== null) {
-      const soldCount = await this.paymentsRepository.count({
-        where: {
-          eventId,
-          status: In([PaymentStatus.PENDING, PaymentStatus.CONFIRMED]),
-        },
-      });
-
-      if (soldCount >= event.maxAttendees) {
-        throw new BadRequestException(
-          `This event has reached its maximum capacity of ${event.maxAttendees} attendees.`,
-        );
-      }
-    }
-
-    // 5. Check for existing non-expired PENDING payment for this user and event
     const existing = await this.paymentsRepository.findOne({
-      where: {
-        userId,
-        eventId,
-        status: PaymentStatus.PENDING,
-      },
+      where: { eventId, userId, status: PaymentStatus.PENDING },
     });
 
-    const now = new Date();
-    // TTL config
-    const ttlMinutes =
-      this.configService.get<number>('PAYMENT_INTENT_TTL_MINUTES') ?? 30;
-    const expiresAt = new Date(now.getTime() + ttlMinutes * 60_000);
-
     if (existing) {
-      if (existing.expiresAt && existing.expiresAt > now) {
-        this.logger.log(
-          `Returning existing payment intent: paymentId=${existing.id}`,
-        );
+      if (existing.expiresAt && existing.expiresAt > new Date()) {
         return {
           paymentId: existing.id,
-          escrowWallet,
-          amount: event.ticketPrice,
-          currency,
           memo: existing.id,
-          expiresAt: existing.expiresAt?.toISOString(),
+          amount: Number(existing.amount),
+          currency: existing.currency,
+          escrowWallet: event.escrowPublicKey,
+          expiresAt: existing.expiresAt,
         };
-      } else {
-        // Expired intent, mark as failed
-        existing.status = PaymentStatus.FAILED;
-        await this.paymentsRepository.save(existing);
-        this.logger.log(
-          `Expired payment intent marked as FAILED: paymentId=${existing.id}`,
-        );
       }
+      existing.status = PaymentStatus.FAILED;
+      await this.paymentsRepository.save(existing);
     }
 
-    // 6. Persist a pending payment record
+    const ttl = 30;
     const payment = this.paymentsRepository.create({
       eventId,
       userId,
       amount: event.ticketPrice,
-      currency,
+      currency: event.currency,
       status: PaymentStatus.PENDING,
-      expiresAt,
+      expiresAt: new Date(Date.now() + ttl * 60 * 1000),
+      amount: Number(event.ticketPrice),
+      currency: selectedCurrency,
+      status: PaymentStatus.PENDING,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      transactionHash: null,
     });
     const saved = await this.paymentsRepository.save(payment);
 
@@ -158,37 +161,45 @@ export class PaymentsService {
       action: 'PAYMENT_INTENT_CREATED',
       userId,
       resourceId: saved.id,
+      action: AuditAction.PAYMENT_INTENT_CREATED,
+      userId,
+      resourceId: saved.id,
       meta: {
         eventId,
-        amount: saved.amount,
+        amount: Number(saved.amount),
         currency: saved.currency,
-        expiresAt: saved.expiresAt,
       },
     });
 
-    this.logger.log(
-      `Payment intent created: paymentId=${saved.id} event=${eventId} user=${userId} expiresAt=${saved.expiresAt?.toISOString() ?? 'N/A'}`,
-    );
-
     return {
       paymentId: saved.id,
-      escrowWallet,
-      amount: event.ticketPrice,
-      currency,
       memo: saved.id,
-      expiresAt: saved.expiresAt?.toISOString() ?? expiresAt.toISOString(),
+      amount: Number(saved.amount),
+      currency: saved.currency,
+      escrowWallet: event.escrowPublicKey,
+      amount: Number(saved.amount),
+      currency: saved.currency,
+      escrowWallet: event.escrowPublicKey,
+      memo: saved.id,
+      expiresAt: saved.expiresAt,
     };
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // STEP 2 — Confirm payment
-  // ─────────────────────────────────────────────────────────────────────────
+  async confirmPayment(transactionHash: string, userId: string): Promise<Payment> {
+    const tx = await this.stellarService.getTransaction(transactionHash).catch(() => {
+      throw new BadRequestException('Transaction not found on the Stellar network');
+    });
 
-  async confirmPayment(
-    transactionHash: string,
-    callerId: string,
-  ): Promise<Payment> {
-    // ← add callerId
+    const memo = this.stellarService.extractAndValidateMemo(tx);
+
+    const payment = await this.paymentsRepository.findOne({
+      where: { id: memo, status: PaymentStatus.PENDING },
+    });
+    if (!payment) throw new NotFoundException(`No pending payment for memo ${memo}`);
+  async confirmPayment(input: ConfirmPaymentDto | string, userId: string) {
+    const transactionHash =
+      typeof input === 'string' ? input : input.transactionHash;
+
     let txRecord: Awaited<ReturnType<StellarService['getTransaction']>>;
     try {
       txRecord = await this.stellarService.getTransaction(transactionHash);
@@ -199,9 +210,11 @@ export class PaymentsService {
     }
 
     const memoValue = this.stellarService.extractAndValidateMemo(txRecord);
-
     const payment = await this.paymentsRepository.findOne({
-      where: { id: memoValue, status: PaymentStatus.PENDING },
+      where: {
+        id: memoValue,
+        status: PaymentStatus.PENDING,
+      },
     });
 
     if (!payment) {
@@ -210,162 +223,175 @@ export class PaymentsService {
       );
     }
 
-    // Enforce expiry
-    if (payment.expiresAt !== null && payment.expiresAt < new Date()) {
-      payment.status = PaymentStatus.FAILED;
-      await this.paymentsRepository.save(payment);
-      await this.auditService.log({
-        action: 'PAYMENT_EXPIRED',
-        userId: payment.userId,
-        resourceId: payment.id,
-        meta: { eventId: payment.eventId, expiresAt: payment.expiresAt },
-      });
-      throw new BadRequestException(
-        'Payment intent has expired. Please create a new payment intent.',
-      );
+    if (userId !== 'system' && payment.userId !== userId) {
+      throw new ForbiddenException('You are not authorised to confirm this payment.');
     }
 
-    // ── Ownership check ──────────────────────────────────────────────────────
-    if (payment.userId !== callerId) {
-      throw new ForbiddenException(
-        'You are not authorised to confirm this payment.',
-      );
+    if (payment.expiresAt && payment.expiresAt < new Date()) {
+      payment.status = PaymentStatus.FAILED;
+      await this.paymentsRepository.save(payment);
+      throw new BadRequestException('Payment has expired.');
+    }
+
+    if (userId !== 'system' && payment.userId !== userId) {
+      throw new ForbiddenException('You are not authorised to confirm this payment');
     }
 
     const event = await this.eventsService.getEventById(payment.eventId);
-    const escrowWallet = this.getEventEscrowWallet(event);
+    const opsHref = (tx as any)._links?.operations?.href;
+    const opsRes = await fetch(opsHref);
+    const opsJson = (await opsRes.json()) as { _embedded: { records: any[] } };
+    const ops = opsJson._embedded.records.filter((o: any) => o.type === 'payment');
 
-    const ops = await this.resolvePaymentOperations(txRecord);
+    if (ops.length === 0) throw new BadRequestException('Transaction has no payment operations');
 
-    if (ops.length === 0) {
-      await this.markFailed(
-        payment,
-        'No payment operations found in transaction.',
+    const op = ops[0];
+    if (op.to !== event.escrowPublicKey) {
+      throw new BadRequestException('Payment destination does not match the escrow wallet');
+    }
+    if (op.asset_type !== 'credit_alphanum4' && op.asset_type !== 'credit_alphanum12') {
+      throw new BadRequestException('Incorrect asset type');
+    }
+    if (Math.abs(parseFloat(op.amount) - Number(payment.amount)) > 0.0000001) {
+      throw new BadRequestException('Incorrect payment amount');
+    const event = await this.eventsService.getEventById(payment.eventId);
+    if (!event.escrowPublicKey) {
+      throw new ConflictException(
+        'This event does not have an escrow wallet configured.',
       );
+    }
+
+    const operations = await this.resolvePaymentOperations(txRecord);
+    if (operations.length === 0) {
+      throw new BadRequestException('Transaction contains no payment operations.');
+    }
+
+    const matchingOperation = operations.find(
+      (operation) => operation.to === event.escrowPublicKey,
+    );
+
+    if (!matchingOperation) {
       throw new BadRequestException(
-        'Transaction contains no payment operations.',
+        'Payment destination does not match the escrow wallet.',
       );
     }
 
-    const matchingOp = ops.find((op) => op.to === escrowWallet);
-
-    if (!matchingOp) {
-      await this.markFailed(
-        payment,
-        `Incorrect destination. Expected ${escrowWallet}.`,
-      );
+    const assetCode = this.extractAssetCode(matchingOperation);
+    if (assetCode !== payment.currency.toUpperCase()) {
       throw new BadRequestException(
-        `Payment destination does not match the escrow wallet.`,
+        'Payment asset does not match expected currency',
       );
     }
 
-    const assetCode: string =
-      matchingOp.asset_type === 'native'
-        ? 'XLM'
-        : (matchingOp.asset_code ?? '');
-
-    if (assetCode.toUpperCase() !== payment.currency.toUpperCase()) {
-      await this.markFailed(
-        payment,
-        `Wrong asset. Expected ${payment.currency}, got ${assetCode}.`,
-      );
-      throw new BadRequestException(
-        `Incorrect asset type. Expected ${payment.currency}, received ${assetCode}.`,
-      );
-    }
-
-    if (!SUPPORTED_ASSETS.includes(assetCode.toUpperCase() as SupportedAsset)) {
-      await this.markFailed(payment, `Unsupported asset "${assetCode}".`);
-      throw new BadRequestException(`Asset "${assetCode}" is not supported.`);
-    }
-
-    const onChainAmount = parseFloat(matchingOp.amount);
-    const expectedAmount = parseFloat(String(payment.amount));
-
+    const onChainAmount = parseFloat(matchingOperation.amount);
+    const expectedAmount = Number(payment.amount);
     if (Math.abs(onChainAmount - expectedAmount) > 0.0000001) {
-      await this.markFailed(
-        payment,
-        `Incorrect amount. Expected ${expectedAmount}, got ${onChainAmount}.`,
-      );
       throw new BadRequestException(
-        `Incorrect payment amount. Expected ${expectedAmount} ${payment.currency}, received ${onChainAmount}.`,
+        `Incorrect payment amount. Expected ${expectedAmount}, received ${onChainAmount}.`,
       );
     }
 
-    payment.transactionHash = transactionHash;
     payment.status = PaymentStatus.CONFIRMED;
-    const confirmed = await this.paymentsRepository.save(payment);
+    payment.transactionHash = transactionHash;
+    const saved = await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
       action: 'PAYMENT_CONFIRMED',
       userId: payment.userId,
       resourceId: payment.id,
-      meta: {
-        transactionHash,
-        amount: payment.amount,
-        currency: payment.currency,
-      },
     });
 
-    this.logger.log(
-      `Payment confirmed: paymentId=${payment.id} txHash=${transactionHash}`,
-    );
+    return saved;
+  }
+
+  async expireStalePayments(): Promise<void> {
+    const expired = await this.paymentsRepository.find({
+      where: { status: PaymentStatus.PENDING, expiresAt: LessThan(new Date()) },
+    });
+    for (const p of expired) {
+      p.status = PaymentStatus.FAILED;
+      await this.paymentsRepository.save(p);
+      await this.auditService.log({
+        action: 'PAYMENT_EXPIRED',
+        userId: p.userId,
+        resourceId: p.id,
+      });
+    }
+    const confirmed = await this.paymentsRepository.save(payment);
+
+    await this.auditService.log({
+      action: AuditAction.PAYMENT_CONFIRMED,
+      userId: payment.userId,
+      resourceId: payment.id,
+      meta: {
+        transactionHash,
+        currency: payment.currency,
+        amount: Number(payment.amount),
+      },
+    });
 
     return confirmed;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Tickets dependency helper
-  // ─────────────────────────────────────────────────────────────────────────
+  async findPaymentPath(
+    sourcePublicKey: string,
+    sourceAsset: string,
+    destAsset: string,
+    destAmount: string,
+  ) {
+    return this.stellarService.findPaymentPath(
+      sourcePublicKey,
+      sourceAsset,
+      destAsset,
+      destAmount,
+    );
+  }
 
-  async getPaymentById(paymentId: string): Promise<Payment> {
-    const payment = await this.paymentsRepository.findOne({
-      where: { id: paymentId },
+  async expireStalePayments(): Promise<void> {
+    const expired = await this.paymentsRepository.find({
+      where: {
+        status: PaymentStatus.PENDING,
+        expiresAt: LessThan(new Date()),
+      },
     });
 
-    if (!payment) {
-      throw new NotFoundException(`Payment "${paymentId}" not found.`);
+    for (const payment of expired) {
+      await this.markFailed(payment, 'Payment expired');
     }
-
-    return payment;
   }
-
-  private getEventEscrowWallet(event: {
-    id: string;
-    escrowPublicKey?: string | null;
-  }): string {
-    if (!event.escrowPublicKey) {
-      throw new ConflictException(
-        `Event "${event.id}" does not have an escrow wallet configured.`,
-      );
-    }
-
-    return event.escrowPublicKey;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────────────────
 
   private async resolvePaymentOperations(
     txRecord: Awaited<ReturnType<StellarService['getTransaction']>>,
-  ): Promise<PaymentOp[]> {
+  ): Promise<PaymentOperation[]> {
     try {
-      const opsHref: string | undefined = txRecord._links.operations?.href;
-      if (!opsHref) return [];
+      const operationsHref = txRecord._links.operations?.href;
+      if (!operationsHref) {
+        return [];
+      }
 
-      const res = await fetch(opsHref);
-      if (!res.ok) return [];
+      const response = await fetch(operationsHref);
+      if (!response.ok) {
+        return [];
+      }
 
-      const json = (await res.json()) as {
-        _embedded: { records: PaymentOp[] };
+      const payload = (await response.json()) as {
+        _embedded?: { records?: PaymentOperation[] };
       };
-      return json._embedded.records.filter(
-        (op) => op.type === 'payment' || op.type === 'create_account',
+
+      return (payload._embedded?.records ?? []).filter(
+        (operation) => operation.type === 'payment',
       );
     } catch {
       return [];
     }
+  }
+
+  private extractAssetCode(operation: PaymentOperation): string {
+    if (operation.asset_type === 'native') {
+      return 'XLM';
+    }
+
+    return (operation.asset_code ?? '').toUpperCase();
   }
 
   private async markFailed(payment: Payment, reason: string): Promise<void> {
@@ -373,44 +399,32 @@ export class PaymentsService {
     await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
-      action: 'PAYMENT_FAILED',
+      action: AuditAction.PAYMENT_FAILED,
       userId: payment.userId,
       resourceId: payment.id,
-      meta: { reason },
+      meta: { reason, currency: payment.currency },
     });
 
-    this.logger.warn(
-      `Payment failed: paymentId=${payment.id} reason=${reason}`,
-    );
-
-    // Queue payment failed email (non-blocking)
-    this.queuePaymentFailedEmail(payment, reason).catch(() => undefined);
-  }
-
-  private async queuePaymentFailedEmail(
-    payment: Payment,
-    reason: string,
-  ): Promise<void> {
-    const [user, event] = await Promise.all([
-      this.userRepository.findOne({ where: { id: payment.userId } }),
-      this.eventsService.getEventById(payment.eventId),
-    ]);
-
-    if (!user) return;
-
-    await this.notificationService.queuePaymentFailedEmail({
-      email: user.email,
-      eventTitle: event.title,
-      amount: Number(payment.amount),
-      currency: payment.currency,
-      reason,
-    });
+    try {
+      const event = await this.eventsService.getEventById(payment.eventId);
+      await this.notificationService.queuePaymentFailedEmail({
+        userId: payment.userId,
+        email: '',
+        eventTitle: event.title,
+        amount: Number(payment.amount),
+        currency: payment.currency,
+        reason,
+      });
+    } catch (error) {
+      console.error(
+        `Failed to queue payment failure email for ${payment.id}:`,
+        error,
+      );
+    }
   }
 }
 
-// ─── Internal type helpers ────────────────────────────────────────────────────
-
-interface PaymentOp {
+interface PaymentOperation {
   type: string;
   to: string;
   amount: string;

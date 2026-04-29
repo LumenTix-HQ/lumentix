@@ -27,8 +27,8 @@ export class TransactionsService {
     if (dto.type) {
       qb.andWhere('tx.type = :type', { type: dto.type });
     }
-    if (dto.txStatus) {
-      qb.andWhere('tx.status = :status', { status: dto.txStatus });
+    if (dto.status) {
+      qb.andWhere('tx.status = :status', { status: dto.status });
     }
     if (dto.from) {
       qb.andWhere('tx.createdAt >= :from', { from: dto.from });

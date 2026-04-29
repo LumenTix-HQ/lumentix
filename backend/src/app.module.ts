@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { envValidationSchema } from './config/env.validation';
 import { BullModule } from '@nestjs/bull';
 import { ThrottlerModule, ThrottlerGuard, seconds } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from 'nestjs-throttler-storage-redis';
@@ -26,12 +27,15 @@ import { ExchangeRatesModule } from './exchange-rates/exchange-rates.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
+import { RegistrationsModule } from './registrations/registrations.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
+      validationSchema: envValidationSchema,
+      validationOptions: { abortEarly: false },
     }),
 
     // ── Redis-backed rate limiting — shared across all instances ──────────────
@@ -40,9 +44,7 @@ import { AdminModule } from './admin/admin.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         throttlers: [
-          { name: 'short', ttl: seconds(1), limit: 3 }, // 3 req/sec
-          { name: 'medium', ttl: seconds(10), limit: 20 }, // 20 req/10sec
-          { name: 'long', ttl: seconds(60), limit: 100 }, // 100 req/min
+          { name: 'global', ttl: seconds(60), limit: 100 },
         ],
         storage: new ThrottlerStorageRedisService(
           new Redis({
@@ -100,6 +102,7 @@ import { AdminModule } from './admin/admin.module';
     ExchangeRatesModule,
     TicketsModule,
     AdminModule,
+    RegistrationsModule,
   ],
   controllers: [AppController],
   providers: [

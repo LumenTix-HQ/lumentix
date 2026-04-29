@@ -32,6 +32,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (user.status === UserStatus.BLOCKED) {
       throw new UnauthorizedException('User account is blocked.');
     }
+
+    if ((user as any).deletedAt) {
+      throw new UnauthorizedException('User account is deleted.');
+    }
+
     // This is attached to request.user on protected routes
     return { id: payload.sub, role: payload.role.toLowerCase() };
   }

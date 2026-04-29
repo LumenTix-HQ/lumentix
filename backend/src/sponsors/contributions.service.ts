@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -19,6 +20,8 @@ import { SponsorTier } from './entities/sponsor-tier.entity';
 import { NotificationService } from 'src/notifications/notification.service';
 import { User } from 'src/users/entities/user.entity';
 import { Event } from 'src/events/entities/event.entity';
+import { EventsService } from 'src/events/events.service';
+import { PaginationDto, paginate } from 'src/common/pagination';
 
 const SUPPORTED_ASSETS = ['XLM', 'USDC'] as const;
 type SupportedAsset = (typeof SUPPORTED_ASSETS)[number];
@@ -49,6 +52,7 @@ export class ContributionsService {
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
     private readonly notificationService: NotificationService,
+    private readonly eventsService: EventsService,
   ) {
     this.escrowWallet =
       this.configService.get<string>('ESCROW_WALLET_PUBLIC_KEY') ?? '';
@@ -218,6 +222,55 @@ export class ContributionsService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // STEP 3 — List contributions for a tier (organizer only)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async listContributions(
+    tierId: string,
+    eventId: string,
+    requesterId: string,
+    dto: PaginationDto,
+  ) {
+    const tier = await this.tierRepository.findOne({
+      where: { id: tierId, eventId },
+    });
+    if (!tier) throw new NotFoundException('Sponsor tier not found');
+
+    const event = await this.eventsService.getEventById(eventId);
+    if (event.organizerId !== requesterId) throw new ForbiddenException();
+
+    const qb = this.contributionRepository
+      .createQueryBuilder('c')
+      .where('c.tierId = :tierId', { tierId });
+
+    const [paginatedResult, tierTotal, contributorCount] = await Promise.all([
+      paginate(qb, { ...dto, sortBy: 'createdAt', order: dto.order }, 'c'),
+      this.contributionRepository
+        .createQueryBuilder('c')
+        .select('SUM(c.amount)', 'total')
+        .where('c.tierId = :tierId AND c.status = :status', {
+          tierId,
+          status: ContributionStatus.CONFIRMED,
+        })
+        .getRawOne<{ total: string | null }>(),
+      this.contributionRepository
+        .createQueryBuilder('c')
+        .select('COUNT(DISTINCT c.sponsorId)', 'count')
+        .where('c.tierId = :tierId AND c.status = :status', {
+          tierId,
+          status: ContributionStatus.CONFIRMED,
+        })
+        .getRawOne<{ count: string | null }>(),
+    ]);
+
+    return {
+      ...paginatedResult,
+      tierTotal: Number(tierTotal?.total ?? 0),
+      contributorCount: Number(contributorCount?.count ?? 0),
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -235,6 +288,7 @@ export class ContributionsService {
     if (!sponsor || !event) return;
 
     await this.notificationService.queueSponsorConfirmedEmail({
+      userId: sponsor.id,
       email: sponsor.email,
       sponsorName: sponsor.email,
       eventTitle: event.title,

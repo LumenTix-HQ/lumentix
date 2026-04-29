@@ -65,4 +65,10 @@ pub enum LumentixError {
 
     /// No platform fees available to withdraw
     NoPlatformFees = 20,
+
+    /// Ticket sales for this event are currently paused
+    EventPaused = 21,
+
+    /// Ticket was administratively revoked and cannot be used or transferred
+    RevokedTicket = 22,
 }

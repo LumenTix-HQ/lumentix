@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -8,6 +9,8 @@ import {
   Query,
   Req,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -18,6 +21,8 @@ import {
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { RequestRoleDto } from './dto/request-role.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { Roles } from 'src/admin/roles.decorator';
@@ -34,7 +39,10 @@ export class UsersController {
 
   @Post()
   @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Create a new user', description: 'Admin-only endpoint to create users.' })
+  @ApiOperation({
+    summary: 'Create a new user',
+    description: 'Admin-only endpoint to create users.',
+  })
   @ApiResponse({ status: 201, description: 'User successfully created.' })
   @ApiResponse({ status: 400, description: 'Bad Request.' })
   @ApiResponse({ status: 403, description: 'Forbidden - Requires Admin role.' })
@@ -47,6 +55,25 @@ export class UsersController {
   @ApiOperation({ summary: 'Get current user profile' })
   async getProfile(@Req() req: AuthenticatedRequest) {
     return this.usersService.findById(req.user.id);
+  }
+
+  @Patch('me')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update current user profile' })
+  async updateProfile(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.usersService.updateProfile(req.user.id, dto);
+  }
+
+  @Delete('me')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Soft delete current user account' })
+  async deleteProfile(@Req() req: AuthenticatedRequest) {
+    await this.usersService.deleteMyAccount(req.user.id);
+    return;
   }
 
   @Patch('me/notification-preferences')
@@ -62,12 +89,17 @@ export class UsersController {
     );
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Find a user by ID', description: 'Retrieves user details.' })
-  @ApiResponse({ status: 200, description: 'User found.' })
-  @ApiResponse({ status: 404, description: 'User not found.' })
-  async findOne(@Param('id') id: string) {
-    return this.usersService.findById(id);
+  @Post('me/request-role')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Request a role upgrade (EVENT_GOER only)' })
+  @ApiResponse({ status: 201, description: 'Role request created' })
+  @ApiResponse({ status: 400, description: 'Not eligible for role upgrade' })
+  @ApiResponse({ status: 409, description: 'Duplicate pending request' })
+  async requestRole(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: RequestRoleDto,
+  ) {
+    return this.usersService.requestRole(req.user.id, dto);
   }
 
   // ── Wallet ─────────────────────────────────────────────────────────────────
@@ -94,5 +126,16 @@ export class UsersController {
     @Query('base') baseCurrency: string = 'USD',
   ) {
     return this.usersService.getPortfolioValue(req.user.id, baseCurrency);
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Find a user by ID',
+    description: 'Retrieves user details.',
+  })
+  @ApiResponse({ status: 200, description: 'User found.' })
+  @ApiResponse({ status: 404, description: 'User not found.' })
+  async findOne(@Param('id') id: string) {
+    return this.usersService.findById(id);
   }
 }

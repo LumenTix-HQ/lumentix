@@ -8,7 +8,7 @@ import {
   IsInt,
   Min,
 } from 'class-validator';
-import { EventStatus } from '../entities/event.entity';
+import { EventStatus, EventCategory } from '../entities/event.entity';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateEventDto {
@@ -60,4 +60,9 @@ export class CreateEventDto {
   @IsInt()
   @Min(1)
   maxAttendees?: number;
+
+  @ApiPropertyOptional({ enum: EventCategory, description: 'Event category' })
+  @IsOptional()
+  @IsEnum(EventCategory)
+  category?: EventCategory;
 }

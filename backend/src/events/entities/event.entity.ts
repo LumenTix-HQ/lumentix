@@ -13,6 +13,16 @@ export enum EventStatus {
   CANCELLED = 'cancelled',
 }
 
+export enum EventCategory {
+  CONFERENCE = 'conference',
+  WORKSHOP = 'workshop',
+  MEETUP = 'meetup',
+  CONCERT = 'concert',
+  SPORTS = 'sports',
+  FESTIVAL = 'festival',
+  OTHER = 'other',
+}
+
 @Entity('events')
 export class Event {
   @PrimaryGeneratedColumn('uuid')
@@ -70,6 +80,23 @@ export class Event {
    */
   @Column({ nullable: true, type: 'text', select: false })
   escrowSecretEncrypted: string | null;
+
+  @Column({ nullable: true, type: 'varchar' })
+  imageUrl: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: EventCategory,
+    default: EventCategory.OTHER,
+  })
+  category: EventCategory;
+
+  /**
+   * Optional sponsorship funding goal in XLM.
+   * NULL means no goal has been set.
+   */
+  @Column({ type: 'decimal', precision: 18, scale: 7, nullable: true, default: null })
+  fundingGoal: number | null;
 
   @CreateDateColumn()
   createdAt: Date;

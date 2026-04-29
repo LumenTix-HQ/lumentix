@@ -14,6 +14,7 @@ export enum PaymentStatus {
   REFUNDED = 'refunded',
 }
 
+@Index(['userId', 'status'])
 @Entity('payments')
 export class Payment {
   @PrimaryGeneratedColumn('uuid')

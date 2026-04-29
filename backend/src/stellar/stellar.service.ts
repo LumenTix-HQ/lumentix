@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { UsersService } from '../users/users.service';
 import {
   Horizon,
   Transaction,
@@ -14,6 +16,7 @@ import {
   BASE_FEE,
   Operation,
   Asset,
+  Memo,
 } from '@stellar/stellar-sdk';
 
 export type PaymentCallback = (
@@ -33,7 +36,10 @@ export class StellarService implements OnModuleDestroy {
   private readonly networkPassphrase: string;
   private streamCloser: (() => void) | null = null;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
+  ) {
     const horizonUrl =
       this.configService.get<string>('stellar.horizonUrl') ??
       'https://horizon-testnet.stellar.org';
@@ -274,6 +280,102 @@ export class StellarService implements OnModuleDestroy {
       }
       throw err;
     }
+  }
+
+  /**
+   * Create and fund a new Stellar keypair via Friendbot (testnet only).
+   */
+  async createTestnetAccount(
+    userId: string,
+  ): Promise<{ publicKey: string; secret: string }> {
+    if (this.configService.get<string>('STELLAR_NETWORK') !== 'testnet') {
+      throw new BadRequestException(
+        'Account creation is only available on testnet',
+      );
+    }
+    const keypair = Keypair.random();
+    const res = await fetch(
+      `https://friendbot.stellar.org?addr=${keypair.publicKey()}`,
+    );
+    if (!res.ok) {
+      throw new InternalServerErrorException('Friendbot funding failed');
+    }
+
+    const account = { publicKey: keypair.publicKey(), secret: keypair.secret() };
+
+    // Link account to user profile if userId provided
+    if (userId) {
+      await this.usersService.updateWallet(userId, account.publicKey);
+    }
+
+    return account;
+  }
+
+  // ─── Path payment methods ────────────────────────────────────────────────
+
+  /**
+   * Find available payment paths via Horizon's strict-receive path-finding API.
+   * Returns paths where the destination receives exactly `destAmount` of `destAsset`.
+   */
+  async findPaymentPath(
+    sourcePublicKey: string,
+    sourceAssetCode: string,
+    destAssetCode: string,
+    destAmount: string,
+  ): Promise<Horizon.ServerApi.PaymentPathRecord[]> {
+    const destAsset =
+      destAssetCode.toUpperCase() === 'XLM'
+        ? Asset.native()
+        : new Asset(destAssetCode, undefined);
+
+    const result = await this.server
+      .strictReceivePaths(sourcePublicKey, destAsset, destAmount)
+      .call();
+
+    if (!result.records.length) {
+      throw new BadRequestException(
+        `No payment path found from "${sourceAssetCode}" to "${destAssetCode}" for amount ${destAmount}.`,
+      );
+    }
+
+    return result.records;
+  }
+
+  /**
+   * Build a pathPaymentStrictReceive XDR string for the client to sign.
+   * Guarantees the destination receives exactly `destAmount` of `destAsset`.
+   */
+  async buildPathPaymentXdr(params: {
+    sourcePublicKey: string;
+    sourceAsset: Asset;
+    sendMax: string;
+    destPublicKey: string;
+    destAsset: Asset;
+    destAmount: string;
+    path: Asset[];
+    memo: string;
+  }): Promise<string> {
+    const sourceAccount = await this.server.loadAccount(params.sourcePublicKey);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.pathPaymentStrictReceive({
+          sendAsset: params.sourceAsset,
+          sendMax: params.sendMax,
+          destination: params.destPublicKey,
+          destAsset: params.destAsset,
+          destAmount: params.destAmount,
+          path: params.path,
+        }),
+      )
+      .addMemo(Memo.text(params.memo))
+      .setTimeout(30)
+      .build();
+
+    return tx.toXDR();
   }
 
   /**
