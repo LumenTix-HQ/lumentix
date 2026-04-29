@@ -1,3 +1,5 @@
+import { Body, Controller, Post, HttpCode, HttpStatus, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import {
   Body,
   Controller,
@@ -24,6 +26,8 @@ import { AuthService } from './auth.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -38,6 +42,7 @@ export class AuthController {
   ) {}
 
   @Post('register')
+  @Throttle({ global: { ttl: seconds(60), limit: 10 } })
   @Throttle({ short: { ttl: seconds(60), limit: 5 } })
   @ApiOperation({
     summary: 'Register a new user',
@@ -69,6 +74,7 @@ export class AuthController {
   @Post('login')
   @UseGuards(BruteForceGuard)
   @HttpCode(HttpStatus.OK)
+  @Throttle({ global: { ttl: seconds(60), limit: 5 } })
   @Throttle({ short: { ttl: seconds(60), limit: 5 } })
   @ApiOperation({
     summary: 'Login',
@@ -93,6 +99,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle({ global: { ttl: seconds(3600), limit: 3 } })
   @ApiOperation({
     summary: 'Request password reset email',
     description:

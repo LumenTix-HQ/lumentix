@@ -44,9 +44,7 @@ import { RegistrationsModule } from './registrations/registrations.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         throttlers: [
-          { name: 'short', ttl: seconds(1), limit: 3 }, // 3 req/sec
-          { name: 'medium', ttl: seconds(10), limit: 20 }, // 20 req/10sec
-          { name: 'long', ttl: seconds(60), limit: 100 }, // 100 req/min
+          { name: 'global', ttl: seconds(60), limit: 100 },
         ],
         storage: new ThrottlerStorageRedisService(
           new Redis({
