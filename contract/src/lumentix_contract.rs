@@ -157,6 +157,27 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Extend event end time. Only the event organizer can extend the event.
+    /// The new end time must be later than the current end time.
+    pub fn extend_event_end_time(
+        env: Env,
+        event_id: u64,
+        new_end_time: u64,
+    ) -> Result<(), LumentixError> {
+        let mut event = storage::get_event(&env, event_id)?;
+
+        event.organizer.require_auth();
+
+        if new_end_time <= event.end_time {
+            return Err(LumentixError::InvalidTimeRange);
+        }
+
+        event.end_time = new_end_time;
+        storage::set_event(&env, event_id, &event);
+
+        Ok(())
+    }
+
     /// Update event status with validated transitions.
     /// Only the event organizer can update the status.
     /// Valid transitions: Draft -> Published, Published -> Cancelled, Published -> Completed (after end_time).
