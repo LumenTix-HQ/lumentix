@@ -16,5 +16,5 @@ export class ListAdminUsersDto extends PaginationDto {
   })
   @IsOptional()
   @IsEnum(UserStatus)
-  status?: UserStatus;
+  status?: UserStatus = undefined;
 }

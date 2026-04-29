@@ -148,6 +148,7 @@ export class RegistrationsService {
   async cancel(registrationId: string, callerId: string): Promise<Registration> {
     const reg = await this.findById(registrationId);
     if (reg.userId !== callerId) throw new ForbiddenException();
+    const wasConfirmed = reg.status === RegistrationStatus.CONFIRMED;
 
     if (
       reg.status !== RegistrationStatus.CONFIRMED &&
@@ -159,7 +160,7 @@ export class RegistrationsService {
     reg.status = RegistrationStatus.CANCELLED;
     const saved = await this.repo.save(reg);
 
-    if (reg.status === RegistrationStatus.CONFIRMED) {
+    if (wasConfirmed) {
       await this.promoteFromWaitlist(reg.eventId);
     }
 

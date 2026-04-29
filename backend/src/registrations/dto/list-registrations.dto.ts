@@ -1,16 +1,11 @@
-import { IsOptional, IsInt, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsOptional } from 'class-validator';
+import { PaginationDto } from '../../common/pagination/dto/pagination.dto';
+import { RegistrationStatus } from '../entities/registration.entity';
 
-export class ListRegistrationsDto {
+export class ListRegistrationsDto extends PaginationDto {
+  @ApiPropertyOptional({ enum: RegistrationStatus })
+  @IsEnum(RegistrationStatus)
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 20;
+  status?: RegistrationStatus = undefined;
 }

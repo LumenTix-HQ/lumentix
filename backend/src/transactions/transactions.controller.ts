@@ -11,38 +11,40 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { Response } from 'express';
-import { TransactionsService } from './transactions.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { TransactionsService } from './transactions.service';
 
 @ApiTags('Transactions')
+@ApiBearerAuth()
 @Controller('transactions')
 @UseGuards(JwtAuthGuard)
-@ApiBearerAuth()
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
   @Get('export')
   @ApiOperation({
     summary: 'Export transactions as CSV',
-    description: 'Downloads all authenticated user transactions as a CSV file, optionally filtered by date range. Capped at 10,000 rows.',
+    description:
+      'Authenticated. Downloads the current user’s transactions as a CSV file, optionally filtered by date range.',
   })
   @ApiQuery({ name: 'from', required: false, description: 'Start date (ISO string)' })
   @ApiQuery({ name: 'to', required: false, description: 'End date (ISO string)' })
-  @ApiResponse({ status: 200, description: 'CSV file' })
-  @ApiResponse({ status: 400, description: 'Too many rows — use a narrower date range' })
+  @ApiResponse({ status: 200, description: 'Transactions exported successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async export(
     @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
     @Query('from') from?: string,
     @Query('to') to?: string,
-    @Res() res?: Response,
   ) {
     const transactions = await this.transactionsService.getAllForExport(
       req.user.id,
@@ -73,10 +75,11 @@ export class TransactionsController {
           tx.referenceId ?? '',
           tx.createdAt.toISOString(),
         ]
-          .map((v) => '"' + String(v).replace(/"/g, '""') + '"')
+          .map((value) => `"${String(value).replace(/"/g, '""')}"`)
           .join(','),
       );
     }
+
     const csv = csvRows.join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader(
@@ -88,13 +91,15 @@ export class TransactionsController {
 
   @Get(':id')
   @ApiOperation({
-    summary: 'Get a single transaction',
-    description: 'Returns details of a specific transaction. Returns 403 if the transaction does not belong to the authenticated user.',
+    summary: 'Get a transaction',
+    description:
+      'Authenticated. Returns details for a transaction owned by the current user.',
   })
-  @ApiResponse({ status: 200, description: 'Transaction details' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  @ApiResponse({ status: 404, description: 'Not found' })
+  @ApiParam({ name: 'id', description: 'Transaction UUID' })
+  @ApiResponse({ status: 200, description: 'Transaction retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
   findOne(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
@@ -104,10 +109,11 @@ export class TransactionsController {
 
   @Get()
   @ApiOperation({
-    summary: 'Get all transactions for the authenticated user',
-    description: 'Returns a paginated, filterable list of the user\'s transactions.',
+    summary: 'List transactions',
+    description:
+      'Authenticated. Returns a paginated and filterable list of transactions for the current user.',
   })
-  @ApiResponse({ status: 200, description: 'Paginated list of transactions' })
+  @ApiResponse({ status: 200, description: 'Transactions retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   findAll(@Req() req: AuthenticatedRequest, @Query() dto: ListTransactionsDto) {
     return this.transactionsService.findAllByUser(req.user.id, dto);

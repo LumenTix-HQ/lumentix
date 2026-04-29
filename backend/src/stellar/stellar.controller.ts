@@ -11,6 +11,7 @@ import {
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -19,24 +20,30 @@ import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { StellarService } from './stellar.service';
-import { UsersService } from '../users/users.service';
 
 @ApiTags('Stellar')
+@ApiBearerAuth()
 @Controller('stellar')
 export class StellarController {
-  constructor(
-    private readonly stellarService: StellarService,
-    private readonly usersService: UsersService,
-  ) {}
+  constructor(private readonly stellarService: StellarService) {}
 
   @Get('account/:publicKey')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get Stellar account info and balances' })
+  @ApiOperation({
+    summary: 'Get Stellar account details',
+    description:
+      'Authenticated. Returns Stellar account information and balances for the specified public key.',
+  })
+  @ApiParam({ name: 'publicKey', description: 'Stellar public key' })
+  @ApiResponse({ status: 200, description: 'Stellar account retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Stellar account not found' })
   async getAccount(@Param('publicKey') publicKey: string) {
     if (!/^G[A-Z2-7]{55}$/.test(publicKey)) {
       throw new BadRequestException('Invalid Stellar public key');
     }
+
     try {
       const account = await this.stellarService.getAccount(publicKey);
       return {
@@ -44,10 +51,11 @@ export class StellarController {
         sequence: account.sequence,
         balances: account.balances,
       };
-    } catch (err: any) {
-      if (err?.response?.status === 404) {
+    } catch (error: any) {
+      if (error?.response?.status === 404) {
         throw new NotFoundException('Stellar account not found');
       }
+
       throw new BadRequestException('Could not fetch account from Horizon');
     }
   }
@@ -55,11 +63,16 @@ export class StellarController {
   @Post('create-testnet-account')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
-  @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Create and fund a testnet Stellar account (testnet only)',
+    summary: 'Create testnet Stellar account',
+    description:
+      'Authenticated organizer/admin endpoint. Creates and funds a Stellar testnet account for the current user.',
   })
-  async createTestnetAccount(@Req() req: AuthenticatedRequest) {
+  @ApiResponse({ status: 201, description: 'Testnet Stellar account created successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  createTestnetAccount(@Req() req: AuthenticatedRequest) {
     return this.stellarService.createTestnetAccount(req.user.id);
   }
 }
