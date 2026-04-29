@@ -161,6 +161,12 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Set event capacity. Only the event organizer can update capacity.
+    /// The new capacity cannot be lower than the number of tickets already sold.
+    pub fn set_event_capacity(
+        env: Env,
+        event_id: u64,
+        new_capacity: u32,
     /// Extend event end time. Only the event organizer can extend the event.
     /// The new end time must be later than the current end time.
     pub fn extend_event_end_time(
@@ -171,6 +177,15 @@ impl LumentixContract {
         let mut event = storage::get_event(&env, event_id)?;
 
         event.organizer.require_auth();
+        validation::validate_positive_capacity(new_capacity)?;
+
+        if new_capacity < event.tickets_sold {
+            return Err(LumentixError::CapacityExceeded);
+        }
+
+        event.max_tickets = new_capacity;
+        storage::set_event(&env, event_id, &event);
+
 
         if new_end_time <= event.end_time {
             return Err(LumentixError::InvalidTimeRange);
