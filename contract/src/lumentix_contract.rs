@@ -157,6 +157,28 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Set event capacity. Only the event organizer can update capacity.
+    /// The new capacity cannot be lower than the number of tickets already sold.
+    pub fn set_event_capacity(
+        env: Env,
+        event_id: u64,
+        new_capacity: u32,
+    ) -> Result<(), LumentixError> {
+        let mut event = storage::get_event(&env, event_id)?;
+
+        event.organizer.require_auth();
+        validation::validate_positive_capacity(new_capacity)?;
+
+        if new_capacity < event.tickets_sold {
+            return Err(LumentixError::CapacityExceeded);
+        }
+
+        event.max_tickets = new_capacity;
+        storage::set_event(&env, event_id, &event);
+
+        Ok(())
+    }
+
     /// Update event status with validated transitions.
     /// Only the event organizer can update the status.
     /// Valid transitions: Draft -> Published, Published -> Cancelled, Published -> Completed (after end_time).
