@@ -28,6 +28,7 @@ export enum AuditAction {
   EVENT_COMPLETED = 'EVENT_COMPLETED',
 }
 
+@Index(['userId', 'action'])
 @Entity('audit_logs')
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')

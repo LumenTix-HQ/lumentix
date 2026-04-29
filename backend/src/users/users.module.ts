@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
+import { RoleRequest } from './entities/role-request.entity';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { CurrenciesModule } from '../currencies/currencies.module';
@@ -8,7 +9,7 @@ import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, RoleRequest]),
     CurrenciesModule,
     ExchangeRatesModule,
   ],

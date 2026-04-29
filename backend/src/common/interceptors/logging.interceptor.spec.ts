@@ -61,4 +61,88 @@ describe('LoggingInterceptor', () => {
       },
     });
   });
+
+  // ── Additional coverage ──────────────────────────────────────────────────
+
+  it('should pass through the response value unchanged', (done) => {
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ method: 'GET', url: '/data' }),
+        getResponse: () => ({ statusCode: 200 }),
+      }),
+    } as unknown as ExecutionContext;
+
+    const mockCallHandler = {
+      handle: () => of({ id: 1, name: 'test' }),
+    } as CallHandler;
+
+    interceptor.intercept(mockContext, mockCallHandler).subscribe({
+      next: (value) => {
+        expect(value).toEqual({ id: 1, name: 'test' });
+        done();
+      },
+    });
+  });
+
+  it('should re-throw the error after logging', (done) => {
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ method: 'DELETE', url: '/resource/1' }),
+      }),
+    } as unknown as ExecutionContext;
+
+    const originalError = new Error('something went wrong');
+    const mockCallHandler = {
+      handle: () => throwError(() => originalError),
+    } as CallHandler;
+
+    interceptor.intercept(mockContext, mockCallHandler).subscribe({
+      error: (err) => {
+        expect(err).toBe(originalError);
+        expect(loggerSpyError).toHaveBeenCalled();
+        done();
+      },
+    });
+  });
+
+  it('should use 500 as default status when error has no status', (done) => {
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ method: 'GET', url: '/crash' }),
+      }),
+    } as unknown as ExecutionContext;
+
+    const mockCallHandler = {
+      handle: () => throwError(() => new Error('no status')),
+    } as CallHandler;
+
+    interceptor.intercept(mockContext, mockCallHandler).subscribe({
+      error: () => {
+        const logArgs = loggerSpyError.mock.calls[0][0];
+        expect(logArgs).toMatch(/GET \/crash 500 \+\d+ms/);
+        done();
+      },
+    });
+  });
+
+  it('should log the correct HTTP method and URL', (done) => {
+    const mockContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ method: 'PATCH', url: '/users/42' }),
+        getResponse: () => ({ statusCode: 204 }),
+      }),
+    } as unknown as ExecutionContext;
+
+    const mockCallHandler = {
+      handle: () => of(null),
+    } as CallHandler;
+
+    interceptor.intercept(mockContext, mockCallHandler).subscribe({
+      next: () => {
+        const logArgs = loggerSpyLog.mock.calls[0][0];
+        expect(logArgs).toMatch(/PATCH \/users\/42 204 \+\d+ms/);
+        done();
+      },
+    });
+  });
 });

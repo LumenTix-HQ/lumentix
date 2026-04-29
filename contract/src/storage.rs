@@ -1,6 +1,6 @@
 use crate::error::LumentixError;
-use crate::types::{Event, Ticket, INSTANCE_LIFETIME, PERSISTENT_LIFETIME};
-use soroban_sdk::{Address, Env};
+use crate::types::{Event, Ticket, TicketTransferRecord, INSTANCE_LIFETIME, PERSISTENT_LIFETIME};
+use soroban_sdk::{Address, Env, Vec};
 
 // Storage keys
 const INITIALIZED: &str = "INIT";
@@ -13,6 +13,7 @@ const TICKET_PREFIX: &str = "TICKET_";
 const ESCROW_PREFIX: &str = "ESCROW_";
 const PLATFORM_FEE_BPS: &str = "PLATFORM_FEE_BPS";
 const PLATFORM_BALANCE: &str = "PLATFORM_BAL";
+const TRANSFER_HISTORY_PREFIX: &str = "TXHIST_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -58,9 +59,17 @@ pub fn set_token(env: &Env, token: &Address) {
         .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
 }
 
-/// Get token address
+/// Get token address as a Result
+pub fn get_token_result(env: &Env) -> Result<Address, LumentixError> {
+    env.storage()
+        .instance()
+        .get(&TOKEN)
+        .ok_or(LumentixError::NotInitialized)
+}
+
+/// Get token address (panics if not set)
 pub fn get_token(env: &Env) -> Address {
-    let token: Address = env.storage().instance().get(&TOKEN).unwrap();
+    let token: Address = get_token_result(env).unwrap();
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
@@ -166,11 +175,15 @@ pub fn add_escrow(env: &Env, event_id: u64, amount: i128) {
 /// Get escrow balance for an event
 pub fn get_escrow(env: &Env, event_id: u64) -> Result<i128, LumentixError> {
     let key = (ESCROW_PREFIX, event_id);
-    let bal: i128 = env.storage().persistent().get(&key).unwrap_or(0);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(bal)
+    if env.storage().persistent().has(&key) {
+        let bal: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+        Ok(bal)
+    } else {
+        Ok(0)
+    }
 }
 
 /// Deduct amount from escrow
@@ -241,4 +254,38 @@ pub fn clear_platform_balance(env: &Env) {
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Append a transfer record to a ticket's transfer history
+pub fn append_ticket_transfer_history(env: &Env, ticket_id: u64, record: TicketTransferRecord) {
+    let key = (TRANSFER_HISTORY_PREFIX, ticket_id);
+    let mut history: Vec<TicketTransferRecord> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    history.push_back(record);
+    env.storage().persistent().set(&key, &history);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get the full transfer history for a ticket
+pub fn get_ticket_transfer_history(
+    env: &Env,
+    ticket_id: u64,
+) -> Vec<TicketTransferRecord> {
+    let key = (TRANSFER_HISTORY_PREFIX, ticket_id);
+    let history: Vec<TicketTransferRecord> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    history
 }

@@ -6,8 +6,9 @@ import {
   Index,
 } from 'typeorm';
 
-export type TicketStatus = 'valid' | 'used' | 'refunded';
+export type TicketStatus = 'valid' | 'used' | 'refunded' | 'expired';
 
+@Index(['eventId', 'status'])
 @Entity({ name: 'tickets' })
 export class TicketEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -38,6 +39,18 @@ export class TicketEntity {
    */
   @Column({ type: 'text', nullable: true })
   signature!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  pdfUrl!: string | null;
+
+  @Column({ type: 'decimal', precision: 18, scale: 7, nullable: true })
+  listingPrice!: number | null;
+
+  @Column({ default: false })
+  isListed!: boolean;
+
+  @Column({ type: 'varchar', nullable: true })
+  listingCurrency!: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

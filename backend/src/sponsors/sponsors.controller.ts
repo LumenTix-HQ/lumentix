@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Req,
   ParseUUIDPipe,
@@ -28,6 +29,7 @@ import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+import { PaginationDto } from '../common/pagination';
 
 @ApiTags('Sponsors')
 @Controller('events/:eventId/tiers')
@@ -59,6 +61,17 @@ export class SponsorsController {
   @ApiResponse({ status: 200, description: 'List of tiers' })
   list(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.sponsorsService.listTiers(eventId);
+  }
+
+  @Get('progress')
+  @ApiOperation({
+    summary: 'Get sponsorship funding progress',
+    description: 'Public. Returns raised amount, goal, percentage, and contributor count for an event.',
+  })
+  @ApiResponse({ status: 200, description: 'Funding progress' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  getFundingProgress(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.sponsorsService.getFundingProgress(eventId);
   }
 
   @Put(':id')
@@ -112,5 +125,45 @@ export class SponsorsController {
   @ApiResponse({ status: 400, description: 'Bad Request' })
   confirmContribution(@Body() dto: ConfirmContributionDto) {
     return this.contributionsService.confirmContribution(dto.transactionHash);
+  }
+
+  @Get(':id/contributions')
+  @Roles(Role.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'List contributions for a sponsor tier',
+    description: 'Organizer-only. Returns paginated contributions with tier totals.',
+  })
+  @ApiResponse({ status: 200, description: 'Paginated contributions with tierTotal and contributorCount' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Tier not found' })
+  listContributions(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Param('id', ParseUUIDPipe) tierId: string,
+    @Query() paginationDto: PaginationDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.contributionsService.listContributions(
+      tierId,
+      eventId,
+      req.user.id,
+      paginationDto,
+    );
+  }
+
+  // ── Escrow distribution (organizer / admin) ───────────────────────────────
+
+  @Post('distribute')
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Distribute escrow to organizer', description: 'Releases sponsor funds from escrow to the organizer Stellar wallet. Event must be COMPLETED.' })
+  @ApiResponse({ status: 201, description: 'Funds distributed' })
+  @ApiResponse({ status: 400, description: 'Bad Request' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  distributeEscrow(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.sponsorsService.distributeEscrow(eventId, req.user.id, req.user.role);
   }
 }

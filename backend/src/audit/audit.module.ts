@@ -15,4 +15,4 @@ import { AuditRetentionJob } from './jobs/audit-retention.job';
   providers: [AuditService, AuditRetentionJob],
   exports: [AuditService],
 })
-export class AuditModule {}
+export class AuditModule { }

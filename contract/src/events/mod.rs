@@ -1,6 +1,6 @@
 #![allow(deprecated)]
 
-use soroban_sdk::{symbol_short, Address, Env, String, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
 
 /// A type for transfer of event
 pub struct TransferEvent;
@@ -66,6 +66,21 @@ impl PlatformFeeUpdated {
     }
 }
 
+/// Event emitted when the platform fee recipient (admin) is changed via
+/// [`crate::lumentix_contract::LumentixContract::change_admin`].
+/// Carries `admin_executor`, `old_recipient`, and `new_recipient`
+/// so Dapp indexing solutions can detect treasury restructuring transparently.
+pub struct PlatformFeeRecipientUpdated;
+
+impl PlatformFeeRecipientUpdated {
+    pub fn emit(env: &Env, admin_executor: Address, old_recipient: Address, new_recipient: Address) {
+        env.events().publish(
+            (symbol_short!("feerecip"),),
+            (admin_executor, old_recipient, new_recipient),
+        );
+    }
+}
+
 /// Event emitted when an organizer cancels a published event.
 pub struct EventCancelled;
 
@@ -123,10 +138,8 @@ pub struct AdminChanged;
 
 impl AdminChanged {
     pub fn emit(env: &Env, caller: Address, old_admin: Address, new_admin: Address) {
-        env.events().publish(
-            (symbol_short!("admchng"),),
-            (caller, old_admin, new_admin),
-        );
+        env.events()
+            .publish((symbol_short!("admchng"),), (caller, old_admin, new_admin));
     }
 }
 
@@ -190,14 +203,51 @@ impl TicketPurchased {
     }
 }
 
+/// Event emitted when multiple tickets are purchased in a single batch via
+/// [`crate::lumentix_contract::LumentixContract::batch_purchase_tickets`].
+/// Exposes `event_id`, `buyer`, `quantity`, `total_price`, and `starting_ticket_id`
+/// so indexers can track bulk purchases without per-ticket event bloat.
+pub struct BatchTicketsPurchased;
+
+impl BatchTicketsPurchased {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        buyer: Address,
+        quantity: u32,
+        total_price: i128,
+        starting_ticket_id: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("batchbuy"),),
+            (event_id, buyer, quantity, total_price, starting_ticket_id),
+        );
+    }
+}
+
 /// Event emitted when a ticket is transferred from one owner to another
 pub struct TicketTransferred;
 
 impl TicketTransferred {
-    pub fn emit(env: &Env, ticket_id: u64, from: Address, to: Address, event_id: u64) {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, from: Address, to: Address) {
         env.events().publish(
-            (symbol_short!("tkttrans"),),
-            (ticket_id, from, to, event_id),
+            (symbol_short!("tkttrans"), ticket_id, event_id),
+            (ticket_id, event_id, from, to),
+        );
+    }
+}
+
+/// Event emitted when multiple tickets are transferred in a single batch via
+/// [`crate::lumentix_contract::LumentixContract::batch_transfer_tickets`].
+/// Carries `from`, `to`, and the full `Vec<u64>` of transferred ticket IDs
+/// so indexers can update ownership in one operation without per-ticket noise.
+pub struct BatchTicketsTransferred;
+
+impl BatchTicketsTransferred {
+    pub fn emit(env: &Env, from: Address, to: Address, ticket_ids: Vec<u64>) {
+        env.events().publish(
+            (symbol_short!("batchtrn"),),
+            (from, to, ticket_ids),
         );
     }
 }
@@ -210,6 +260,19 @@ impl TicketUsed {
         env.events().publish(
             (symbol_short!("tktused"),),
             (ticket_id, event_id, owner, caller),
+        );
+    }
+}
+
+/// Event emitted when multiple tickets are checked in via [`crate::lumentix_contract::LumentixContract::batch_use_tickets`].
+/// Carries `event_id`, `quantity`, and the list of `ticket_ids` so indexers can update headcounts without one log line per ticket.
+pub struct BatchTicketsUsed;
+
+impl BatchTicketsUsed {
+    pub fn emit(env: &Env, event_id: u64, quantity: u32, ticket_ids: Vec<u64>) {
+        env.events().publish(
+            (symbol_short!("batchuse"),),
+            (event_id, quantity, ticket_ids),
         );
     }
 }
@@ -231,9 +294,145 @@ pub struct EscrowReleased;
 
 impl EscrowReleased {
     pub fn emit(env: &Env, event_id: u64, organizer: Address, amount: i128) {
+        env.events()
+            .publish((symbol_short!("escrwrel"),), (event_id, organizer, amount));
+    }
+}
+
+/// Diagnostic event emitted on each successful [`crate::lumentix_contract::LumentixContract::get_protocol_fee`]
+/// invocation. Carries the current fee (bps) and admin recipient for analytics and indexers; not a state change.
+pub struct ProtocolFeeQueried;
+
+impl ProtocolFeeQueried {
+    pub fn emit(env: &Env, fee_bps: u32, fee_recipient: Address) {
+        env.events()
+            .publish((symbol_short!("feequery"),), (fee_bps, fee_recipient));
+    }
+}
+
+/// Event emitted when funds are deposited into a group's treasury.
+pub struct FundsDeposited;
+
+impl FundsDeposited {
+    pub fn emit(env: &Env, event_id: u64, depositor: Address, amount: i128, new_balance: i128) {
         env.events().publish(
-            (symbol_short!("escrwrel"),),
-            (event_id, organizer, amount),
+            (symbol_short!("deposit"),),
+            (event_id, depositor, amount, new_balance),
+        );
+    }
+}
+
+/// Event emitted when funds are withdrawn from a group's treasury.
+pub struct FundsWithdrawn;
+
+impl FundsWithdrawn {
+    pub fn emit(env: &Env, event_id: u64, withdrawer: Address, amount: i128, new_balance: i128) {
+        env.events().publish(
+            (symbol_short!("withdraw"),),
+            (event_id, withdrawer, amount, new_balance),
+        );
+    }
+}
+
+/// Event emitted when event metadata is updated (name, description, location, times, price, capacity).
+/// Enables front-end graph indexers to reflect changed event information dynamically without polling.
+pub struct EventMetadataUpdated;
+
+impl EventMetadataUpdated {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, time_updated: u64) {
+        env.events().publish(
+            (symbol_short!("evtmeta"),),
+            (event_id, organizer, time_updated),
+        );
+    }
+}
+
+/// Event emitted when ticket sales for an event are paused by the organizer.
+/// Informs users in real-time that an event they are purchasing has gone offline.
+pub struct EventSalesPaused;
+
+impl EventSalesPaused {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("salespaus"),),
+            (event_id, organizer, timestamp),
+        );
+    }
+}
+
+/// Event emitted when ticket sales for a paused event are resumed by the organizer.
+/// Restores UI cart validity for users waiting on the event.
+pub struct EventSalesResumed;
+
+impl EventSalesResumed {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("salesrsm"),),
+            (event_id, organizer, timestamp),
+        );
+    }
+}
+
+/// Universal event emitted anytime an EventStatus switches (e.g. Draft -> Published, Active -> Cancelled).
+/// Standardizes indexer states minimizing specific listener configuration.
+pub struct GenericEventStateTransition;
+
+impl GenericEventStateTransition {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        caller: Address,
+        old_status: crate::types::EventStatus,
+        new_status: crate::types::EventStatus,
+    ) {
+        env.events().publish(
+            (symbol_short!("genstsch"),),
+            (event_id, caller, old_status, new_status),
+        );
+    }
+}
+
+/// Event emitted when an event's capacity is changed.
+/// Alerts scalpers, waitlists, and potential buyers of capacity changes immediately.
+pub struct EventCapacityChanged;
+
+impl EventCapacityChanged {
+    pub fn emit(env: &Env, event_id: u64, old_capacity: u32, new_capacity: u32) {
+        env.events().publish(
+            (symbol_short!("capchng"),),
+            (event_id, old_capacity, new_capacity),
+        );
+    }
+}
+
+/// Event emitted when a ticket is revoked by an admin.
+/// Provides audit trail for admin tampering actions and builds off-chain trust graphs.
+pub struct TicketRevoked;
+
+impl TicketRevoked {
+    pub fn emit(
+        env: &Env,
+        admin_address: Address,
+        ticket_id: u64,
+        event_id: u64,
+        reason: Option<String>,
+    ) {
+        env.events().publish(
+            (symbol_short!("tktrevok"),),
+            (admin_address, ticket_id, event_id, reason),
+        );
+    }
+}
+
+/// Event emitted when an event's end time is extended.
+/// Notifies attendees of prolonged event times for mobile push alerts.
+pub struct EventTimeExtended;
+
+impl EventTimeExtended {
+    pub fn emit(env: &Env, event_id: u64, previous_end_time: u64, new_end_time: u64) {
+        env.events().publish(
+            (symbol_short!("timeext"),),
+            (event_id, previous_end_time, new_end_time),
         );
     }
 }

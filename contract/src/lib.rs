@@ -32,6 +32,12 @@ impl SponsorsContract {
             sponsor_count: 0,
         };
         env.storage().persistent().set(&key, &tier);
+
+        // Emit SponsorTierRegistered event
+        env.events().publish(
+            (symbol_short!("sponstier"),),
+            (event_id, tier_id, price, max_sponsors),
+        );
     }
 
     pub fn contribute(env: Env, event_id: String, tier_id: String, sponsor: Address, amount: i128) {
@@ -62,6 +68,11 @@ impl SponsorsContract {
 
         tier.sponsor_count = tier.sponsor_count.saturating_add(1);
         env.storage().persistent().set(&key, &tier);
+
+        env.events().publish(
+            (Symbol::new(&env, "SponsorContributed"),),
+            (event_id, tier_id, sponsor, amount, tier.sponsor_count),
+        );
     }
 
     pub fn get_tier_contributions(
@@ -84,7 +95,7 @@ impl SponsorsContract {
 #[cfg(test)]
 mod sponsor_tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Env};
+    use soroban_sdk::{testutils::Address as _, testutils::Events, xdr, Env};
 
     #[test]
     fn test_simple_register() {
@@ -126,6 +137,44 @@ mod sponsor_tests {
         let (count2, list2) = client.get_tier_contributions(&event, &tier);
         assert_eq!(count2, 2u32);
         assert_eq!(list2.len(), 2u32);
+    }
+
+    #[test]
+    fn contribute_emits_sponsor_contributed_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let event = String::from_str(&env, "event1");
+        let tier = String::from_str(&env, "tierA");
+
+        let contract_id = env.register(SponsorsContract, ());
+        let client = SponsorsContractClient::new(&env, &contract_id);
+
+        client.register_sponsor_tier(&event, &tier, &100_i128, &2u32);
+
+        let sponsor = Address::generate(&env);
+        client.contribute(&event, &tier, &sponsor, &100_i128);
+
+        let events = env.events().all();
+        assert_eq!(events.events().len(), 1);
+
+        let xdr_event = events.events().get(0).unwrap();
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            assert_eq!(body.topics.len(), 1);
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                assert_eq!(topic_sym.as_slice(), b"SponsorContributed");
+            } else {
+                panic!("Expected Symbol topic");
+            }
+
+            if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                assert_eq!(data_vec.len(), 5);
+            } else {
+                panic!("Expected Vec data");
+            }
+        } else {
+            panic!("Expected V0 event body");
+        }
     }
 
     #[test]
@@ -183,9 +232,15 @@ mod test;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod get_protocol_fee_test;
+
+#[cfg(test)]
+mod withdraw_platform_fees_test;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
-pub use events::{CheckInEvent, EventCancelled, TransferEvent};
+pub use events::{CheckInEvent, EventCancelled, EventMetadataUpdated, EventSalesPaused, EventSalesResumed, TransferEvent};
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
 pub use types::{Event, EventStatus, Ticket as LumentixTicket};

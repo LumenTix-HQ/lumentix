@@ -1,6 +1,6 @@
-import { IsOptional, IsEnum, IsString, IsInt, Min } from 'class-validator';
-import { Type } from 'class-transformer';
-import { EventStatus } from '../entities/event.entity';
+import { IsOptional, IsEnum, IsString, IsInt, Min, IsBoolean } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
+import { EventStatus, EventCategory } from '../entities/event.entity';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ListEventsDto {
@@ -14,10 +14,21 @@ export class ListEventsDto {
   @IsString()
   organizerId?: string;
 
-  @ApiPropertyOptional({ description: 'Search query for title or description' })
+  @ApiPropertyOptional({ description: 'Search by event title (case-insensitive)' })
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ enum: EventCategory, description: 'Filter by event category' })
+  @IsOptional()
+  @IsEnum(EventCategory)
+  category?: EventCategory;
+
+  @ApiPropertyOptional({ description: 'Only return events with available capacity' })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  showAvailableOnly?: boolean;
 
   @ApiPropertyOptional({ example: 1, description: 'Page number' })
   @IsOptional()
