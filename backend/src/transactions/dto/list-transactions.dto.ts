@@ -12,7 +12,7 @@ export class ListTransactionsDto extends PaginationDto {
   @ApiPropertyOptional({ enum: TransactionStatus, description: 'Filter by transaction status' })
   @IsOptional()
   @IsEnum(TransactionStatus)
-  status?: TransactionStatus;
+  status?: TransactionStatus = undefined;
 
   @ApiPropertyOptional({ example: '2025-01-01', description: 'Filter transactions from this date' })
   @IsOptional()
