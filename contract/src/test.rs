@@ -2772,7 +2772,7 @@ fn test_event_status_changed_published_to_completed() {
 // ============================================================================
 
 #[test]
-fn test_change_admin_success() {
+fn test_update_platform_fee_recipient_success() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2780,7 +2780,7 @@ fn test_change_admin_success() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    let result = client.try_change_admin(&admin, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&admin, &new_admin);
     assert!(result.is_ok());
 
     // Verify new admin can call admin functions
@@ -2796,7 +2796,7 @@ fn test_change_admin_success() {
 }
 
 #[test]
-fn test_change_admin_unauthorized() {
+fn test_update_platform_fee_recipient_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2805,7 +2805,7 @@ fn test_change_admin_unauthorized() {
     let new_admin = Address::generate(&env);
 
     // Try to change admin as unauthorized user
-    let result = client.try_change_admin(&unauthorized, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&unauthorized, &new_admin);
     assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
 
     // Verify admin is still the original
@@ -2814,14 +2814,14 @@ fn test_change_admin_unauthorized() {
 }
 
 #[test]
-fn test_change_admin_to_same_address_fails() {
+fn test_update_platform_fee_recipient_to_same_address_fails() {
     let env = Env::default();
     env.mock_all_auths();
 
     let (admin, client) = create_test_contract(&env);
 
     // Try to change admin to the same address
-    let result = client.try_change_admin(&admin, &admin);
+    let result = client.try_update_platform_fee_recipient(&admin, &admin);
     assert_eq!(result, Err(Ok(LumentixError::InvalidAddress)));
 
     // Verify admin is unchanged
@@ -2830,7 +2830,7 @@ fn test_change_admin_to_same_address_fails() {
 }
 
 #[test]
-fn test_change_admin_get_admin_returns_new_address() {
+fn test_update_platform_fee_recipient_get_admin_returns_new_address() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2838,7 +2838,7 @@ fn test_change_admin_get_admin_returns_new_address() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // Verify get_admin returns the new admin
     let current_admin = client.get_admin();
@@ -2846,7 +2846,7 @@ fn test_change_admin_get_admin_returns_new_address() {
 }
 
 #[test]
-fn test_change_admin_set_platform_fee_with_new_admin() {
+fn test_update_platform_fee_recipient_set_platform_fee_with_new_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2854,7 +2854,7 @@ fn test_change_admin_set_platform_fee_with_new_admin() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // New admin should be able to set platform fee
     let result = client.try_set_platform_fee(&new_admin, &500u32);
@@ -2866,7 +2866,7 @@ fn test_change_admin_set_platform_fee_with_new_admin() {
 }
 
 #[test]
-fn test_change_admin_withdraw_platform_fees_with_new_admin() {
+fn test_update_platform_fee_recipient_withdraw_platform_fees_with_new_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2881,7 +2881,7 @@ fn test_change_admin_withdraw_platform_fees_with_new_admin() {
     client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // New admin should be able to withdraw fees
     let withdrawn = client.withdraw_platform_fees(&new_admin);
@@ -2893,7 +2893,7 @@ fn test_change_admin_withdraw_platform_fees_with_new_admin() {
 }
 
 #[test]
-fn test_change_admin_chain_a_to_b_to_c() {
+fn test_update_platform_fee_recipient_chain_a_to_b_to_c() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2902,14 +2902,14 @@ fn test_change_admin_chain_a_to_b_to_c() {
     let admin_c = Address::generate(&env);
 
     // A -> B
-    client.change_admin(&admin_a, &admin_b);
+    client.update_platform_fee_recipient(&admin_a, &admin_b);
 
     // Verify B is now admin
     let current_admin = client.get_admin();
     assert_eq!(current_admin, admin_b);
 
     // B -> C
-    client.change_admin(&admin_b, &admin_c);
+    client.update_platform_fee_recipient(&admin_b, &admin_c);
 
     // Verify C is now admin
     let current_admin = client.get_admin();
@@ -2929,7 +2929,7 @@ fn test_change_admin_chain_a_to_b_to_c() {
 }
 
 #[test]
-fn test_change_admin_emits_event() {
+fn test_update_platform_fee_recipient_emits_event() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2937,7 +2937,7 @@ fn test_change_admin_emits_event() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // Verify AdminChanged event was emitted
     let events = env.events().all();
@@ -4880,7 +4880,7 @@ fn test_update_event_metadata_persists_changes() {
 // ============================================================================
 
 #[test]
-fn test_treasury_rotation_non_admin_cannot_change_admin() {
+fn test_treasury_rotation_non_admin_cannot_update_platform_fee_recipient() {
     // Non-admin attempts to rotate recipient, fails auth.
     let env = Env::default();
     env.mock_all_auths();
@@ -4889,7 +4889,7 @@ fn test_treasury_rotation_non_admin_cannot_change_admin() {
     let attacker = Address::generate(&env);
     let new_admin = Address::generate(&env);
 
-    let result = client.try_change_admin(&attacker, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&attacker, &new_admin);
     assert_eq!(
         result,
         Err(Ok(LumentixError::Unauthorized)),
@@ -4909,7 +4909,7 @@ fn test_treasury_rotation_admin_rotates_recipient_a_to_b() {
     let (addr_a, client) = create_test_contract(&env);
     let addr_b = Address::generate(&env);
 
-    let result = client.try_change_admin(&addr_a, &addr_b);
+    let result = client.try_update_platform_fee_recipient(&addr_a, &addr_b);
     assert!(result.is_ok(), "Admin must be able to rotate recipient");
 
     assert_eq!(
@@ -4943,7 +4943,7 @@ fn test_treasury_rotation_subsequent_withdrawal_resolves_to_new_recipient() {
     assert_eq!(client.get_platform_balance(), 20i128);
 
     // Rotate recipient from A to B
-    client.change_admin(&addr_a, &addr_b);
+    client.update_platform_fee_recipient(&addr_a, &addr_b);
 
     // Address_A must no longer be able to withdraw
     let old_withdraw = client.try_withdraw_platform_fees(&addr_a);
@@ -4975,7 +4975,7 @@ fn test_treasury_rotation_escrow_release_after_rotation_goes_to_organizer_not_ad
     client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Rotate admin
-    client.change_admin(&addr_a, &addr_b);
+    client.update_platform_fee_recipient(&addr_a, &addr_b);
 
     // Complete event and release escrow — must go to organizer
     env.ledger().with_mut(|li| li.timestamp = 2001);
