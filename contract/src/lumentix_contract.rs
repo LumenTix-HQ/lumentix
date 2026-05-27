@@ -1119,6 +1119,7 @@ impl LumentixContract {
             TicketTransferred::emit(&env, ticket_id, ticket.event_id, from.clone(), to.clone());
         }
 
+        // Resolves Issue #546
         // Emit BatchTicketsTransferred event for indexer efficiency
         BatchTicketsTransferred::emit(&env, from.clone(), to.clone(), ticket_ids.clone());
 

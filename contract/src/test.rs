@@ -5240,3 +5240,47 @@ fn test_set_event_capacity() {
     // Decrease to 50 should succeed
     assert!(client.try_set_event_capacity(&organizer, &event_id, &50u32).is_ok());
 }
+
+#[test]
+fn test_batch_transfer_tickets_event_emission() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let client = create_and_initialize_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    
+    let current_time = 1_000_000;
+    env.ledger().with_mut(|li| li.timestamp = current_time);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Event with tickets"),
+        &100i128,
+        &50u32,
+        &(current_time + 100),
+        &(current_time + 200),
+    );
+    client.publish_event(&organizer, &event_id);
+    
+    // Purchase 3 tickets
+    client.batch_purchase_tickets(&event_id, &buyer, &3u32);
+    
+    let ticket_ids = vec![&env, 1u64, 2u64, 3u64];
+    client.batch_transfer_tickets(&ticket_ids, &new_owner, &buyer);
+    
+    let events = env.events().all();
+    let mut batch_event_found = false;
+    for (contract_id, topic, data) in events.iter() {
+        if topic.len() == 1 {
+            let topic_val = topic.get(0).unwrap();
+            let expected_symbol = soroban_sdk::symbol_short!("batchtrn");
+            if topic_val.to_val() == expected_symbol.to_val() {
+                batch_event_found = true;
+                break;
+            }
+        }
+    }
+    assert!(batch_event_found, "BatchTicketsTransferred event not emitted");
+}
