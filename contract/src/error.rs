@@ -109,4 +109,12 @@ pub enum LumentixError {
     OraclePriceNotFound = 44,
     /// Currency conversion error
     CurrencyConversionError = 45,
+
+    // Waitlist errors (46–49)
+    /// User is already present in the event waitlist
+    AlreadyOnWaitlist = 46,
+    /// User has no active waitlist offer
+    WaitlistOfferNotFound = 47,
+    /// Waitlist offer has expired
+    WaitlistOfferExpired = 48,
 }

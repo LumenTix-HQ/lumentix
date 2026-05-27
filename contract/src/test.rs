@@ -5240,3 +5240,78 @@ fn test_set_event_capacity() {
     // Decrease to 50 should succeed
     assert!(client.try_set_event_capacity(&organizer, &event_id, &50u32).is_ok());
 }
+
+#[test]
+fn test_calculate_dynamic_price_time_tiers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_000);
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Dynamic"),
+        &String::from_str(&env, "Pricing"),
+        &String::from_str(&env, "Venue"),
+        &2_000u64,
+        &(1_000 + (31 * 24 * 60 * 60)),
+        &100i128,
+        &100u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let early = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
+    assert_eq!(early, 80i128);
+
+    env.ledger()
+        .with_mut(|li| li.timestamp = 1_000 + (10 * 24 * 60 * 60));
+    let normal = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
+    assert_eq!(normal, 100i128);
+
+    env.ledger()
+        .with_mut(|li| li.timestamp = (1_000 + (31 * 24 * 60 * 60)) - (12 * 60 * 60));
+    let last_minute = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
+    assert_eq!(last_minute, 150i128);
+}
+
+#[test]
+fn test_waitlist_fifo_offer_and_reserved_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer_a = Address::generate(&env);
+    let buyer_b = Address::generate(&env);
+    let buyer_c = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Waitlist Event"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &1u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    client.purchase_ticket(&buyer_a, &event_id, &100i128);
+    let position = client.join_waitlist(&event_id, &buyer_b);
+    assert_eq!(position, 1u32);
+
+    // Increasing capacity auto-processes queue and reserves the new slot for buyer_b.
+    assert!(client
+        .try_set_event_capacity(&organizer, &event_id, &2u32)
+        .is_ok());
+
+    // Public buyer cannot consume the reserved waitlist slot.
+    let c_result = client.try_purchase_ticket(&buyer_c, &event_id, &100i128);
+    assert_eq!(c_result, Err(Ok(LumentixError::EventSoldOut)));
+
+    // Waitlisted buyer can purchase during their reservation window.
+    assert!(client
+        .try_purchase_ticket(&buyer_b, &event_id, &100i128)
+        .is_ok());
+}

@@ -9,12 +9,12 @@ use crate::events::{
     FundsWithdrawn, GenericEventStateTransition, OraclePriceUpdated, PlatformFeeRecipientUpdated,
     PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried, SeatHoldReleased, SeatSelected,
     TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed, VenueLayoutCreated,
-    VipTierCreated, VipTicketAssigned,
+    VipTierCreated, VipTicketAssigned, WaitlistAvailabilityNotified, WaitlistJoined,
 };
 use crate::storage;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, CurrencyConfig, Event, EventStatus, Seat,
-    Ticket, TicketTransferRecord, VenueLayout, VenueSection, VipTier,
+    Ticket, TicketTransferRecord, VenueLayout, VenueSection, VipTier, WaitlistOffer,
     PERSISTENT_LIFETIME,
 };
 use crate::validation;
@@ -22,6 +22,10 @@ use soroban_sdk::{contract, contractimpl, Address, Env, String, Vec, Map};
 
 #[contract]
 pub struct LumentixContract;
+
+const ONE_DAY_SECONDS: u64 = 24 * 60 * 60;
+const SEVEN_DAYS_SECONDS: u64 = 7 * 24 * 60 * 60;
+const THIRTY_DAYS_SECONDS: u64 = 30 * 24 * 60 * 60;
 
 #[contractimpl]
 impl LumentixContract {
@@ -298,6 +302,11 @@ impl LumentixContract {
         event.max_tickets = new_capacity;
         storage::set_event(&env, event_id, &event);
 
+        if new_capacity > old_capacity && event.status == EventStatus::Published {
+            let newly_available = new_capacity - old_capacity;
+            let _ = Self::process_waitlist_queue_internal(&env, event_id, newly_available);
+        }
+
         // Emit EventCapacityChanged event
         EventCapacityChanged::emit(&env, event_id, old_capacity, new_capacity);
 
@@ -365,8 +374,21 @@ impl LumentixContract {
             return Err(LumentixError::EventPaused);
         }
 
-        // Check capacity — reject when sold out
-        if event.tickets_sold >= event.max_tickets {
+        let now = env.ledger().timestamp();
+        Self::cleanup_expired_waitlist_offers(&env, event_id, now);
+        let reserved_for_waitlist = storage::get_waitlist_reserved(&env, event_id);
+
+        let mut consume_waitlist_offer = false;
+        if let Some(offer) = storage::get_waitlist_offer(&env, event_id, &buyer) {
+            if offer.quantity > 0 && offer.expires_at > now {
+                consume_waitlist_offer = true;
+            }
+        }
+
+        // Check capacity, accounting for reserved waitlist offers.
+        if !consume_waitlist_offer
+            && event.tickets_sold.saturating_add(reserved_for_waitlist) >= event.max_tickets
+        {
             return Err(LumentixError::EventSoldOut);
         }
 
@@ -405,7 +427,7 @@ impl LumentixContract {
         let ticket = Ticket {
             id: ticket_id,
             event_id,
-            owner: buyer,
+            owner: buyer.clone(),
             purchase_time: env.ledger().timestamp(),
             used: false,
             refunded: false,
@@ -416,6 +438,22 @@ impl LumentixContract {
         };
 
         storage::set_ticket(&env, ticket_id, &ticket);
+
+        if consume_waitlist_offer {
+            if let Some(mut offer) = storage::get_waitlist_offer(&env, event_id, &buyer) {
+                if offer.quantity > 0 {
+                    offer.quantity -= 1;
+                    let reserved = storage::get_waitlist_reserved(&env, event_id);
+                    storage::set_waitlist_reserved(&env, event_id, reserved.saturating_sub(1));
+                }
+
+                if offer.quantity == 0 {
+                    storage::remove_waitlist_offer(&env, event_id, &buyer);
+                } else {
+                    storage::set_waitlist_offer(&env, event_id, &buyer, &offer);
+                }
+            }
+        }
 
         TicketPurchased::emit(
             &env,
@@ -461,8 +499,14 @@ impl LumentixContract {
             return Err(LumentixError::EventPaused);
         }
 
-        // Check availability for the requested quantity
-        let available = event.max_tickets.saturating_sub(event.tickets_sold);
+        let now = env.ledger().timestamp();
+        Self::cleanup_expired_waitlist_offers(&env, event_id, now);
+        let reserved_for_waitlist = storage::get_waitlist_reserved(&env, event_id);
+
+        // Check public availability for the requested quantity
+        let available = event
+            .max_tickets
+            .saturating_sub(event.tickets_sold.saturating_add(reserved_for_waitlist));
         if available < quantity {
             return Err(LumentixError::EventSoldOut);
         }
@@ -798,6 +842,12 @@ impl LumentixContract {
         event.tickets_sold = event.tickets_sold.saturating_sub(1);
         storage::set_event(&env, ticket.event_id, &event);
 
+        if event.status == EventStatus::Cancelled {
+            // Cancelled events do not issue waitlist offers.
+        } else {
+            let _ = Self::process_waitlist_queue_internal(&env, ticket.event_id, 1);
+        }
+
         // Emit TicketRefunded event
         TicketRefunded::emit(&env, ticket_id, ticket.event_id, buyer, event.ticket_price);
 
@@ -919,6 +969,168 @@ impl LumentixContract {
     /// Get event data by ID.
     pub fn get_event(env: Env, event_id: u64) -> Result<Event, LumentixError> {
         storage::get_event(&env, event_id)
+    }
+
+    /// Calculate dynamic ticket price from time window and demand velocity.
+    /// - Early bird: >30 days => -20%
+    /// - Normal: 7..=30 days => base price
+    /// - Last minute: <=24h => +50%
+    /// Additional demand multipliers are applied from purchase velocity metrics.
+    pub fn calculate_dynamic_price(
+        env: Env,
+        event_id: u64,
+        recent_purchases: u32,
+        window_seconds: u64,
+    ) -> Result<i128, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+        let now = env.ledger().timestamp();
+        let time_remaining = event.end_time.saturating_sub(now);
+
+        let mut price = if time_remaining > THIRTY_DAYS_SECONDS {
+            // Early bird discount
+            (event.ticket_price * 80) / 100
+        } else if time_remaining >= SEVEN_DAYS_SECONDS {
+            // Normal window (7-30 days)
+            event.ticket_price
+        } else if time_remaining <= ONE_DAY_SECONDS {
+            // Last-minute premium
+            (event.ticket_price * 150) / 100
+        } else {
+            // Between 24h and 7 days: keep base price
+            event.ticket_price
+        };
+
+        // Demand metric: purchases per hour over a caller-supplied analysis window.
+        if recent_purchases > 0 {
+            let window = if window_seconds == 0 { 1 } else { window_seconds };
+            let velocity_per_hour = (recent_purchases as u64).saturating_mul(3600) / window;
+
+            let demand_multiplier_bps = if velocity_per_hour >= 50 {
+                13000 // +30%
+            } else if velocity_per_hour >= 20 {
+                11500 // +15%
+            } else if velocity_per_hour >= 10 {
+                10500 // +5%
+            } else {
+                10000
+            };
+
+            price = (price * demand_multiplier_bps as i128) / 10000;
+        }
+
+        if price <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        Ok(price)
+    }
+
+    /// Join an event waitlist once capacity is exhausted.
+    pub fn join_waitlist(env: Env, event_id: u64, buyer: Address) -> Result<u32, LumentixError> {
+        buyer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        let now = env.ledger().timestamp();
+        Self::cleanup_expired_waitlist_offers(&env, event_id, now);
+
+        let reserved = storage::get_waitlist_reserved(&env, event_id);
+        let available = event
+            .max_tickets
+            .saturating_sub(event.tickets_sold.saturating_add(reserved));
+        if available > 0 {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        if let Some(offer) = storage::get_waitlist_offer(&env, event_id, &buyer) {
+            if offer.quantity > 0 && offer.expires_at > now {
+                return Err(LumentixError::AlreadyOnWaitlist);
+            }
+        }
+
+        let mut queue = storage::get_waitlist_queue(&env, event_id);
+        for queued in queue.iter() {
+            if queued == buyer {
+                return Err(LumentixError::AlreadyOnWaitlist);
+            }
+        }
+        queue.push_back(buyer.clone());
+        let position = queue.len();
+        storage::set_waitlist_queue(&env, event_id, &queue);
+        WaitlistJoined::emit(&env, event_id, buyer, position);
+        Ok(position)
+    }
+
+    /// Organizer-triggered queue processing to issue FIFO waitlist offers.
+    pub fn process_waitlist_queue(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        Self::cleanup_expired_waitlist_offers(&env, event_id, now);
+        let reserved = storage::get_waitlist_reserved(&env, event_id);
+        let available = event
+            .max_tickets
+            .saturating_sub(event.tickets_sold.saturating_add(reserved));
+
+        Ok(Self::process_waitlist_queue_internal(&env, event_id, available))
+    }
+
+    /// Notify a specific waitlist member that tickets are available.
+    /// Creates a 24-hour reservation window.
+    pub fn notify_waitlist_availability(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        buyer: Address,
+        quantity: u32,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        if quantity == 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        let now = env.ledger().timestamp();
+        Self::cleanup_expired_waitlist_offers(&env, event_id, now);
+
+        let reserved = storage::get_waitlist_reserved(&env, event_id);
+        let available = event
+            .max_tickets
+            .saturating_sub(event.tickets_sold.saturating_add(reserved));
+        if available < quantity {
+            return Err(LumentixError::EventSoldOut);
+        }
+
+        let expires_at = now + ONE_DAY_SECONDS;
+        let offer = WaitlistOffer {
+            quantity,
+            expires_at,
+        };
+        storage::set_waitlist_offer(&env, event_id, &buyer, &offer);
+        Self::add_offer_recipient_if_missing(&env, event_id, &buyer);
+
+        let new_reserved = storage::get_waitlist_reserved(&env, event_id).saturating_add(quantity);
+        storage::set_waitlist_reserved(&env, event_id, new_reserved);
+        WaitlistAvailabilityNotified::emit(&env, event_id, buyer, quantity, expires_at);
+
+        Ok(expires_at)
     }
 
     /// Get the status of an event by ID.
@@ -2257,6 +2469,82 @@ impl LumentixContract {
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
+
+    fn add_offer_recipient_if_missing(env: &Env, event_id: u64, buyer: &Address) {
+        let mut recipients = storage::get_waitlist_offer_recipients(env, event_id);
+        for existing in recipients.iter() {
+            if existing == *buyer {
+                return;
+            }
+        }
+        recipients.push_back(buyer.clone());
+        storage::set_waitlist_offer_recipients(env, event_id, &recipients);
+    }
+
+    fn cleanup_expired_waitlist_offers(env: &Env, event_id: u64, now: u64) {
+        let recipients = storage::get_waitlist_offer_recipients(env, event_id);
+        let mut active_recipients = Vec::<Address>::new(env);
+        let mut reserved = storage::get_waitlist_reserved(env, event_id);
+
+        for buyer in recipients.iter() {
+            if let Some(offer) = storage::get_waitlist_offer(env, event_id, &buyer) {
+                if offer.quantity == 0 || offer.expires_at <= now {
+                    reserved = reserved.saturating_sub(offer.quantity);
+                    storage::remove_waitlist_offer(env, event_id, &buyer);
+                } else {
+                    active_recipients.push_back(buyer);
+                }
+            }
+        }
+
+        storage::set_waitlist_offer_recipients(env, event_id, &active_recipients);
+        storage::set_waitlist_reserved(env, event_id, reserved);
+    }
+
+    fn process_waitlist_queue_internal(env: &Env, event_id: u64, mut available: u32) -> u32 {
+        if available == 0 {
+            return 0;
+        }
+
+        let event = match storage::get_event(env, event_id) {
+            Ok(event) => event,
+            Err(_) => return 0,
+        };
+        if event.status != EventStatus::Published {
+            return 0;
+        }
+
+        let mut queue = storage::get_waitlist_queue(env, event_id);
+        let mut next_queue = Vec::<Address>::new(env);
+        let mut processed: u32 = 0;
+        let now = env.ledger().timestamp();
+
+        for buyer in queue.iter() {
+            if available == 0 {
+                next_queue.push_back(buyer);
+                continue;
+            }
+
+            let expires_at = now + ONE_DAY_SECONDS;
+            let offer = WaitlistOffer {
+                quantity: 1,
+                expires_at,
+            };
+            storage::set_waitlist_offer(env, event_id, &buyer, &offer);
+            Self::add_offer_recipient_if_missing(env, event_id, &buyer);
+
+            let reserved = storage::get_waitlist_reserved(env, event_id);
+            storage::set_waitlist_reserved(env, event_id, reserved.saturating_add(1));
+
+            WaitlistAvailabilityNotified::emit(env, event_id, buyer, 1, expires_at);
+            available -= 1;
+            processed += 1;
+        }
+
+        queue = next_queue;
+        storage::set_waitlist_queue(env, event_id, &queue);
+        processed
+    }
 
     fn build_seat_id(env: &Env, section: &String, row: u32, number: u32) -> String {
         let sec = section.to_bytes();

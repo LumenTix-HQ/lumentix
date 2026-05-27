@@ -277,6 +277,30 @@ impl BatchTicketsUsed {
     }
 }
 
+/// Event emitted when a buyer joins an event waitlist.
+pub struct WaitlistJoined;
+
+impl WaitlistJoined {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, position: u32) {
+        env.events().publish(
+            (symbol_short!("wjoin"),),
+            (event_id, buyer, position),
+        );
+    }
+}
+
+/// Event emitted when waitlist members receive a reservation offer.
+pub struct WaitlistAvailabilityNotified;
+
+impl WaitlistAvailabilityNotified {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, quantity: u32, expires_at: u64) {
+        env.events().publish(
+            (symbol_short!("wnotify"),),
+            (event_id, buyer, quantity, expires_at),
+        );
+    }
+}
+
 /// Event emitted when a ticket is refunded
 pub struct TicketRefunded;
 
