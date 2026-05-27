@@ -1668,6 +1668,72 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // HYBRID EVENTS / STREAMING
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Create a hybrid event with streaming options.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_hybrid_event(
+        env: Env,
+        organizer: Address,
+        name: String,
+        ticket_price: i128,
+        max_tickets: u32,
+        start_time: u64,
+        end_time: u64,
+        streaming_url: String,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        let event_id = Self::create_event(env.clone(), organizer, name, ticket_price, max_tickets, start_time, end_time)?;
+        
+        let url_key = (soroban_sdk::symbol_short!("STRM_URL"), event_id);
+        env.storage().persistent().set(&url_key, &streaming_url);
+        env.storage().persistent().extend_ttl(&url_key, crate::types::PERSISTENT_LIFETIME, crate::types::PERSISTENT_LIFETIME);
+
+        Ok(event_id)
+    }
+
+    /// Manage access to the streaming feature for an attendee.
+    pub fn manage_streaming_access(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+        has_access: bool,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+        
+        let access_key = (soroban_sdk::symbol_short!("STRM_ACC"), event_id, user);
+        env.storage().persistent().set(&access_key, &has_access);
+        env.storage().persistent().extend_ttl(&access_key, crate::types::PERSISTENT_LIFETIME, crate::types::PERSISTENT_LIFETIME);
+        Ok(())
+    }
+
+    /// Track virtual attendance of a user for a hybrid event.
+    pub fn track_virtual_attendance(
+        env: Env,
+        event_id: u64,
+        user: Address,
+    ) -> Result<(), LumentixError> {
+        user.require_auth();
+        
+        let access_key = (soroban_sdk::symbol_short!("STRM_ACC"), event_id, user.clone());
+        let has_access: bool = env.storage().persistent().get(&access_key).unwrap_or(false);
+        if !has_access {
+            return Err(LumentixError::Unauthorized);
+        }
+        
+        let att_key = (soroban_sdk::symbol_short!("VIRT_ATT"), event_id, user);
+        env.storage().persistent().set(&att_key, &true);
+        env.storage().persistent().extend_ttl(&att_key, crate::types::PERSISTENT_LIFETIME, crate::types::PERSISTENT_LIFETIME);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // VIP TIER SYSTEM
     // ═══════════════════════════════════════════════════════════════════════
 
