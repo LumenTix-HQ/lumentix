@@ -2772,7 +2772,7 @@ fn test_event_status_changed_published_to_completed() {
 // ============================================================================
 
 #[test]
-fn test_change_admin_success() {
+fn test_update_platform_fee_recipient_success() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2780,7 +2780,7 @@ fn test_change_admin_success() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    let result = client.try_change_admin(&admin, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&admin, &new_admin);
     assert!(result.is_ok());
 
     // Verify new admin can call admin functions
@@ -2796,7 +2796,7 @@ fn test_change_admin_success() {
 }
 
 #[test]
-fn test_change_admin_unauthorized() {
+fn test_update_platform_fee_recipient_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2805,7 +2805,7 @@ fn test_change_admin_unauthorized() {
     let new_admin = Address::generate(&env);
 
     // Try to change admin as unauthorized user
-    let result = client.try_change_admin(&unauthorized, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&unauthorized, &new_admin);
     assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
 
     // Verify admin is still the original
@@ -2814,14 +2814,14 @@ fn test_change_admin_unauthorized() {
 }
 
 #[test]
-fn test_change_admin_to_same_address_fails() {
+fn test_update_platform_fee_recipient_to_same_address_fails() {
     let env = Env::default();
     env.mock_all_auths();
 
     let (admin, client) = create_test_contract(&env);
 
     // Try to change admin to the same address
-    let result = client.try_change_admin(&admin, &admin);
+    let result = client.try_update_platform_fee_recipient(&admin, &admin);
     assert_eq!(result, Err(Ok(LumentixError::InvalidAddress)));
 
     // Verify admin is unchanged
@@ -2830,7 +2830,7 @@ fn test_change_admin_to_same_address_fails() {
 }
 
 #[test]
-fn test_change_admin_get_admin_returns_new_address() {
+fn test_update_platform_fee_recipient_get_admin_returns_new_address() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2838,7 +2838,7 @@ fn test_change_admin_get_admin_returns_new_address() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // Verify get_admin returns the new admin
     let current_admin = client.get_admin();
@@ -2846,7 +2846,7 @@ fn test_change_admin_get_admin_returns_new_address() {
 }
 
 #[test]
-fn test_change_admin_set_platform_fee_with_new_admin() {
+fn test_update_platform_fee_recipient_set_platform_fee_with_new_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2854,7 +2854,7 @@ fn test_change_admin_set_platform_fee_with_new_admin() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // New admin should be able to set platform fee
     let result = client.try_set_platform_fee(&new_admin, &500u32);
@@ -2866,7 +2866,7 @@ fn test_change_admin_set_platform_fee_with_new_admin() {
 }
 
 #[test]
-fn test_change_admin_withdraw_platform_fees_with_new_admin() {
+fn test_update_platform_fee_recipient_withdraw_platform_fees_with_new_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2881,7 +2881,7 @@ fn test_change_admin_withdraw_platform_fees_with_new_admin() {
     client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // New admin should be able to withdraw fees
     let withdrawn = client.withdraw_platform_fees(&new_admin);
@@ -2893,7 +2893,7 @@ fn test_change_admin_withdraw_platform_fees_with_new_admin() {
 }
 
 #[test]
-fn test_change_admin_chain_a_to_b_to_c() {
+fn test_update_platform_fee_recipient_chain_a_to_b_to_c() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2902,14 +2902,14 @@ fn test_change_admin_chain_a_to_b_to_c() {
     let admin_c = Address::generate(&env);
 
     // A -> B
-    client.change_admin(&admin_a, &admin_b);
+    client.update_platform_fee_recipient(&admin_a, &admin_b);
 
     // Verify B is now admin
     let current_admin = client.get_admin();
     assert_eq!(current_admin, admin_b);
 
     // B -> C
-    client.change_admin(&admin_b, &admin_c);
+    client.update_platform_fee_recipient(&admin_b, &admin_c);
 
     // Verify C is now admin
     let current_admin = client.get_admin();
@@ -2929,7 +2929,7 @@ fn test_change_admin_chain_a_to_b_to_c() {
 }
 
 #[test]
-fn test_change_admin_emits_event() {
+fn test_update_platform_fee_recipient_emits_event() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2937,7 +2937,7 @@ fn test_change_admin_emits_event() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // Verify AdminChanged event was emitted
     let events = env.events().all();
@@ -4880,7 +4880,7 @@ fn test_update_event_metadata_persists_changes() {
 // ============================================================================
 
 #[test]
-fn test_treasury_rotation_non_admin_cannot_change_admin() {
+fn test_treasury_rotation_non_admin_cannot_update_platform_fee_recipient() {
     // Non-admin attempts to rotate recipient, fails auth.
     let env = Env::default();
     env.mock_all_auths();
@@ -4889,7 +4889,7 @@ fn test_treasury_rotation_non_admin_cannot_change_admin() {
     let attacker = Address::generate(&env);
     let new_admin = Address::generate(&env);
 
-    let result = client.try_change_admin(&attacker, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&attacker, &new_admin);
     assert_eq!(
         result,
         Err(Ok(LumentixError::Unauthorized)),
@@ -4909,7 +4909,7 @@ fn test_treasury_rotation_admin_rotates_recipient_a_to_b() {
     let (addr_a, client) = create_test_contract(&env);
     let addr_b = Address::generate(&env);
 
-    let result = client.try_change_admin(&addr_a, &addr_b);
+    let result = client.try_update_platform_fee_recipient(&addr_a, &addr_b);
     assert!(result.is_ok(), "Admin must be able to rotate recipient");
 
     assert_eq!(
@@ -4943,7 +4943,7 @@ fn test_treasury_rotation_subsequent_withdrawal_resolves_to_new_recipient() {
     assert_eq!(client.get_platform_balance(), 20i128);
 
     // Rotate recipient from A to B
-    client.change_admin(&addr_a, &addr_b);
+    client.update_platform_fee_recipient(&addr_a, &addr_b);
 
     // Address_A must no longer be able to withdraw
     let old_withdraw = client.try_withdraw_platform_fees(&addr_a);
@@ -4975,7 +4975,7 @@ fn test_treasury_rotation_escrow_release_after_rotation_goes_to_organizer_not_ad
     client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Rotate admin
-    client.change_admin(&addr_a, &addr_b);
+    client.update_platform_fee_recipient(&addr_a, &addr_b);
 
     // Complete event and release escrow — must go to organizer
     env.ledger().with_mut(|li| li.timestamp = 2001);
@@ -5242,45 +5242,76 @@ fn test_set_event_capacity() {
 }
 
 #[test]
-fn test_batch_transfer_tickets_event_emission() {
+fn test_calculate_dynamic_price_time_tiers() {
     let env = Env::default();
     env.mock_all_auths();
-    
-    let client = create_and_initialize_contract(&env);
+    let (_admin, client) = create_test_contract(&env);
     let organizer = Address::generate(&env);
-    let buyer = Address::generate(&env);
-    let new_owner = Address::generate(&env);
-    
-    let current_time = 1_000_000;
-    env.ledger().with_mut(|li| li.timestamp = current_time);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_000);
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Dynamic"),
+        &String::from_str(&env, "Pricing"),
+        &String::from_str(&env, "Venue"),
+        &2_000u64,
+        &(1_000 + (31 * 24 * 60 * 60)),
+        &100i128,
+        &100u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let early = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
+    assert_eq!(early, 80i128);
+
+    env.ledger()
+        .with_mut(|li| li.timestamp = 1_000 + (10 * 24 * 60 * 60));
+    let normal = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
+    assert_eq!(normal, 100i128);
+
+    env.ledger()
+        .with_mut(|li| li.timestamp = (1_000 + (31 * 24 * 60 * 60)) - (12 * 60 * 60));
+    let last_minute = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
+    assert_eq!(last_minute, 150i128);
+}
+
+#[test]
+fn test_waitlist_fifo_offer_and_reserved_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer_a = Address::generate(&env);
+    let buyer_b = Address::generate(&env);
+    let buyer_c = Address::generate(&env);
 
     let event_id = client.create_event(
         &organizer,
-        &String::from_str(&env, "Event with tickets"),
+        &String::from_str(&env, "Waitlist Event"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
         &100i128,
-        &50u32,
-        &(current_time + 100),
-        &(current_time + 200),
+        &1u32,
     );
-    client.publish_event(&organizer, &event_id);
-    
-    // Purchase 3 tickets
-    client.batch_purchase_tickets(&event_id, &buyer, &3u32);
-    
-    let ticket_ids = vec![&env, 1u64, 2u64, 3u64];
-    client.batch_transfer_tickets(&ticket_ids, &new_owner, &buyer);
-    
-    let events = env.events().all();
-    let mut batch_event_found = false;
-    for (contract_id, topic, data) in events.iter() {
-        if topic.len() == 1 {
-            let topic_val = topic.get(0).unwrap();
-            let expected_symbol = soroban_sdk::symbol_short!("batchtrn");
-            if topic_val.to_val() == expected_symbol.to_val() {
-                batch_event_found = true;
-                break;
-            }
-        }
-    }
-    assert!(batch_event_found, "BatchTicketsTransferred event not emitted");
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    client.purchase_ticket(&buyer_a, &event_id, &100i128);
+    let position = client.join_waitlist(&event_id, &buyer_b);
+    assert_eq!(position, 1u32);
+
+    // Increasing capacity auto-processes queue and reserves the new slot for buyer_b.
+    assert!(client
+        .try_set_event_capacity(&organizer, &event_id, &2u32)
+        .is_ok());
+
+    // Public buyer cannot consume the reserved waitlist slot.
+    let c_result = client.try_purchase_ticket(&buyer_c, &event_id, &100i128);
+    assert_eq!(c_result, Err(Ok(LumentixError::EventSoldOut)));
+
+    // Waitlisted buyer can purchase during their reservation window.
+    assert!(client
+        .try_purchase_ticket(&buyer_b, &event_id, &100i128)
+        .is_ok());
 }

@@ -1,7 +1,8 @@
 use crate::error::LumentixError;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, CurrencyConfig, Event, Seat, Ticket,
-    TicketTransferRecord, VenueLayout, VipTier, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
+    TicketTransferRecord, VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME,
+    PERSISTENT_LIFETIME,
 };
 use soroban_sdk::{Address, Env, String, Vec};
 
@@ -24,6 +25,10 @@ const VENUE_LAYOUT_PREFIX: &str = "VENUE_";
 const SEAT_PREFIX: &str = "SEAT_";
 const CURRENCY_CONFIG_PREFIX: &str = "CURCFG_";
 const ACC_BOOKING_COUNTER: &str = "ACC_CTR";
+const WAITLIST_QUEUE_PREFIX: &str = "WQUEUE_";
+const WAITLIST_OFFER_PREFIX: &str = "WOFFER_";
+const WAITLIST_OFFER_RECIPIENTS_PREFIX: &str = "WOFRECS_";
+const WAITLIST_RESERVED_PREFIX: &str = "WRESV_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -466,4 +471,97 @@ pub fn get_currency_config(env: &Env, code: &String) -> Result<CurrencyConfig, L
 pub fn has_currency(env: &Env, code: &String) -> bool {
     let key = (CURRENCY_CONFIG_PREFIX, code.clone());
     env.storage().instance().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WAITLIST STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn get_waitlist_queue(env: &Env, event_id: u64) -> Vec<Address> {
+    let key = (WAITLIST_QUEUE_PREFIX, event_id);
+    let queue: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    queue
+}
+
+pub fn set_waitlist_queue(env: &Env, event_id: u64, queue: &Vec<Address>) {
+    let key = (WAITLIST_QUEUE_PREFIX, event_id);
+    env.storage().persistent().set(&key, queue);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_waitlist_offer(env: &Env, event_id: u64, buyer: &Address) -> Option<WaitlistOffer> {
+    let key = (WAITLIST_OFFER_PREFIX, event_id, buyer.clone());
+    let offer: Option<WaitlistOffer> = env.storage().persistent().get(&key);
+    if offer.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    offer
+}
+
+pub fn set_waitlist_offer(env: &Env, event_id: u64, buyer: &Address, offer: &WaitlistOffer) {
+    let key = (WAITLIST_OFFER_PREFIX, event_id, buyer.clone());
+    env.storage().persistent().set(&key, offer);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn remove_waitlist_offer(env: &Env, event_id: u64, buyer: &Address) {
+    let key = (WAITLIST_OFFER_PREFIX, event_id, buyer.clone());
+    env.storage().persistent().remove(&key);
+}
+
+pub fn get_waitlist_offer_recipients(env: &Env, event_id: u64) -> Vec<Address> {
+    let key = (WAITLIST_OFFER_RECIPIENTS_PREFIX, event_id);
+    let recipients: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    recipients
+}
+
+pub fn set_waitlist_offer_recipients(env: &Env, event_id: u64, recipients: &Vec<Address>) {
+    let key = (WAITLIST_OFFER_RECIPIENTS_PREFIX, event_id);
+    env.storage().persistent().set(&key, recipients);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_waitlist_reserved(env: &Env, event_id: u64) -> u32 {
+    let key = (WAITLIST_RESERVED_PREFIX, event_id);
+    let reserved: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    reserved
+}
+
+pub fn set_waitlist_reserved(env: &Env, event_id: u64, reserved: u32) {
+    let key = (WAITLIST_RESERVED_PREFIX, event_id);
+    env.storage().persistent().set(&key, &reserved);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
