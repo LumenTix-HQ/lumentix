@@ -17,6 +17,10 @@ async function request<T>(
     throw new Error(`API error ${res.status}: ${errorBody}`);
   }
 
+  if (res.status === 204) {
+    return null as any;
+  }
+
   return res.json();
 }
 
@@ -105,6 +109,26 @@ export const apiClient = {
 
   getOrganizerResaleEarnings: (token: string) =>
     request('/resale/organizer/earnings', {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  getEventAnalyticsDashboard: (eventId: string, token: string) =>
+    request(`/analytics/events/${eventId}/dashboard`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  getEventSalesReport: (eventId: string, token: string) =>
+    request(`/analytics/events/${eventId}/sales-report`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  getEventDemographics: (eventId: string, token: string) =>
+    request(`/analytics/events/${eventId}/demographics`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  getEventAttendance: (eventId: string, token: string) =>
+    request(`/analytics/events/${eventId}/attendance`, {
       headers: { Authorization: `Bearer ${token}` },
     }),
 };

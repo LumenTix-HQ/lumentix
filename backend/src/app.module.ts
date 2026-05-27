@@ -28,6 +28,7 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 
 @Module({
@@ -104,6 +105,7 @@ import { RegistrationsModule } from './registrations/registrations.module';
     TicketsModule,
     AdminModule,
     RegistrationsModule,
+    AnalyticsModule,
 
   ],
   controllers: [AppController],
