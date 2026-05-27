@@ -28,6 +28,8 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
+import { SocialModule } from './social/social.module';
 
 @Module({
   imports: [
@@ -105,6 +107,8 @@ import { RegistrationsModule } from './registrations/registrations.module';
     TicketsModule,
     AdminModule,
     RegistrationsModule,
+    LoyaltyModule,
+    SocialModule,
   ],
   controllers: [AppController],
   providers: [
