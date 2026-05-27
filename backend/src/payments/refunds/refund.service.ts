@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConfigService,
   Injectable,
   Logger,
   NotFoundException,
+  TimeoutException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -39,6 +41,7 @@ export class RefundService {
     private readonly auditService: AuditService,
     private readonly escrowService: EscrowService,
     private readonly notificationService: NotificationService,
+    private readonly configService: ConfigService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -152,7 +155,7 @@ export class RefundService {
     });
 
     if (event?.startDate) {
-      const cutoff = Number(process.env.REFUND_CUTOFF_HOURS ?? 24);
+      const cutoff = Number(this.configService.get('REFUND_CUTOFF_HOURS', '24'));
       const hoursToEvent = (new Date(event.startDate).getTime() - Date.now()) / 3_600_000;
       if (hoursToEvent < cutoff) {
         return {
@@ -166,9 +169,9 @@ export class RefundService {
     const hoursSincePurchase =
       (Date.now() - payment.createdAt.getTime()) / (1000 * 60 * 60);
     const FULL_REFUND_WINDOW_HOURS = Number(
-      process.env.FULL_REFUND_WINDOW_HOURS ?? 48,
+      this.configService.get('FULL_REFUND_WINDOW_HOURS', '48'),
     );
-    const PARTIAL_REFUND_RATE = Number(process.env.PARTIAL_REFUND_RATE ?? 0.5);
+    const PARTIAL_REFUND_RATE = Number(this.configService.get('PARTIAL_REFUND_RATE', '0.5'));
 
     const refundAmount =
       hoursSincePurchase <= FULL_REFUND_WINDOW_HOURS
@@ -245,6 +248,17 @@ export class RefundService {
   // PRIVATE — process a single payment refund
   // ─────────────────────────────────────────────────────────────────────────
 
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    errorMessage: string,
+  ): Promise<T> {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMessage)), ms),
+    );
+    return Promise.race([promise, timeout]);
+  }
+
   private async processSingleRefund(
     payment: Payment,
     event: Event,
@@ -291,12 +305,16 @@ export class RefundService {
         );
       }
 
-      // 3. Send computed amount back to the original payer via StellarService
-      const txResponse = await this.stellarService.sendPayment(
-        escrowSecret,
-        user.stellarPublicKey,
-        String(amount),
-        payment.currency,
+      // 3. Send computed amount back to the original payer via StellarService with timeout
+      const txResponse = await this.withTimeout(
+        this.stellarService.sendPayment(
+          escrowSecret,
+          user.stellarPublicKey,
+          String(amount),
+          payment.currency,
+        ),
+        30000, // 30 second timeout
+        `Stellar payment timeout for payment ${payment.id}`
       );
 
       const txHash =
