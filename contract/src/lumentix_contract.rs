@@ -1668,6 +1668,56 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // FRAUD DETECTION SYSTEM
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Analyze purchase patterns to detect suspicious activities.
+    pub fn analyze_purchase_pattern(
+        env: Env,
+        buyer: Address,
+        _event_id: u64,
+    ) -> Result<bool, LumentixError> {
+        // Simple logic: if a user has bought more than 10 tickets, flag as suspicious
+        let tickets = Self::get_tickets_by_buyer(env, buyer);
+        if tickets.len() > 10 {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Flag suspicious activity for manual review.
+    pub fn flag_suspicious_activity(
+        env: Env,
+        buyer: Address,
+        reason: String,
+    ) -> Result<(), LumentixError> {
+        let flag_key = (soroban_sdk::symbol_short!("FLAG_USR"), buyer);
+        env.storage().persistent().set(&flag_key, &reason);
+        env.storage().persistent().extend_ttl(&flag_key, crate::types::PERSISTENT_LIFETIME, crate::types::PERSISTENT_LIFETIME);
+        Ok(())
+    }
+
+    /// Implement fraud prevention measures (e.g., blocking an address).
+    pub fn implement_fraud_prevention(
+        env: Env,
+        admin: Address,
+        target: Address,
+        _action: String,
+    ) -> Result<(), LumentixError> {
+        admin.require_auth();
+        let current_admin = storage::get_admin(&env);
+        if current_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        
+        let block_key = (soroban_sdk::symbol_short!("BLK_USR"), target);
+        env.storage().persistent().set(&block_key, &true);
+        env.storage().persistent().extend_ttl(&block_key, crate::types::PERSISTENT_LIFETIME, crate::types::PERSISTENT_LIFETIME);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // VIP TIER SYSTEM
     // ═══════════════════════════════════════════════════════════════════════
 
