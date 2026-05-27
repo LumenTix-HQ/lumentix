@@ -65,6 +65,18 @@ pub struct TicketTransferRecord {
     pub timestamp: u64,
 }
 
+/// A single record in a ticket's transfer history
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TicketTransferRecord {
+    /// Address that sent the ticket
+    pub from: Address,
+    /// Address that received the ticket
+    pub to: Address,
+    /// Ledger timestamp when the transfer occurred
+    pub timestamp: u64,
+}
+
 /// Fee collected event for tracking platform fees
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]

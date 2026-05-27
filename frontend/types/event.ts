@@ -5,6 +5,12 @@ export enum EventStatus {
 	CANCELLED = "cancelled",
 }
 
+export enum EventAgeRestriction {
+	NONE = "none",
+	EIGHTEEN_PLUS = "18+",
+	TWENTY_ONE_PLUS = "21+",
+}
+
 export enum EventCategory {
 	CONFERENCE = "Conference",
 	WORKSHOP = "Workshop",
@@ -91,6 +97,7 @@ export interface Event {
 	organizerName: string;
 	status: EventStatus;
 	category: EventCategory;
+	ageRestriction: EventAgeRestriction;
 	imageUrl: string;
 	totalTickets: number;
 	soldTickets: number;

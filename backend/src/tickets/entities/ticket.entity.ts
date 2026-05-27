@@ -52,6 +52,9 @@ export class TicketEntity {
   @Column({ type: 'varchar', nullable: true })
   listingCurrency!: string | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  listedAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

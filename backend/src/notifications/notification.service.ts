@@ -66,6 +66,17 @@ export class NotificationService {
     await this.notificationQueue.add('sendSponsorConfirmedEmail', data, { attempts: 3 });
   }
 
+  async queuePaymentConfirmedEmail(data: {
+    userId: string;
+    email: string;
+    amount: number;
+    currency: string;
+    transactionHash: string;
+    eventTitle: string;
+  }) {
+    await this.notificationQueue.add('sendPaymentConfirmedEmail', data, { attempts: 3 });
+  }
+
   async queuePaymentFailedEmail(data: {
     userId: string;
     email: string;

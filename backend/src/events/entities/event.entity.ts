@@ -13,6 +13,12 @@ export enum EventStatus {
   CANCELLED = 'cancelled',
 }
 
+export enum EventAgeRestriction {
+  NONE = 'none',
+  EIGHTEEN_PLUS = '18+',
+  TWENTY_ONE_PLUS = '21+',
+}
+
 export enum EventCategory {
   CONFERENCE = 'conference',
   WORKSHOP = 'workshop',
@@ -97,6 +103,13 @@ export class Event {
    */
   @Column({ type: 'decimal', precision: 18, scale: 7, nullable: true, default: null })
   fundingGoal: number | null;
+
+  @Column({
+    type: 'enum',
+    enum: EventAgeRestriction,
+    default: EventAgeRestriction.NONE,
+  })
+  ageRestriction: EventAgeRestriction;
 
   @CreateDateColumn()
   createdAt: Date;

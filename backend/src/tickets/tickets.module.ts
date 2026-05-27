@@ -15,18 +15,21 @@ import { NotificationModule } from '../notifications/notification.module';
 import { VerificationController } from './verification/verification.controller';
 import { TicketExpiryJob } from './jobs/ticket-expiry.job';
 import { AuditModule } from '../audit/audit.module';
+import { ResaleService } from './resale/resale.service';
+import { ResaleController } from './resale/resale.controller';
+import { ResaleTransaction } from './resale/resale-transaction.entity';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([TicketEntity, Event, User]),
+    TypeOrmModule.forFeature([TicketEntity, Event, User, ResaleTransaction]),
     forwardRef(() => PaymentsModule),
     StellarModule,
     NotificationModule,
     AuditModule,
   ],
-  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob],
-  controllers: [TicketsController, TicketsPublicController, VerificationController],
-  exports: [TicketsService],
+  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob, ResaleService],
+  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController],
+  exports: [TicketsService, ResaleService],
 })
 export class TicketsModule {}
