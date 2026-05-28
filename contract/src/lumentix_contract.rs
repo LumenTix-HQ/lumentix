@@ -1897,7 +1897,17 @@ impl LumentixContract {
         streaming_url: String,
     ) -> Result<u64, LumentixError> {
         organizer.require_auth();
-        let event_id = Self::create_event(env.clone(), organizer, name, ticket_price, max_tickets, start_time, end_time)?;
+        let event_id = Self::create_event(
+            env.clone(), 
+            organizer, 
+            name, 
+            String::from_str(&env, "Virtual event with streaming"), // description
+            String::from_str(&env, "Online"), // location
+            start_time, 
+            end_time, 
+            ticket_price, 
+            max_tickets
+        )?;
         
         let url_key = (soroban_sdk::symbol_short!("STRM_URL"), event_id);
         env.storage().persistent().set(&url_key, &streaming_url);

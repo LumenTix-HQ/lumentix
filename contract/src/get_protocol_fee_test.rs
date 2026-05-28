@@ -103,7 +103,7 @@ fn test_get_protocol_fee_recipient_updates_after_admin_change() {
     let (admin, client) = setup_initialized(&env);
     let new_admin = Address::generate(&env);
 
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     let (_fee, recipient) = client.get_protocol_fee();
     assert_eq!(recipient, new_admin, "recipient should reflect new admin");

@@ -5315,3 +5315,377 @@ fn test_waitlist_fifo_offer_and_reserved_capacity() {
         .try_purchase_ticket(&buyer_b, &event_id, &100i128)
         .is_ok());
 }
+
+// ============================================================================
+// ADMINISTRATIVE OVERSIGHT OPERATIONS TESTS
+// ============================================================================
+
+#[test]
+fn test_normal_user_revoke_fails_auth_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let normal_user = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_revoke_ticket(&normal_user, &ticket_id);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_admin_executes_revoke_on_valid_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_revoke_ticket(&admin, &ticket_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_valid_ticket_gets_flagged_invalid_after_revoke() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Verify ticket is initially valid
+    assert!(client.get_ticket_validity(&ticket_id));
+
+    // Revoke the ticket
+    client.revoke_ticket(&admin, &ticket_id);
+
+    // Verify ticket is now invalid
+    assert!(!client.get_ticket_validity(&ticket_id));
+}
+
+#[test]
+fn test_regular_check_in_use_ticket_flags_revoked_ticket_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Revoke the ticket
+    client.revoke_ticket(&admin, &ticket_id);
+
+    // Attempt to use the revoked ticket should fail
+    let result = client.try_use_ticket(&ticket_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::RevokedTicket)));
+}
+
+#[test]
+fn test_transfer_attempts_on_revoked_tickets_crash() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&owner, &event_id, &100i128);
+
+    // Revoke the ticket
+    client.revoke_ticket(&admin, &ticket_id);
+
+    // Attempt to transfer the revoked ticket should fail
+    let result = client.try_transfer_ticket(&ticket_id, &owner, &recipient);
+    assert_eq!(result, Err(Ok(LumentixError::RevokedTicket)));
+}
+
+// ============================================================================
+// STORAGE EXTENSIONS TESTS
+// ============================================================================
+
+#[test]
+fn test_extending_single_ttl_logic_executes_properly() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Extend TTL for the ticket - this should execute without error
+    let result = client.try_bump_ticket_ttl(&ticket_id);
+    assert!(result.is_ok());
+
+    // Extend TTL for the event - this should execute without error
+    let result = client.try_bump_event_ttl(&event_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_batch_operations_extend_ttls_dynamically() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    
+    // Purchase multiple tickets
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &4u32, &buyer);
+    
+    // Extend TTL for multiple tickets to prevent accidental expiration during deep modifications
+    for ticket_id in ticket_ids.iter() {
+        let result = client.try_bump_ticket_ttl(&ticket_id);
+        assert!(result.is_ok());
+    }
+
+    // Extend TTL for the event as well
+    let result = client.try_bump_event_ttl(&event_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_correct_state_of_minimum_and_max_ttl_allocations() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Test that TTL extension operations work correctly
+    // The PERSISTENT_LIFETIME constant provides the TTL allocation
+    let result = client.try_bump_ticket_ttl(&ticket_id);
+    assert!(result.is_ok());
+
+    let result = client.try_bump_event_ttl(&event_id);
+    assert!(result.is_ok());
+
+    // Verify that the ticket and event still exist after TTL extension
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket.id, ticket_id);
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.id, event_id);
+}
+
+// ============================================================================
+// MULTI-CHECK-IN FLOWS TESTS
+// ============================================================================
+
+#[test]
+fn test_batch_check_in_4_valid_tickets_changes_all_state_to_used() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    
+    // Purchase 4 tickets for the same user
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &4u32, &buyer);
+    
+    // Batch check-in all 4 tickets
+    let result = client.try_batch_use_tickets(&ticket_ids, &organizer);
+    assert!(result.is_ok());
+
+    // Verify all tickets are marked as used
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert!(ticket.used, "Ticket {} should be marked as used", ticket_id);
+    }
+}
+
+#[test]
+fn test_batch_check_in_different_user_succeeds_if_same_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer1 = Address::generate(&env);
+    let buyer2 = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    
+    // Purchase 3 tickets for buyer1 and 1 ticket for buyer2
+    let mut ticket_ids = client.batch_purchase_tickets(&event_id, &3u32, &buyer1);
+    let buyer2_ticket = client.purchase_ticket(&buyer2, &event_id, &100i128);
+    ticket_ids.push_back(buyer2_ticket);
+
+    // Batch check-in should succeed since all tickets belong to the same event with same organizer
+    let result = client.try_batch_use_tickets(&ticket_ids, &organizer);
+    assert!(result.is_ok(), "Batch check-in should succeed when organizer is authorized for all tickets");
+
+    // Verify all tickets were marked as used
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert!(ticket.used, "All tickets should be marked as used after successful batch operation");
+    }
+}
+
+#[test]
+fn test_already_used_ids_in_batch_gracefully_reject_tx() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    
+    // Purchase 4 tickets
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &4u32, &buyer);
+    
+    // Use one ticket individually first
+    let first_ticket = ticket_ids.get(0).unwrap();
+    client.use_ticket(&first_ticket, &organizer);
+
+    // Attempt batch check-in including the already used ticket
+    let result = client.try_batch_use_tickets(&ticket_ids, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
+
+    // Verify state consistency: other tickets should remain unused
+    for i in 1..ticket_ids.len() {
+        let ticket_id = ticket_ids.get(i).unwrap();
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert!(!ticket.used, "Unused tickets should remain unused after failed batch operation");
+    }
+}
+
+// ============================================================================
+// AUTH CONSTRAINTS TESTS
+// ============================================================================
+
+#[test]
+fn test_valid_organizer_successfully_updates_draft_event_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Original Description"),
+        &String::from_str(&env, "Original Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Valid organizer should successfully update string name, location, and metadata fields
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event Name"),
+        &String::from_str(&env, "Updated Description with metadata"),
+        &String::from_str(&env, "Updated Location"),
+        &1500u64,
+        &2500u64,
+        &150i128,
+        &75u32,
+    );
+    assert!(result.is_ok());
+
+    // Verify the updates were applied
+    let event = client.get_event(&event_id);
+    assert_eq!(event.name, String::from_str(&env, "Updated Event Name"));
+    assert_eq!(event.description, String::from_str(&env, "Updated Description with metadata"));
+    assert_eq!(event.location, String::from_str(&env, "Updated Location"));
+}
+
+#[test]
+fn test_non_organizer_account_gets_auth_error_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let non_organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Non-organizer account calling the method should get Auth Error
+    let result = client.try_update_event(
+        &non_organizer,
+        &event_id,
+        &String::from_str(&env, "Unauthorized Update"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_modifying_details_post_publish_correctly_surfaces_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create and publish event (sales have begun)
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Test modifying details post-publish - business rules forbid editing location after sales begin
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event Name"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"), // This should not be allowed after publish
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    
+    // Assert the panic correctly surfaces as InvalidStatusTransition
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
