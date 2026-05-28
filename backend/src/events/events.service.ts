@@ -22,7 +22,10 @@ import { AuditAction } from '../audit/entities/audit-log.entity';
 import { User } from '../users/entities/user.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
-import { SponsorContribution, ContributionStatus } from '../sponsors/entities/sponsor-contribution.entity';
+import {
+  SponsorContribution,
+  ContributionStatus,
+} from '../sponsors/entities/sponsor-contribution.entity';
 import { EscrowService } from '../payments/services/escrow.service';
 import { RefundService } from '../payments/refunds/refund.service';
 import { CurrenciesService } from '../currencies/currencies.service';
@@ -62,12 +65,12 @@ export class EventsService {
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
     private readonly currenciesService: CurrenciesService,
-  ) { }
+  ) {}
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
     if (dto.currency) {
       const codes = await this.currenciesService.findActiveCodes();
-      const supported = codes.map(c => c.toLowerCase());
+      const supported = codes.map((c) => c.toLowerCase());
       if (!supported.includes(dto.currency.toLowerCase())) {
         throw new BadRequestException(
           `Currency "${dto.currency}" is not supported. Supported: ${codes.join(', ')}`,
@@ -111,7 +114,9 @@ export class EventsService {
       ...(dto.currency !== undefined && { currency: dto.currency }),
       ...(dto.category !== undefined && { category: dto.category }),
       ...(!isPublishing && dto.status !== undefined && { status: dto.status }),
-      ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
+      ...(dto.startDate !== undefined && {
+        startDate: new Date(dto.startDate),
+      }),
       ...(dto.endDate !== undefined && { endDate: new Date(dto.endDate) }),
     };
 
@@ -140,7 +145,10 @@ export class EventsService {
       throw new ForbiddenException('You are not the organiser of this event.');
     }
 
-    this.eventStateService.validateTransition(event.status, EventStatus.PUBLISHED);
+    this.eventStateService.validateTransition(
+      event.status,
+      EventStatus.PUBLISHED,
+    );
 
     event.status = EventStatus.PUBLISHED;
     await this.eventRepository.save(event);
@@ -169,7 +177,10 @@ export class EventsService {
       throw new BadRequestException('Event has not ended yet.');
     }
 
-    this.eventStateService.validateTransition(event.status, EventStatus.COMPLETED);
+    this.eventStateService.validateTransition(
+      event.status,
+      EventStatus.COMPLETED,
+    );
 
     event.status = EventStatus.COMPLETED;
     const saved = await this.eventRepository.save(event);
@@ -192,7 +203,10 @@ export class EventsService {
       throw new ForbiddenException('You are not the organiser of this event.');
     }
 
-    this.eventStateService.validateTransition(event.status, EventStatus.CANCELLED);
+    this.eventStateService.validateTransition(
+      event.status,
+      EventStatus.CANCELLED,
+    );
 
     event.status = EventStatus.CANCELLED;
     const saved = await this.eventRepository.save(event);
@@ -204,9 +218,11 @@ export class EventsService {
     });
 
     // Non-blocking refund trigger — failures are logged, not thrown
-    this.refundService.refundEvent(id).catch((err) =>
-      this.logger.error(`Refund trigger failed for event ${id}`, err),
-    );
+    this.refundService
+      .refundEvent(id)
+      .catch((err) =>
+        this.logger.error(`Refund trigger failed for event ${id}`, err),
+      );
 
     this.queueLifecycleEmail(saved).catch(() => undefined);
 
@@ -236,12 +252,23 @@ export class EventsService {
     return {
       ...event,
       soldTickets,
-      remainingCapacity: event.maxAttendees !== null ? event.maxAttendees - soldTickets : null,
+      remainingCapacity:
+        event.maxAttendees !== null ? event.maxAttendees - soldTickets : null,
     };
   }
 
-  async listEvents(filterDto: ListEventsDto): Promise<PaginatedResult<EventWithCapacity>> {
-    const { status, organizerId, search, category, showAvailableOnly, page = 1, limit = 10 } = filterDto;
+  async listEvents(
+    filterDto: ListEventsDto,
+  ): Promise<PaginatedResult<EventWithCapacity>> {
+    const {
+      status,
+      organizerId,
+      search,
+      category,
+      showAvailableOnly,
+      page = 1,
+      limit = 10,
+    } = filterDto;
 
     const qb: SelectQueryBuilder<Event> = this.eventRepository
       .createQueryBuilder('event')
@@ -259,8 +286,12 @@ export class EventsService {
       .addSelect('COALESCE(ticket_counts."soldCount"::int, 0)', 'soldTickets');
 
     if (status) qb.andWhere('event.status = :status', { status });
-    if (organizerId) qb.andWhere('event.organizerId = :organizerId', { organizerId });
-    if (search) qb.andWhere('LOWER(event.title) LIKE LOWER(:search)', { search: `%${search}%` });
+    if (organizerId)
+      qb.andWhere('event.organizerId = :organizerId', { organizerId });
+    if (search)
+      qb.andWhere('LOWER(event.title) LIKE LOWER(:search)', {
+        search: `%${search}%`,
+      });
     if (category) qb.andWhere('event.category = :category', { category });
     if (showAvailableOnly) {
       qb.andWhere(
@@ -282,14 +313,18 @@ export class EventsService {
       return {
         ...event,
         soldTickets,
-        remainingCapacity: event.maxAttendees !== null ? event.maxAttendees - soldTickets : null,
+        remainingCapacity:
+          event.maxAttendees !== null ? event.maxAttendees - soldTickets : null,
       };
     });
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async getEventStats(id: string, callerId: string): Promise<EventStatsResponseDto> {
+  async getEventStats(
+    id: string,
+    callerId: string,
+  ): Promise<EventStatsResponseDto> {
     const event = await this.eventRepository.findOne({ where: { id } });
     if (!event) throw new NotFoundException(`Event with id "${id}" not found`);
     if (event.organizerId !== callerId) {
@@ -308,13 +343,19 @@ export class EventsService {
         .createQueryBuilder('p')
         .select('COALESCE(SUM(p.amount), 0)', 'totalRevenue')
         .addSelect('COUNT(*)', 'refundCount')
-        .where('p.eventId = :id AND p.status = :s', { id, s: PaymentStatus.REFUNDED })
+        .where('p.eventId = :id AND p.status = :s', {
+          id,
+          s: PaymentStatus.REFUNDED,
+        })
         .getRawOne(),
       this.contributionRepository
         .createQueryBuilder('c')
         .innerJoin('c.tier', 'tier')
         .select('COALESCE(SUM(c.amount), 0)', 'totalSponsorship')
-        .where('tier.eventId = :id AND c.status = :s', { id, s: ContributionStatus.CONFIRMED })
+        .where('tier.eventId = :id AND c.status = :s', {
+          id,
+          s: ContributionStatus.CONFIRMED,
+        })
         .getRawOne(),
     ]);
 
@@ -330,7 +371,10 @@ export class EventsService {
     const confirmedRevenue = await this.paymentRepository
       .createQueryBuilder('p')
       .select('COALESCE(SUM(p.amount), 0)', 'totalRevenue')
-      .where('p.eventId = :id AND p.status = :s', { id, s: PaymentStatus.CONFIRMED })
+      .where('p.eventId = :id AND p.status = :s', {
+        id,
+        s: PaymentStatus.CONFIRMED,
+      })
       .getRawOne();
 
     return {
@@ -340,8 +384,132 @@ export class EventsService {
       totalRevenue: Number(confirmedRevenue?.totalRevenue ?? 0),
       totalSponsorship: Number(sponsorStats?.totalSponsorship ?? 0),
       refundCount: Number(paymentStats?.refundCount ?? 0),
-      remainingCapacity: event.maxAttendees !== null ? event.maxAttendees - (ticketsSold + ticketsUsed) : null,
+      remainingCapacity:
+        event.maxAttendees !== null
+          ? event.maxAttendees - (ticketsSold + ticketsUsed)
+          : null,
     };
+  }
+
+  async trigger_emergency_protocol(
+    id: string,
+    callerId: string,
+    data: {
+      protocol?: string;
+      message?: string;
+      emergencyServicesContact?: string;
+    },
+  ) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    await this.send_emergency_notifications(
+      id,
+      callerId,
+      data.message ?? 'Emergency protocol activated.',
+    );
+
+    return {
+      eventId: id,
+      protocol: data.protocol ?? 'standard_evacuation',
+      status: 'active',
+      emergencyServicesContact: data.emergencyServicesContact ?? null,
+      activatedAt: new Date().toISOString(),
+    };
+  }
+
+  async track_evacuation_status(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    const ticketStats = await this.getEventStats(id, callerId);
+    return {
+      eventId: id,
+      status: 'tracking',
+      checkedInOrUsedTickets: ticketStats.ticketsUsed,
+      activeTicketHolders: ticketStats.ticketsSold,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async send_emergency_notifications(
+    id: string,
+    callerId: string,
+    message: string,
+  ) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    await this.notificationService.queueLifecycleEmail({
+      ...event,
+      status: EventStatus.CANCELLED,
+    } as Event);
+
+    return { eventId: id, message, queued: true };
+  }
+
+  async monitor_weather_conditions(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    return {
+      eventId: id,
+      location: event.location,
+      status: 'monitoring',
+      riskLevel: 'unknown',
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  async trigger_automatic_postponement(
+    id: string,
+    callerId: string,
+    reason = 'Unsafe weather conditions',
+  ) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    event.status = EventStatus.CANCELLED;
+    const saved = await this.eventRepository.save(event);
+    await this.notificationService.queueLifecycleEmail(saved);
+    return saved;
+  }
+
+  async reschedule_event(
+    id: string,
+    callerId: string,
+    data: { startDate: string; endDate: string; reason?: string },
+  ) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    const startDate = new Date(data.startDate);
+    const endDate = new Date(data.endDate);
+    if (
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(endDate.getTime()) ||
+      endDate <= startDate
+    ) {
+      throw new BadRequestException('Invalid reschedule date range.');
+    }
+
+    event.startDate = startDate;
+    event.endDate = endDate;
+    const saved = await this.eventRepository.save(event);
+    await this.notificationService.queueLifecycleEmail(saved);
+    return { ...saved, rescheduleReason: data.reason ?? null };
   }
 
   private async queueLifecycleEmail(event: Event): Promise<void> {

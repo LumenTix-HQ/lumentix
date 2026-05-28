@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -49,7 +50,10 @@ export class EventsController {
 
   @Post()
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Create a new event', description: 'Organizer-only. Creates a DRAFT event.' })
+  @ApiOperation({
+    summary: 'Create a new event',
+    description: 'Organizer-only. Creates a DRAFT event.',
+  })
   @ApiBody({
     type: CreateEventDto,
     examples: {
@@ -74,14 +78,22 @@ export class EventsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all events', description: 'Supports filtering by status, date, category, and title search.' })
+  @ApiOperation({
+    summary: 'List all events',
+    description:
+      'Supports filtering by status, date, category, and title search.',
+  })
   @ApiResponse({ status: 200, description: 'List of events', type: [Event] })
   list(@Query() filterDto: ListEventsDto) {
     return this.eventsService.listEvents(filterDto);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get an event by ID', description: 'Retrieves full details including soldTickets and remainingCapacity.' })
+  @ApiOperation({
+    summary: 'Get an event by ID',
+    description:
+      'Retrieves full details including soldTickets and remainingCapacity.',
+  })
   @ApiResponse({ status: 200, description: 'Event found', type: Event })
   @ApiResponse({ status: 404, description: 'Event not found' })
   getById(@Param('id', ParseUUIDPipe) id: string) {
@@ -90,7 +102,10 @@ export class EventsController {
 
   @Put(':id')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Update an event', description: 'Organizer-only. Allows updating event details.' })
+  @ApiOperation({
+    summary: 'Update an event',
+    description: 'Organizer-only. Allows updating event details.',
+  })
   @ApiResponse({ status: 200, description: 'Event updated', type: Event })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
@@ -102,10 +117,71 @@ export class EventsController {
     return this.eventsService.updateEvent(id, dto, req.user.id);
   }
 
+  @Patch(':id')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Patch an event',
+    description: 'Organizer-only. Allows partial event updates.',
+  })
+  @ApiResponse({ status: 200, description: 'Event updated', type: Event })
+  patch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateEventDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.updateEvent(id, dto, req.user.id);
+  }
+
+  @Post(':id/emergency')
+  @Roles(Role.ORGANIZER)
+  triggerEmergency(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body()
+    body: {
+      protocol?: string;
+      message?: string;
+      emergencyServicesContact?: string;
+    },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.trigger_emergency_protocol(id, req.user.id, body);
+  }
+
+  @Get(':id/evacuation')
+  @Roles(Role.ORGANIZER)
+  trackEvacuation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.track_evacuation_status(id, req.user.id);
+  }
+
+  @Post(':id/weather/monitor')
+  @Roles(Role.ORGANIZER)
+  monitorWeather(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.monitor_weather_conditions(id, req.user.id);
+  }
+
+  @Post(':id/reschedule')
+  @Roles(Role.ORGANIZER)
+  reschedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { startDate: string; endDate: string; reason?: string },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.reschedule_event(id, req.user.id, body);
+  }
+
   @Delete(':id')
   @Roles(Role.ORGANIZER)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete an event', description: 'Organizer-only. Soft deletes an event if no tickets sold.' })
+  @ApiOperation({
+    summary: 'Delete an event',
+    description: 'Organizer-only. Soft deletes an event if no tickets sold.',
+  })
   @ApiResponse({ status: 204, description: 'Event deleted' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
@@ -118,7 +194,11 @@ export class EventsController {
 
   @Post(':id/publish')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Publish an event', description: 'Organizer-only. Transitions DRAFT → PUBLISHED and sets up escrow.' })
+  @ApiOperation({
+    summary: 'Publish an event',
+    description:
+      'Organizer-only. Transitions DRAFT → PUBLISHED and sets up escrow.',
+  })
   @ApiResponse({ status: 201, description: 'Event published', type: Event })
   @ApiResponse({ status: 400, description: 'Invalid state transition' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
@@ -132,9 +212,16 @@ export class EventsController {
 
   @Post(':id/complete')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Complete an event', description: 'Organizer-only. Transitions PUBLISHED → COMPLETED. Only allowed after endDate.' })
+  @ApiOperation({
+    summary: 'Complete an event',
+    description:
+      'Organizer-only. Transitions PUBLISHED → COMPLETED. Only allowed after endDate.',
+  })
   @ApiResponse({ status: 201, description: 'Event completed', type: Event })
-  @ApiResponse({ status: 400, description: 'Event has not ended yet or invalid transition' })
+  @ApiResponse({
+    status: 400,
+    description: 'Event has not ended yet or invalid transition',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
   complete(
@@ -146,7 +233,11 @@ export class EventsController {
 
   @Post(':id/cancel')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Cancel an event', description: 'Organizer-only. Cancels the event and automatically triggers refunds.' })
+  @ApiOperation({
+    summary: 'Cancel an event',
+    description:
+      'Organizer-only. Cancels the event and automatically triggers refunds.',
+  })
   @ApiResponse({ status: 201, description: 'Event cancelled' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
@@ -159,8 +250,16 @@ export class EventsController {
 
   @Get(':id/stats')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Get event stats', description: 'Organizer-only. Returns revenue, ticket counts, sponsorship totals.' })
-  @ApiResponse({ status: 200, description: 'Event stats', type: EventStatsResponseDto })
+  @ApiOperation({
+    summary: 'Get event stats',
+    description:
+      'Organizer-only. Returns revenue, ticket counts, sponsorship totals.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Event stats',
+    type: EventStatsResponseDto,
+  })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
   getStats(
@@ -172,7 +271,10 @@ export class EventsController {
 
   @Get(':eventId/tickets')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Get event tickets', description: 'Organizer-only. Lists all tickets sold for the event.' })
+  @ApiOperation({
+    summary: 'Get event tickets',
+    description: 'Organizer-only. Lists all tickets sold for the event.',
+  })
   @ApiResponse({ status: 200, description: 'Tickets list' })
   async getEventTickets(
     @Param('eventId', ParseUUIDPipe) eventId: string,
@@ -184,7 +286,10 @@ export class EventsController {
 
   @Get(':eventId/tickets/summary')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Get ticket summary', description: 'Organizer-only. Statistics on ticket sales.' })
+  @ApiOperation({
+    summary: 'Get ticket summary',
+    description: 'Organizer-only. Statistics on ticket sales.',
+  })
   @ApiResponse({ status: 200, description: 'Ticket stats' })
   async getTicketSummary(
     @Param('eventId', ParseUUIDPipe) eventId: string,
