@@ -33,6 +33,7 @@ import { InsuranceModule } from './insurance/insurance.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { VenuesModule } from './venues/venues.module';
 import { GamificationModule } from './gamification/gamification.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
 
 
 @Module({
@@ -110,10 +111,7 @@ import { GamificationModule } from './gamification/gamification.module';
     AdminModule,
     RegistrationsModule,
     AnalyticsModule,
-    InsuranceModule,
-    ReviewsModule,
-    VenuesModule,
-    GamificationModule,
+    SchedulingModule,
 
   ],
   controllers: [AppController],
