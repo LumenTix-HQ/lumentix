@@ -243,7 +243,7 @@ mod vip_accessibility_currency_seat_tests;
 
 pub use contract::TicketContract;
 pub use error::LumentixError;
-pub use events::{CheckInEvent, EventCancelled, EventMetadataUpdated, EventSalesPaused, EventSalesResumed, TransferEvent};
+pub use events::{CheckInEvent, EventCancelled, EventMetadataUpdated, EventSalesPaused, EventSalesResumed, InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased, TransferEvent, AttendanceVerified, AttendanceVerificationFailed, ReviewSubmitted, ReputationUpdated};
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
-pub use types::{Event, EventStatus, Ticket as LumentixTicket};
+pub use types::{CancellationReason, Event, EventReview, EventStatus, InsurancePool, InsurancePolicy, OrganizerReputation, Ticket as LumentixTicket};

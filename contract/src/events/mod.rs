@@ -584,3 +584,125 @@ impl OraclePriceUpdated {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INSURANCE EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Event emitted when insurance is purchased for a ticket
+pub struct InsurancePurchased;
+
+impl InsurancePurchased {
+    pub fn emit(
+        env: &Env,
+        policy_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        holder: Address,
+        premium_paid: i128,
+        coverage_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("insbuy"),),
+            (policy_id, ticket_id, event_id, holder, premium_paid, coverage_amount),
+        );
+    }
+}
+
+/// Event emitted when an insurance claim is processed
+pub struct InsuranceClaimProcessed;
+
+impl InsuranceClaimProcessed {
+    pub fn emit(
+        env: &Env,
+        policy_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        claimant: Address,
+        claim_amount: i128,
+        reason: crate::types::CancellationReason,
+    ) {
+        env.events().publish(
+            (symbol_short!("insclaim"),),
+            (policy_id, ticket_id, event_id, claimant, claim_amount, reason),
+        );
+    }
+}
+
+/// Event emitted when insurance pool balance is updated
+pub struct InsurancePoolUpdated;
+
+impl InsurancePoolUpdated {
+    pub fn emit(env: &Env, total_balance: i128, total_policies: u32, total_claims_paid: i128) {
+        env.events().publish(
+            (symbol_short!("inspool"),),
+            (total_balance, total_policies, total_claims_paid),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REVIEW & REPUTATION EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a verified attendee submits an event review
+pub struct ReviewSubmitted;
+
+impl ReviewSubmitted {
+    pub fn emit(
+        env: &Env,
+        review_id: u64,
+        event_id: u64,
+        reviewer: Address,
+        organizer: Address,
+        rating: u32,
+        attendance_verified: bool,
+    ) {
+        env.events().publish(
+            (symbol_short!("revsubmt"),),
+            (review_id, event_id, reviewer, organizer, rating, attendance_verified),
+        );
+    }
+}
+
+/// Emitted when a reviewer's attendance is confirmed
+pub struct AttendanceVerified;
+
+impl AttendanceVerified {
+    pub fn emit(env: &Env, review_id: u64, event_id: u64, reviewer: Address, ticket_id: u64) {
+        env.events().publish(
+            (symbol_short!("attverif"),),
+            (review_id, event_id, reviewer, ticket_id),
+        );
+    }
+}
+
+/// Emitted when an attendance verification attempt fails
+pub struct AttendanceVerificationFailed;
+
+impl AttendanceVerificationFailed {
+    pub fn emit(env: &Env, review_id: u64, reviewer: Address) {
+        env.events().publish(
+            (symbol_short!("attfail"),),
+            (review_id, reviewer),
+        );
+    }
+}
+
+/// Emitted when an organizer's reputation score is recalculated
+pub struct ReputationUpdated;
+
+impl ReputationUpdated {
+    pub fn emit(
+        env: &Env,
+        organizer: Address,
+        reputation_score: u32,
+        average_rating_x100: u32,
+        total_reviews: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("repupdt"),),
+            (organizer, reputation_score, average_rating_x100, total_reviews),
+        );
+    }
+}

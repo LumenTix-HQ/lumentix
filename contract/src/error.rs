@@ -117,4 +117,36 @@ pub enum LumentixError {
     WaitlistOfferNotFound = 47,
     /// Waitlist offer has expired
     WaitlistOfferExpired = 48,
+
+    // Insurance errors (49–55)
+    /// Insurance policy not found
+    InsurancePolicyNotFound = 49,
+    /// Insurance already purchased for this ticket
+    InsuranceAlreadyPurchased = 50,
+    /// Insurance pool has insufficient funds
+    InsufficientInsurancePool = 51,
+    /// Invalid cancellation reason for insurance claim
+    InvalidCancellationReason = 52,
+    /// Insurance claim already processed
+    InsuranceClaimAlreadyProcessed = 53,
+    /// Insurance policy is not active
+    InsurancePolicyNotActive = 54,
+    /// Insurance premium amount is invalid
+    InvalidInsurancePremium = 55,
+
+    // Review & Reputation errors (56–65)
+    /// Review not found
+    ReviewNotFound = 56,
+    /// Reviewer has already submitted a review for this event
+    ReviewAlreadySubmitted = 57,
+    /// Reviewer did not attend the event (ticket not used)
+    AttendanceNotVerified = 58,
+    /// Ticket does not belong to the reviewer
+    ReviewerNotTicketOwner = 59,
+    /// Event is not completed — reviews only allowed after completion
+    EventNotCompleted = 60,
+    /// Rating must be between 1 and 5
+    InvalidRating = 61,
+    /// Ticket does not belong to the reviewed event
+    TicketEventMismatch = 62,
 }

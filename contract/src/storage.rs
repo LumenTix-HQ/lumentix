@@ -1,8 +1,8 @@
 use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, CurrencyConfig, Event, Seat, Ticket,
-    TicketTransferRecord, VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME,
-    PERSISTENT_LIFETIME,
+    AccessibilityBooking, AccessibilityInventory, CurrencyConfig, Event, EventReview,
+    InsurancePool, InsurancePolicy, OrganizerReputation, Seat, Ticket, TicketTransferRecord,
+    VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
 };
 use soroban_sdk::{Address, Env, String, Vec};
 
@@ -29,6 +29,13 @@ const WAITLIST_QUEUE_PREFIX: &str = "WQUEUE_";
 const WAITLIST_OFFER_PREFIX: &str = "WOFFER_";
 const WAITLIST_OFFER_RECIPIENTS_PREFIX: &str = "WOFRECS_";
 const WAITLIST_RESERVED_PREFIX: &str = "WRESV_";
+const INSURANCE_POLICY_PREFIX: &str = "INSPOL_";
+const INSURANCE_POLICY_ID_COUNTER: &str = "INSPOL_CTR";
+const INSURANCE_POOL: &str = "INSPOOL";
+const REVIEW_PREFIX: &str = "REVIEW_";
+const REVIEW_ID_COUNTER: &str = "REVIEW_CTR";
+const REVIEWER_EVENT_PREFIX: &str = "REVEVT_";
+const ORGANIZER_REPUTATION_PREFIX: &str = "ORGREP_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -564,4 +571,226 @@ pub fn set_waitlist_reserved(env: &Env, event_id: u64, reserved: u32) {
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INSURANCE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get next insurance policy ID
+pub fn get_next_insurance_policy_id(env: &Env) -> u64 {
+    let id = env.storage().instance().get(&INSURANCE_POLICY_ID_COUNTER).unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment insurance policy ID counter
+pub fn increment_insurance_policy_id(env: &Env) {
+    let next_id = get_next_insurance_policy_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&INSURANCE_POLICY_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set insurance policy
+pub fn set_insurance_policy(env: &Env, policy_id: u64, policy: &InsurancePolicy) {
+    let key = (INSURANCE_POLICY_PREFIX, policy_id);
+    env.storage().persistent().set(&key, policy);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get insurance policy
+pub fn get_insurance_policy(
+    env: &Env,
+    policy_id: u64,
+) -> Result<InsurancePolicy, LumentixError> {
+    let key = (INSURANCE_POLICY_PREFIX, policy_id);
+    let policy = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::InsurancePolicyNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(policy)
+}
+
+/// Get insurance policy by ticket ID
+pub fn get_insurance_policy_by_ticket(
+    env: &Env,
+    ticket_id: u64,
+) -> Result<InsurancePolicy, LumentixError> {
+    // Note: In a production system, you'd want a more efficient lookup
+    // For now, we'll iterate through policies (this is simplified)
+    let policy_id = get_next_insurance_policy_id(env);
+    for i in 1..policy_id {
+        let key = (INSURANCE_POLICY_PREFIX, i);
+        if let Some(policy) = env.storage().persistent().get::<(u64, u64), InsurancePolicy>(&key) {
+            if policy.ticket_id == ticket_id {
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+                return Ok(policy);
+            }
+        }
+    }
+    Err(LumentixError::InsurancePolicyNotFound)
+}
+
+/// Get insurance pool
+pub fn get_insurance_pool(env: &Env) -> InsurancePool {
+    let pool: InsurancePool = env
+        .storage()
+        .instance()
+        .get(&INSURANCE_POOL)
+        .unwrap_or(InsurancePool {
+            total_balance: 0,
+            total_policies: 0,
+            total_claims_paid: 0,
+        });
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    pool
+}
+
+/// Set insurance pool
+pub fn set_insurance_pool(env: &Env, pool: &InsurancePool) {
+    env.storage().instance().set(&INSURANCE_POOL, pool);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Add to insurance pool balance
+pub fn add_to_insurance_pool(env: &Env, amount: i128) {
+    let mut pool = get_insurance_pool(env);
+    pool.total_balance += amount;
+    set_insurance_pool(env, &pool);
+}
+
+/// Deduct from insurance pool balance
+pub fn deduct_from_insurance_pool(env: &Env, amount: i128) -> Result<(), LumentixError> {
+    let mut pool = get_insurance_pool(env);
+    if pool.total_balance < amount {
+        return Err(LumentixError::InsufficientInsurancePool);
+    }
+    pool.total_balance -= amount;
+    pool.total_claims_paid += amount;
+    set_insurance_pool(env, &pool);
+    Ok(())
+}
+
+/// Increment total policies count in insurance pool
+pub fn increment_total_policies(env: &Env) {
+    let mut pool = get_insurance_pool(env);
+    pool.total_policies += 1;
+    set_insurance_pool(env, &pool);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REVIEW & REPUTATION STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get next review ID
+pub fn get_next_review_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&REVIEW_ID_COUNTER)
+        .unwrap_or(1u64);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment review ID counter
+pub fn increment_review_id(env: &Env) {
+    let next_id = get_next_review_id(env) + 1;
+    env.storage().instance().set(&REVIEW_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist a review
+pub fn set_review(env: &Env, review_id: u64, review: &EventReview) {
+    let key = (REVIEW_PREFIX, review_id);
+    env.storage().persistent().set(&key, review);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a review by ID
+pub fn get_review(env: &Env, review_id: u64) -> Result<EventReview, LumentixError> {
+    let key = (REVIEW_PREFIX, review_id);
+    let review = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::ReviewNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(review)
+}
+
+/// Record that a reviewer has already reviewed an event (duplicate guard).
+/// Key: (reviewer, event_id) → review_id
+pub fn set_reviewer_event(env: &Env, reviewer: &Address, event_id: u64, review_id: u64) {
+    let key = (REVIEWER_EVENT_PREFIX, reviewer.clone(), event_id);
+    env.storage().persistent().set(&key, &review_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Check whether a reviewer has already reviewed an event
+pub fn has_reviewer_reviewed(env: &Env, reviewer: &Address, event_id: u64) -> bool {
+    let key = (REVIEWER_EVENT_PREFIX, reviewer.clone(), event_id);
+    env.storage().persistent().has(&key)
+}
+
+/// Persist an organizer's reputation record
+pub fn set_organizer_reputation(env: &Env, organizer: &Address, rep: &OrganizerReputation) {
+    let key = (ORGANIZER_REPUTATION_PREFIX, organizer.clone());
+    env.storage().persistent().set(&key, rep);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch an organizer's reputation record
+pub fn get_organizer_reputation(
+    env: &Env,
+    organizer: &Address,
+) -> OrganizerReputation {
+    let key = (ORGANIZER_REPUTATION_PREFIX, organizer.clone());
+    let rep: OrganizerReputation = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or(OrganizerReputation {
+            organizer: organizer.clone(),
+            reputation_score: 0,
+            average_rating_x100: 0,
+            total_reviews: 0,
+            total_ratings_sum: 0,
+        });
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    rep
 }

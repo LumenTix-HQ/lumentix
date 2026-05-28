@@ -169,3 +169,73 @@ pub struct WaitlistOffer {
     pub quantity: u32,
     pub expires_at: u64,
 }
+
+// ── Insurance System ───────────────────────────────────────────────────────
+
+/// Cancellation reason enum for insurance claims
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CancellationReason {
+    EventCancelledByOrganizer,
+    ForceMajeure,
+    VenueUnavailable,
+    ArtistPerformerUnavailable,
+    HealthSafetyConcerns,
+    GovernmentRestriction,
+    Other,
+}
+
+/// Insurance policy for a ticket
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsurancePolicy {
+    pub id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub holder: Address,
+    pub premium_paid: i128,
+    pub coverage_amount: i128,
+    pub purchase_time: u64,
+    pub active: bool,
+    pub claim_processed: bool,
+}
+
+/// Insurance pool balance managed by smart contract
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsurancePool {
+    pub total_balance: i128,
+    pub total_policies: u32,
+    pub total_claims_paid: i128,
+}
+
+// ── Review & Reputation System ─────────────────────────────────────────────
+
+/// A single event review submitted by a verified attendee
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventReview {
+    pub id: u64,
+    pub event_id: u64,
+    pub reviewer: Address,
+    pub organizer: Address,
+    pub ticket_id: u64,
+    /// Star rating 1–5
+    pub rating: u32,
+    pub comment: String,
+    pub attendance_verified: bool,
+    pub timestamp: u64,
+}
+
+/// Aggregated reputation score for an organizer
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrganizerReputation {
+    pub organizer: Address,
+    /// Weighted score 0–10000 (divide by 100 for 0.00–100.00)
+    pub reputation_score: u32,
+    /// Average rating × 100 (e.g. 420 = 4.20 stars)
+    pub average_rating_x100: u32,
+    pub total_reviews: u32,
+    pub total_ratings_sum: u32,
+}

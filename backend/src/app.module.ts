@@ -29,6 +29,10 @@ import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { InsuranceModule } from './insurance/insurance.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { VenuesModule } from './venues/venues.module';
+import { GamificationModule } from './gamification/gamification.module';
 
 
 @Module({
@@ -106,6 +110,10 @@ import { AnalyticsModule } from './analytics/analytics.module';
     AdminModule,
     RegistrationsModule,
     AnalyticsModule,
+    InsuranceModule,
+    ReviewsModule,
+    VenuesModule,
+    GamificationModule,
 
   ],
   controllers: [AppController],
