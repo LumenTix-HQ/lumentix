@@ -6,7 +6,7 @@ use crate::storage;
 use crate::types::{EventStatus, Ticket};
 use soroban_sdk::xdr;
 use soroban_sdk::{
-    testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, String,
+    testutils::Address as _, testutils::Events, testutils::Ledger, token, Address, Env, String,
 };
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
@@ -395,6 +395,72 @@ fn test_batch_purchase_tickets_charges_list_price_per_ticket() {
     let tids = client.batch_purchase_tickets(&event_id, &2u32, &buyer);
     assert_eq!(tids.len(), 2);
     assert_eq!(client.get_escrow_balance(&event_id), 200i128);
+}
+
+#[test]
+fn test_batch_purchase_ten_tickets_reduces_availability_charges_tokens_and_maps_owners() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, contract_id, client) = create_test_contract_with_id(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_address = token_contract.address();
+    let token_client = token::Client::new(&env, &token_address);
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+    let initial_balance = 10_000i128;
+
+    token_admin_client.mint(&buyer, &initial_balance);
+    client.set_token(&admin, &token_address);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let before_buyer_balance = token_client.balance(&buyer);
+    let before_contract_balance = token_client.balance(&contract_id);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &10u32, &buyer);
+    let event = client.get_event(&event_id);
+    let total_price = 10i128 * event.ticket_price;
+
+    assert_eq!(ticket_ids.len(), 10);
+    assert_eq!(event.max_tickets - event.tickets_sold, 40);
+    assert_eq!(before_buyer_balance - token_client.balance(&buyer), total_price);
+    assert_eq!(token_client.balance(&contract_id) - before_contract_balance, total_price);
+
+    for i in 0..10u32 {
+        let ticket_id = ticket_ids.get(i).unwrap();
+        assert_eq!(ticket_id, i as u64 + 1);
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert_eq!(ticket.owner, buyer);
+        assert_eq!(ticket.event_id, event_id);
+    }
+}
+
+#[test]
+fn test_batch_purchase_exceeding_venue_capacity_fails_without_partial_mints() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Limited Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &5u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let result = client.try_batch_purchase_tickets(&event_id, &10u32, &buyer);
+    assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
+    assert_eq!(client.get_event(&event_id).tickets_sold, 0);
+    assert_eq!(client.try_get_ticket_info(&1u64), Err(Ok(LumentixError::TicketNotFound)));
 }
 
 // ============================================================================
@@ -5595,12 +5661,29 @@ fn test_extend_event_end_time_success() {
 
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
-    // Extend end time from 2000 to 3000
-    let result = client.try_extend_event_end_time(&organizer, &event_id, &3000u64);
+    let result = client.try_extend_event_end_time(&organizer, &event_id, &88400u64);
     assert!(result.is_ok());
 
     let event = client.get_event(&event_id);
-    assert_eq!(event.end_time, 3000u64);
+    assert_eq!(event.end_time, 88400u64);
+}
+
+#[test]
+fn test_extend_event_end_time_allows_subsequent_extensions() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let first = client.try_extend_event_end_time(&organizer, &event_id, &88400u64);
+    assert!(first.is_ok());
+
+    let second = client.try_extend_event_end_time(&organizer, &event_id, &174800u64);
+    assert!(second.is_ok());
+    assert_eq!(client.get_event(&event_id).end_time, 174800u64);
 }
 
 #[test]
@@ -5663,6 +5746,19 @@ fn test_extend_event_end_time_new_time_not_after_current_fails() {
     // Earlier end time — must also fail
     let earlier = client.try_extend_event_end_time(&organizer, &event_id, &1500u64);
     assert_eq!(earlier, Err(Ok(LumentixError::InvalidTimeRange)));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_extend_event_end_time_backward_panics_on_non_try_client() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.extend_event_end_time(&organizer, &event_id, &1500u64);
 }
 
 #[test]

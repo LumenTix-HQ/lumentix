@@ -10,7 +10,7 @@ use crate::events::{
     GenericEventStateTransition, InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased,
     OraclePriceUpdated, PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn,
     ProtocolFeeQueried, ReputationUpdated, ReviewSubmitted, SeatHoldReleased, SeatSelected,
-    TicketPurchased, TicketRefunded, TicketTransferred, TicketUsed, VenueLayoutCreated,
+    TicketPurchased, TicketRefunded, TicketRevoked, TicketTransferred, TicketUsed, VenueLayoutCreated,
     VipTierCreated, VipTicketAssigned, WaitlistAvailabilityNotified, WaitlistJoined,
 };
 use crate::storage;
@@ -672,6 +672,7 @@ impl LumentixContract {
         }
         ticket.revoked = true;
         storage::set_ticket(&env, ticket_id, &ticket);
+        TicketRevoked::emit(&env, admin, ticket_id, ticket.event_id, None);
         Ok(())
     }
 
