@@ -1,3 +1,43 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { getAnalyticsOptOut, setAnalyticsOptOut } from '@/lib/analytics/analytics';
+
+function AnalyticsOptOut() {
+  const [optOut, setOptOut] = useState(false);
+  useEffect(() => { setOptOut(getAnalyticsOptOut()); }, []);
+
+  const toggle = () => {
+    const next = !optOut;
+    setOptOut(next);
+    setAnalyticsOptOut(next);
+  };
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6">
+      <h2 className="text-white font-semibold mb-4">Privacy</h2>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-white text-sm font-medium">Analytics opt-out</p>
+          <p className="text-gray-500 text-xs mt-1">
+            Cookie-free, privacy-respecting usage analytics. Disable to stop all tracking.
+          </p>
+        </div>
+        <button
+          onClick={toggle}
+          aria-label={optOut ? 'Enable analytics' : 'Disable analytics'}
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${optOut ? 'bg-gray-700' : 'bg-blue-600'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${optOut ? 'translate-x-1' : 'translate-x-6'}`} />
+        </button>
+      </div>
+      <p className="text-xs text-gray-600 mt-3">
+        {optOut ? 'Analytics disabled — no data is collected.' : 'Analytics enabled (no cookies set).'}
+      </p>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
     return (
         <main className="flex min-h-screen flex-col items-center justify-center p-24 bg-gradient-to-bl from-black via-gray-900 to-blue-950 text-white">
@@ -35,6 +75,7 @@ export default function ProfilePage() {
                         </div>
                     </div>
                 </div>
+                <AnalyticsOptOut />
             </div>
         </main>
     );
