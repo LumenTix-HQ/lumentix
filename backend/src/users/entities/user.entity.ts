@@ -37,6 +37,9 @@ export class User {
   })
   status: UserStatus;
 
+  @Column({ nullable: true, type: 'varchar', unique: true })
+  googleId: string | null;
+
   @Column({ nullable: true, type: 'varchar' })
   stellarPublicKey: string | null;
 

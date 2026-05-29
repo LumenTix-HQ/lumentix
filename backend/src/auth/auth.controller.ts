@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
   Req,
+  Res,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
@@ -27,6 +29,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
 
 @ApiTags('Auth')
 @ApiResponse({ status: 429, description: 'Too many requests' })
@@ -145,5 +148,19 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Unauthorized or invalid token' })
   logout(@Body() dto: RefreshTokenDto, @Req() req: AuthenticatedRequest) {
     return this.authService.logout(req.user.id, dto.refreshToken);
+  }
+
+  @Get('google')
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: 'Google OAuth redirect' })
+  googleAuth() {}
+
+  @Get('google/callback')
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: 'Google OAuth callback' })
+  async googleCallback(@Req() req: any, @Res() res: any) {
+    const tokens = await this.authService.findOrCreateGoogleUser(req.user);
+    const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`;
+    return res.redirect(redirectUrl);
   }
 }

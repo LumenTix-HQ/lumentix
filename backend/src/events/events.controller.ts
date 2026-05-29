@@ -32,6 +32,8 @@ import { CreateEventSeriesDto } from './dto/create-event-series.dto';
 import { UpdateEventSeriesDto } from './dto/update-event-series.dto';
 import { BulkUpdateSeriesDto } from './dto/bulk-update-series.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
+import { AddEventImageDto } from './dto/add-event-image.dto';
+import { UpdateImageOrderDto } from './dto/update-image-order.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -350,5 +352,42 @@ export class EventsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.eventsService.duplicateEvent(id, dto, req.user.id);
+  }
+
+  @Post(':id/images')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Add image to event', description: 'Organizer-only. Max 10 images.' })
+  @ApiResponse({ status: 201, description: 'Image added' })
+  addImage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddEventImageDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.addEventImage(id, req.user.id, dto);
+  }
+
+  @Patch(':id/images/order')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Update image order', description: 'Organizer-only. Set order for multiple images.' })
+  @ApiResponse({ status: 200, description: 'Order updated' })
+  updateImageOrder(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateImageOrderDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.updateImageOrder(id, req.user.id, dto);
+  }
+
+  @Delete(':id/images/:imageId')
+  @Roles(Role.ORGANIZER)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete event image', description: 'Organizer-only.' })
+  @ApiResponse({ status: 204, description: 'Image deleted' })
+  deleteImage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('imageId', ParseUUIDPipe) imageId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.deleteEventImage(id, imageId, req.user.id);
   }
 }

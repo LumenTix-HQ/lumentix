@@ -25,6 +25,7 @@ import { AdminService } from './admin.service';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { RoleRequestStatus } from '../users/entities/role-request.entity';
 import { UserRole } from '../users/enums/user-role.enum';
+import { StellarService } from '../stellar/stellar.service';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -35,6 +36,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly bruteForceService: BruteForceService,
+    private readonly stellarService: StellarService,
   ) {}
 
   @Patch('security/unlock-ip/:ip')
@@ -202,5 +204,28 @@ export class AdminController {
   @ApiResponse({ status: 404, description: 'Role request not found' })
   rejectRoleRequest(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.rejectRoleRequest(id);
+  }
+
+  @Get('stellar/platform-balance')
+  @ApiOperation({
+    summary: 'Get platform Stellar account balance',
+    description:
+      'Returns available, reserved, and minimum required XLM balance for the platform account.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Platform balance retrieved successfully',
+    schema: {
+      properties: {
+        available: { type: 'string', example: '100.0000000' },
+        reserved: { type: 'string', example: '1.5000000' },
+        minimumRequired: { type: 'string', example: '2.5000000' },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  getPlatformBalance() {
+    return this.stellarService.getPlatformBalanceInfo();
   }
 }

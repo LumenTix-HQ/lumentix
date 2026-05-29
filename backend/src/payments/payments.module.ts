@@ -29,7 +29,7 @@ import { RefundModule } from './refunds/refund.module';
     EscrowModule,
     forwardRef(() => RefundModule),
   ],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, PaymentAnalyticsController],
   providers: [
     PaymentsService,
     PaymentExpiryJob,

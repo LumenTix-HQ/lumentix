@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SponsorTier } from './entities/sponsor-tier.entity';
 import { SponsorContribution, ContributionStatus } from './entities/sponsor-contribution.entity';
+import { Sponsor } from './entities/sponsor.entity';
 import { ContributionsService } from './contributions.service';
 import { EventsService } from '../events/events.service';
 import { CreateSponsorTierDto } from './dto/create-sponsor-tier.dto';
@@ -30,6 +31,8 @@ export class SponsorsService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
+    @InjectRepository(Sponsor)
+    private readonly sponsorRepo: Repository<Sponsor>,
     private readonly eventsService: EventsService,
     private readonly contributionsService: ContributionsService,
     private readonly escrowService: EscrowService,
@@ -214,5 +217,43 @@ export class SponsorsService {
       .getRawOne<{ total: string | null }>();
 
     return Number(result?.total ?? 0);
+  }
+
+  async getEventLeaderboard(eventId: string): Promise<any[]> {
+    const rows = await this.sponsorRepo
+      .createQueryBuilder('s')
+      .select('s.userId', 'userId')
+      .addSelect('s.displayName', 'displayName')
+      .addSelect('s.logoUrl', 'logoUrl')
+      .addSelect('s.websiteUrl', 'websiteUrl')
+      .addSelect('SUM(s.amount)', 'totalContribution')
+      .where('s.eventId = :eventId', { eventId })
+      .groupBy('s.userId, s.displayName, s.logoUrl, s.websiteUrl')
+      .orderBy('SUM(s.amount)', 'DESC')
+      .getRawMany();
+    return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+  }
+
+  async getSponsorProfile(userId: string): Promise<any> {
+    const contributions = await this.sponsorRepo.find({
+      where: { userId },
+      relations: ['event'],
+      order: { createdAt: 'DESC' },
+    });
+    if (!contributions.length) return { userId, events: [] };
+    const latest = contributions[0];
+    return {
+      userId,
+      displayName: latest.displayName,
+      logoUrl: latest.logoUrl,
+      websiteUrl: latest.websiteUrl,
+      totalContributed: contributions.reduce((sum, c) => sum + Number(c.amount), 0),
+      events: contributions.map((c) => ({
+        eventId: c.eventId,
+        title: c.event?.title,
+        amount: c.amount,
+        date: c.createdAt,
+      })),
+    };
   }
 }

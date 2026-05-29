@@ -43,4 +43,9 @@ export class ListEventsDto {
   @IsInt()
   @Min(1)
   limit?: number = 10;
+
+  @ApiPropertyOptional({ description: 'Filter by category IDs (comma-separated UUIDs)' })
+  @IsOptional()
+  @IsString()
+  categoryIds?: string; // comma-separated UUIDs
 }

@@ -298,6 +298,23 @@ export class UsersService {
     return this.roleRequestRepository.save(request);
   }
 
+  async findByGoogleId(googleId: string) {
+    return this.usersRepository.findOne({ where: { googleId } });
+  }
+
+  async updateGoogleId(userId: string, googleId: string) {
+    await this.usersRepository.update(userId, { googleId });
+  }
+
+  async createGoogleUser(data: { email: string; googleId: string; displayName?: string }) {
+    const user = this.usersRepository.create({
+      email: data.email,
+      googleId: data.googleId,
+      passwordHash: '',
+    });
+    return this.usersRepository.save(user);
+  }
+
   private sanitize(user: User): Omit<User, 'passwordHash'> {
     const { passwordHash, ...sanitized } = user;
     return sanitized;

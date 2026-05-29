@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check-deps": "node -e \"const p=require('./package.json'); const shared=Object.keys(p.dependencies||{}).filter(k=>p.devDependencies?.[k]); if(shared.length){console.error('Duplicate deps:',shared);process.exit(1)}\""
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

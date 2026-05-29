@@ -1,13 +1,85 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
+const TOKEN_KEY = "lumentix_access_token";
+const REFRESH_KEY = "lumentix_refresh_token";
+
+function getAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+function setTokens(accessToken: string, refreshToken?: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(TOKEN_KEY, accessToken);
+  if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
+}
+
+function clearTokens(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const newAccessToken: string = data.access_token;
+    const newRefreshToken: string | undefined = data.refresh_token;
+    setTokens(newAccessToken, newRefreshToken);
+    return newAccessToken;
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
+  isRetry = false,
 ): Promise<T> {
+  const accessToken = getAccessToken();
+  const authHeader: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
+
   const res = await fetch(`${API_BASE}${endpoint}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeader,
+      ...(options.headers ?? {}),
+    },
     ...options,
   });
+
+  if (res.status === 401 && !isRetry) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      return request<T>(endpoint, options, true);
+    }
+    // Refresh failed — clear tokens and redirect to login
+    clearTokens();
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new Error("Session expired. Redirecting to login.");
+  }
+
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`API error ${res.status}: ${body}`);
@@ -16,10 +88,38 @@ async function request<T>(
   return res.json();
 }
 
+// ── Typed helper functions ─────────────────────────────────────────────────────
+
+export async function apiGet<T>(path: string): Promise<T> {
+  return request<T>(path, { method: "GET" });
+}
+
+export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PATCH",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  return request<T>(path, { method: "DELETE" });
+}
+
+// ── Named exports for token management ────────────────────────────────────────
+
+export { setTokens, clearTokens, getAccessToken };
+
 export const apiClient = {
   // ── Auth ──────────────────────────────────────────────────────────────────
   login: (body: { email: string; password: string }) =>
-    request<{ access_token: string }>("/auth/login", {
+    request<{ access_token: string; refresh_token?: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify(body),
     }),

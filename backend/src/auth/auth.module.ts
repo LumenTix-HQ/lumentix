@@ -8,6 +8,7 @@ import { UsersModule } from '../users/users.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { GoogleStrategy } from './strategies/google.strategy';
 import { BruteForceService } from '../common/services/brute-force.service';
 import { BruteForceGuard } from '../common/guards/brute-force.guard';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
@@ -36,7 +37,7 @@ import type { StringValue } from 'ms';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, BruteForceService, BruteForceGuard],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, BruteForceService, BruteForceGuard],
   exports: [BruteForceService, BruteForceGuard],
   controllers: [AuthController],
 })

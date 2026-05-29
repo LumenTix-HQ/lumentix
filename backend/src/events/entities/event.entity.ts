@@ -4,7 +4,10 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToMany,
+  JoinTable,
 } from 'typeorm';
+import { Category } from '../../categories/entities/category.entity';
 
 export enum EventStatus {
   DRAFT = 'draft',
@@ -113,6 +116,10 @@ export class Event {
     default: EventAgeRestriction.NONE,
   })
   ageRestriction: EventAgeRestriction;
+
+  @ManyToMany(() => Category, (c) => c.events)
+  @JoinTable({ name: 'event_categories' })
+  categories: Category[];
 
   @CreateDateColumn()
   createdAt: Date;

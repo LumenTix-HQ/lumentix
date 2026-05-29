@@ -9,6 +9,8 @@ import { ThrottlerStorageRedisService } from 'nestjs-throttler-storage-redis';
 import Redis from 'ioredis';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
+import { LoggerService } from './common/logging/logger.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -34,6 +36,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { VenuesModule } from './venues/venues.module';
 import { GamificationModule } from './gamification/gamification.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
+import { CategoriesModule } from './categories/categories.module';
 
 
 @Module({
@@ -112,14 +115,20 @@ import { SchedulingModule } from './scheduling/scheduling.module';
     RegistrationsModule,
     AnalyticsModule,
     SchedulingModule,
+    CategoriesModule,
 
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    LoggerService,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CorrelationIdInterceptor,
     },
     {
       provide: APP_INTERCEPTOR,

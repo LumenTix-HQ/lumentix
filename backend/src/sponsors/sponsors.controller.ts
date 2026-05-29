@@ -13,6 +13,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+
 import {
   ApiTags,
   ApiBearerAuth,
@@ -165,5 +166,31 @@ export class SponsorsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.sponsorsService.distributeEscrow(eventId, req.user.id, req.user.role);
+  }
+}
+
+@ApiTags('Sponsors')
+@Controller('events/:eventId/sponsors')
+export class EventSponsorsController {
+  constructor(private readonly sponsorsService: SponsorsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Event sponsor leaderboard', description: 'Public. Returns sponsors sorted by total contribution.' })
+  @ApiResponse({ status: 200, description: 'Sponsor leaderboard' })
+  getLeaderboard(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.sponsorsService.getEventLeaderboard(eventId);
+  }
+}
+
+@ApiTags('Sponsors')
+@Controller('sponsors')
+export class SponsorProfileController {
+  constructor(private readonly sponsorsService: SponsorsService) {}
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Sponsor public profile', description: 'Public. Returns sponsor profile and sponsored events.' })
+  @ApiResponse({ status: 200, description: 'Sponsor profile' })
+  getProfile(@Param('id', ParseUUIDPipe) id: string) {
+    return this.sponsorsService.getSponsorProfile(id);
   }
 }
