@@ -10,21 +10,24 @@ import { EventsModule } from '../events/events.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationModule } from '../notifications/notification.module';
+import { PaymentAnalyticsController } from './controllers/payment-analytics.controller';
+import { PaymentAnalyticsService } from './services/payment-analytics.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Payment]),
-    ScheduleModule,           // Issue #127 – needed for @Cron decorator
-    CurrenciesModule,         // Issue #128 – currency validation
+    ScheduleModule,
+    CurrenciesModule,
     EventsModule,
-    StellarModule,            // Issue #129 – path payments
-    AuditModule,              // Issue #127 – audit logging on expiry
-    NotificationModule,       // Issue #127 – email on expiry
+    StellarModule,
+    AuditModule,
+    NotificationModule,
   ],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, PaymentAnalyticsController],
   providers: [
     PaymentsService,
-    PaymentExpiryJob,         // Issue #127 – scheduled expiry job
+    PaymentExpiryJob,
+    PaymentAnalyticsService,
   ],
   exports: [PaymentsService],
 })
