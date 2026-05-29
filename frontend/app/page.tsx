@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import FeaturedEvents from '@/components/FeaturedEvents';
+import Footer from '@/components/Footer';
 
 const FEATURES = [
   {
@@ -50,6 +52,7 @@ const FEATURES = [
 
 export default function Home() {
   return (
+    <>
     <main className="min-h-screen bg-[#060609] text-white">
       {/* Ambient background */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
@@ -118,6 +121,29 @@ export default function Home() {
           ))}
         </div>
       </div>
+
+      {/* How it works */}
+      <div className="max-w-5xl mx-auto px-4 py-16">
+        <h2 className="text-2xl md:text-3xl font-bold text-white text-center mb-12">How It Works</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {[
+            { n: '1', title: 'Create an Event', desc: 'Set up your event with details, ticket price, and capacity. A Stellar escrow account is created automatically.' },
+            { n: '2', title: 'Register & Pay', desc: 'Attendees register and pay with XLM via Freighter. Funds are held in escrow until the event concludes.' },
+            { n: '3', title: 'Attend & Earn', desc: 'Receive your blockchain-backed ticket. Leave verified reviews. Earn XP and badges for your participation.' },
+          ].map(step => (
+            <div key={step.n} className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center">
+              <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-lg mx-auto mb-4">
+                {step.n}
+              </div>
+              <h3 className="font-semibold text-white mb-2">{step.title}</h3>
+              <p className="text-gray-500 text-sm leading-relaxed">{step.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
     </main>
+    <FeaturedEvents />
+    <Footer />
+    </>
   );
 }
