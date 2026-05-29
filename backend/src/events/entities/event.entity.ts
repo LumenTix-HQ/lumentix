@@ -111,6 +111,13 @@ export class Event {
   })
   ageRestriction: EventAgeRestriction;
 
+  /**
+   * Timestamp set when the escrow account is merged back to the platform
+   * after all refunds for a cancelled event have been successfully issued.
+   */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  mergedAt: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -256,6 +256,36 @@ export class StellarService implements OnModuleDestroy {
   }
 
   /**
+   * Merge an escrow account back into the platform account, recovering the
+   * base reserve XLM. All non-native asset balances must be zero before calling.
+   *
+   * @param escrowSecret  Decrypted secret key of the escrow account to close
+   * @param destination   Platform account that receives the remaining XLM
+   */
+  async mergeAccount(
+    escrowSecret: string,
+    destination: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    this.logger.debug(`mergeAccount: destination=${destination}`);
+
+    const escrowKeypair = Keypair.fromSecret(escrowSecret);
+    const escrowAccount = await this.server.loadAccount(
+      escrowKeypair.publicKey(),
+    );
+
+    const tx = new TransactionBuilder(escrowAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(Operation.accountMerge({ destination }))
+      .setTimeout(30)
+      .build();
+
+    tx.sign(escrowKeypair);
+    return this.server.submitTransaction(tx);
+  }
+
+  /**
    * Get paginated transaction history for a Stellar account.
    * Returns an empty records array for new/unfunded accounts (Horizon 404).
    */

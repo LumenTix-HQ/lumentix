@@ -1,0 +1,11 @@
+<h2>Your Ticket is Ready!</h2>
+<p>Hi {{userName}},</p>
+<p>Your ticket for <strong>{{eventTitle}}</strong> is ready.</p>
+<ul>
+  <li><strong>Ticket ID:</strong> {{ticketId}}</li>
+  <li><strong>Event Date:</strong> {{eventDate}}</li>
+</ul>
+{{#if pdfUrl}}
+<p><a class="btn" href="{{{pdfUrl}}}">Download Ticket PDF</a></p>
+{{/if}}
+<p>Present this ticket at the venue entrance. Enjoy the event!</p>

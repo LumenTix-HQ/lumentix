@@ -1,0 +1,70 @@
+name: Backend CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches: ["main", "develop"]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+jobs:
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test -- --passWithNoTests
+
+  check-synchronize:
+    name: Check DB_SYNCHRONIZE is disabled
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Ensure synchronize is false in app.module.ts
+        run: |
+          if grep -rn "synchronize: true" src/app.module.ts; then
+            echo "ERROR: synchronize: true found in app.module.ts. Use migrations instead."
+            exit 1
+          fi
+          echo "OK: synchronize is not set to true."
+
+      - name: Ensure no .env file commits DB_SYNCHRONIZE=true
+        run: |
+          if git diff --cached --name-only | grep -E '\.env' | xargs grep -l "DB_SYNCHRONIZE=true" 2>/dev/null; then
+            echo "ERROR: DB_SYNCHRONIZE=true found in a committed .env file."
+            exit 1
+          fi
+          echo "OK: No DB_SYNCHRONIZE=true in committed env files."

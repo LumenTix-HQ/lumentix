@@ -121,6 +121,21 @@ export class RefundService {
       },
     });
 
+    // Merge escrow account back to platform only when ALL refunds succeeded
+    const allSucceeded = results.every((r) => r.success);
+    if (allSucceeded && results.length > 0) {
+      try {
+        await this.escrowService.mergeEscrowAfterRefund(eventId);
+        this.logger.log(`Escrow merged after full refund for event=${eventId}`);
+      } catch (err) {
+        // Non-fatal: log but don't fail the refund response
+        this.logger.error(
+          `Escrow merge failed after refunds for event=${eventId}`,
+          err,
+        );
+      }
+    }
+
     return results;
   }
 

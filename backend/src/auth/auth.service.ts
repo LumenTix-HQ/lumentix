@@ -13,6 +13,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from '../mailer/mailer.service';
+import { TemplateService } from '../mailer/template.service';
 
 const SALT = 10;
 const REFRESH_TTL_DAYS = 30;
@@ -24,6 +25,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly mailerService: MailerService,
+    private readonly templateService: TemplateService,
     @InjectRepository(PasswordResetToken)
     private readonly passwordResetTokenRepository: Repository<PasswordResetToken>,
     @InjectRepository(RefreshToken)
@@ -87,8 +89,8 @@ export class AuthService {
     const rawToken = `${saved.id}:${rawSecret}`;
     const base = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
     const resetUrl = `${base}/reset-password?token=${encodeURIComponent(rawToken)}`;
-    await this.mailerService.send(user.email, 'Lumentix Password Reset',
-      `<p>Click to reset: <a href="${resetUrl}">Reset your password</a></p>`);
+    const html = this.templateService.render('password-reset', { resetUrl });
+    await this.mailerService.send(user.email, 'Lumentix Password Reset', html);
     return { message: 'If the email exists, password reset instructions have been sent.' };
   }
 

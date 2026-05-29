@@ -37,6 +37,11 @@ function makeEvent(overrides: Partial<Event> = {}): Event {
     maxAttendees: null,
     escrowPublicKey: null,
     escrowSecretEncrypted: null,
+    imageUrl: null,
+    category: 'other' as any,
+    fundingGoal: null,
+    ageRestriction: 'none' as any,
+    mergedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -335,6 +340,132 @@ describe('EscrowService', () => {
 
       await expect(service.handleCancellation('event-uuid-1')).rejects.toThrow(
         BadRequestException,
+      );
+    });
+  });
+
+  // ── mergeEscrowAfterRefund ──────────────────────────────────────────────
+
+  describe('mergeEscrowAfterRefund', () => {
+    const PLATFORM_KEY = 'GPLATFORM_PUBLIC_KEY';
+
+    function makeCancelledEventWithEscrow() {
+      const encrypted = encrypt(ESCROW_SECRET, ENCRYPTION_SECRET);
+      return makeEvent({
+        status: EventStatus.CANCELLED,
+        escrowPublicKey: ESCROW_PUBLIC_KEY,
+        escrowSecretEncrypted: encrypted,
+      });
+    }
+
+    it('merges escrow account to platform and clears DB fields', async () => {
+      const event = makeCancelledEventWithEscrow();
+      const qb = makeQbMock(event);
+      eventRepository.createQueryBuilder.mockReturnValue(qb);
+      (stellarService as any).mergeAccount = jest
+        .fn()
+        .mockResolvedValue({ hash: 'merge-tx-hash' });
+
+      // Rebuild module with PLATFORM_PUBLIC_KEY configured
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EscrowService,
+          { provide: getRepositoryToken(Event), useValue: eventRepository },
+          { provide: StellarService, useValue: stellarService },
+          { provide: AuditService, useValue: auditService },
+          {
+            provide: ConfigService,
+            useValue: {
+              get: jest.fn((key: string) => {
+                if (key === 'ESCROW_ENCRYPTION_SECRET') return ENCRYPTION_SECRET;
+                if (key === 'ESCROW_FUNDER_SECRET') return FUNDER_SECRET;
+                if (key === 'PLATFORM_PUBLIC_KEY') return PLATFORM_KEY;
+                return undefined;
+              }),
+            },
+          },
+        ],
+      }).compile();
+
+      const svc = (module as any).get(EscrowService);
+      const result = await svc.mergeEscrowAfterRefund('event-uuid-1');
+
+      expect((stellarService as any).mergeAccount).toHaveBeenCalledWith(
+        ESCROW_SECRET,
+        PLATFORM_KEY,
+      );
+      expect(qb.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          escrowPublicKey: null,
+          escrowSecretEncrypted: null,
+          mergedAt: expect.any(Date),
+        }),
+      );
+      expect(result.txHash).toBe('merge-tx-hash');
+    });
+
+    it('throws BadRequestException if no escrow account exists', async () => {
+      const event = makeEvent({
+        status: EventStatus.CANCELLED,
+        escrowPublicKey: null,
+        escrowSecretEncrypted: null,
+      });
+      const qb = makeQbMock(event);
+      eventRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EscrowService,
+          { provide: getRepositoryToken(Event), useValue: eventRepository },
+          { provide: StellarService, useValue: stellarService },
+          { provide: AuditService, useValue: auditService },
+          {
+            provide: ConfigService,
+            useValue: {
+              get: jest.fn((key: string) => {
+                if (key === 'ESCROW_ENCRYPTION_SECRET') return ENCRYPTION_SECRET;
+                if (key === 'ESCROW_FUNDER_SECRET') return FUNDER_SECRET;
+                if (key === 'PLATFORM_PUBLIC_KEY') return PLATFORM_KEY;
+                return undefined;
+              }),
+            },
+          },
+        ],
+      }).compile();
+
+      const svc = (module as any).get(EscrowService);
+      await expect(svc.mergeEscrowAfterRefund('event-uuid-1')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws InternalServerErrorException if PLATFORM_PUBLIC_KEY is not set', async () => {
+      const event = makeCancelledEventWithEscrow();
+      const qb = makeQbMock(event);
+      eventRepository.createQueryBuilder.mockReturnValue(qb);
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          EscrowService,
+          { provide: getRepositoryToken(Event), useValue: eventRepository },
+          { provide: StellarService, useValue: stellarService },
+          { provide: AuditService, useValue: auditService },
+          {
+            provide: ConfigService,
+            useValue: {
+              get: jest.fn((key: string) => {
+                if (key === 'ESCROW_ENCRYPTION_SECRET') return ENCRYPTION_SECRET;
+                if (key === 'ESCROW_FUNDER_SECRET') return FUNDER_SECRET;
+                return undefined;
+              }),
+            },
+          },
+        ],
+      }).compile();
+
+      const svc = (module as any).get(EscrowService);
+      await expect(svc.mergeEscrowAfterRefund('event-uuid-1')).rejects.toThrow(
+        InternalServerErrorException,
       );
     });
   });

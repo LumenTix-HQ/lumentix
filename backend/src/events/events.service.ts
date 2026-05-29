@@ -288,10 +288,16 @@ export class EventsService {
     if (status) qb.andWhere('event.status = :status', { status });
     if (organizerId)
       qb.andWhere('event.organizerId = :organizerId', { organizerId });
-    if (search)
-      qb.andWhere('LOWER(event.title) LIKE LOWER(:search)', {
-        search: `%${search}%`,
-      });
+    if (search) {
+      qb.andWhere(
+        `to_tsvector('english', COALESCE(event.title, '') || ' ' || COALESCE(event.description, '')) @@ plainto_tsquery('english', :search)`,
+        { search },
+      );
+      qb.addOrderBy(
+        `ts_rank(to_tsvector('english', COALESCE(event.title, '') || ' ' || COALESCE(event.description, '')), plainto_tsquery('english', :search))`,
+        'DESC',
+      );
+    }
     if (category) qb.andWhere('event.category = :category', { category });
     if (showAvailableOnly) {
       qb.andWhere(

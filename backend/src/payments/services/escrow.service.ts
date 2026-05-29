@@ -213,6 +213,87 @@ export class EscrowService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Merge — called after all refunds succeed
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Merge the escrow account back into the platform account after all refunds
+   * for a cancelled event have been successfully issued.
+   *
+   * - Decrypts the escrow secret
+   * - Calls StellarService.mergeAccount to sweep remaining XLM to the platform
+   * - Nulls escrowPublicKey, escrowSecretEncrypted and sets mergedAt on the event
+   *
+   * @param eventId  The cancelled event whose escrow to close
+   */
+  async mergeEscrowAfterRefund(eventId: string): Promise<{ txHash: string }> {
+    const event = await this.getEventWithEscrow(eventId);
+
+    if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
+      throw new BadRequestException(
+        `No escrow account to merge for event "${eventId}".`,
+      );
+    }
+
+    const platformPublicKey = this.configService.get<string>(
+      'PLATFORM_PUBLIC_KEY',
+    );
+    if (!platformPublicKey) {
+      throw new InternalServerErrorException(
+        'PLATFORM_PUBLIC_KEY is not configured.',
+      );
+    }
+
+    let escrowSecret: string;
+    try {
+      escrowSecret = decrypt(event.escrowSecretEncrypted, this.encryptionSecret);
+    } catch {
+      throw new InternalServerErrorException(
+        'Failed to decrypt escrow credentials.',
+      );
+    }
+
+    let txResponse: Awaited<ReturnType<StellarService['mergeAccount']>>;
+    try {
+      txResponse = await this.stellarService.mergeAccount(
+        escrowSecret,
+        platformPublicKey,
+      );
+    } catch (err) {
+      this.logger.error(`Failed to merge escrow for event ${eventId}`, err);
+      throw new InternalServerErrorException(
+        'Failed to merge escrow account on the Stellar network.',
+      );
+    }
+
+    const txHash = String(txResponse.hash);
+
+    await this.eventRepository
+      .createQueryBuilder()
+      .update(Event)
+      .set({
+        escrowPublicKey: null,
+        escrowSecretEncrypted: null,
+        mergedAt: new Date(),
+      })
+      .where('id = :id', { id: eventId })
+      .execute();
+
+    await this.auditService.log({
+      action: AuditAction.ESCROW_RELEASED,
+      userId: SYSTEM_USER_ID,
+      resourceId: eventId,
+      meta: { txHash, platformPublicKey, eventId, action: 'merge_after_refund' },
+    });
+
+    this.logger.log(
+      `Escrow merged for event ${eventId}: txHash=${txHash}`,
+    );
+
+    return { txHash };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Cancellation — trigger refund flow
   // ─────────────────────────────────────────────────────────────────────────
 

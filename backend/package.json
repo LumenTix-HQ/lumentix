@@ -17,7 +17,13 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js --dataSource src/database/data-source.ts",
+    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:run": "npm run typeorm -- migration:run",
+    "migration:revert": "npm run typeorm -- migration:revert",
+    "migration:show": "npm run typeorm -- migration:show",
+    "check-migrations": "npm run build && node -e \"const {DataSource} = require('typeorm'); const ds = require('./dist/database/data-source').AppDataSource; ds.initialize().then(() => ds.showMigrations()).then(pending => { if(pending){ console.error('Pending migrations detected. Run npm run migration:run'); process.exit(1); } else { console.log('All migrations applied.'); ds.destroy(); } }).catch(e => { console.error(e); process.exit(1); })\""
   },
   "dependencies": {
     "@nestjs/bull": "^11.0.4",
@@ -40,6 +46,7 @@
     "bull": "^4.16.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
+    "handlebars": "4.7.8",
     "helmet": "^8.1.0",
     "ioredis": "^5.9.3",
     "joi": "^17.13.3",
@@ -67,6 +74,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/bull": "^3.15.9",
     "@types/express": "^5.0.0",
+    "@types/handlebars": "4.1.0",
     "@types/helmet": "^0.0.48",
     "@types/ioredis": "^4.28.10",
     "@types/jest": "^29.5.14",
