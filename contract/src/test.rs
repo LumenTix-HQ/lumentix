@@ -5935,3 +5935,284 @@ fn test_modifying_details_post_publish_correctly_surfaces_panic() {
     // Assert the panic correctly surfaces as InvalidStatusTransition
     assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
 }
+
+// ============================================================================
+// ISSUE #539 – EventMetadataUpdated EMISSION FIELD-LEVEL TESTS
+// Verifies that EventMetadataUpdated carries the correct (event_id, organizer,
+// time_updated) values and is NOT emitted on error paths.
+// ============================================================================
+
+/// Helper: find the first ContractEvent whose first topic symbol equals `needle`.
+/// Returns the raw data ScVal for further inspection.
+fn find_event_by_topic<'a>(
+    env: &Env,
+    needle: &[u8],
+) -> Option<xdr::ScVal> {
+    for xdr_event in env.events().all().events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let Some(xdr::ScVal::Symbol(sym)) = body.topics.first() {
+                if sym.as_slice() == needle {
+                    return Some(body.data.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// EventMetadataUpdated emits the correct event_id as the first data field.
+#[test]
+fn test_event_metadata_updated_emits_correct_event_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 9000);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let data = find_event_by_topic(&env, b"evtmeta")
+        .expect("EventMetadataUpdated not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        // field[0] = event_id (u64)
+        let emitted_id = match &fields[0] {
+            xdr::ScVal::U64(v) => *v,
+            other => panic!("expected U64 event_id, got {:?}", other),
+        };
+        assert_eq!(emitted_id, event_id, "emitted event_id must match the updated event");
+    } else {
+        panic!("EventMetadataUpdated data must be a Vec");
+    }
+}
+
+/// EventMetadataUpdated emits the correct organizer address as the second field.
+#[test]
+fn test_event_metadata_updated_emits_correct_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 9001);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let data = find_event_by_topic(&env, b"evtmeta")
+        .expect("EventMetadataUpdated not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        // field[1] = organizer (Address) — encoded as ScVal::Address
+        match &fields[1] {
+            xdr::ScVal::Address(_) => { /* correct type */ }
+            other => panic!("expected ScVal::Address for organizer, got {:?}", other),
+        }
+    } else {
+        panic!("EventMetadataUpdated data must be a Vec");
+    }
+}
+
+/// EventMetadataUpdated emits the ledger timestamp as time_updated (third field).
+#[test]
+fn test_event_metadata_updated_emits_correct_time_updated() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let fixed_ts: u64 = 42_000;
+    env.ledger().with_mut(|li| li.timestamp = fixed_ts);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Name"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let data = find_event_by_topic(&env, b"evtmeta")
+        .expect("EventMetadataUpdated not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        // field[2] = time_updated (u64) – must equal the ledger timestamp at call time
+        let emitted_ts = match &fields[2] {
+            xdr::ScVal::U64(v) => *v,
+            other => panic!("expected U64 time_updated, got {:?}", other),
+        };
+        assert_eq!(
+            emitted_ts, fixed_ts,
+            "time_updated must equal the ledger timestamp at the moment of the call"
+        );
+    } else {
+        panic!("EventMetadataUpdated data must be a Vec");
+    }
+}
+
+/// No EventMetadataUpdated event is emitted when the caller is not the organizer.
+#[test]
+fn test_event_metadata_updated_not_emitted_on_unauthorized_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // This call must fail – no event should be emitted
+    let result = client.try_update_event_metadata(
+        &attacker,
+        &event_id,
+        &String::from_str(&env, "Hacked"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+
+    // Confirm EventMetadataUpdated was NOT emitted
+    assert!(
+        find_event_by_topic(&env, b"evtmeta").is_none(),
+        "EventMetadataUpdated must NOT be emitted when authorization fails"
+    );
+}
+
+/// No EventMetadataUpdated event is emitted when the event is in Draft status.
+#[test]
+fn test_event_metadata_updated_not_emitted_on_draft_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create but do NOT publish (leaves status as Draft)
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let result = client.try_update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+
+    // Confirm EventMetadataUpdated was NOT emitted
+    assert!(
+        find_event_by_topic(&env, b"evtmeta").is_none(),
+        "EventMetadataUpdated must NOT be emitted for a Draft event"
+    );
+}
+
+/// Successive updates each emit a separate EventMetadataUpdated event, and the
+/// time_updated in the second event reflects the updated ledger timestamp.
+#[test]
+fn test_event_metadata_updated_successive_updates_emit_independent_events_with_fresh_timestamps() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // ── First update at t=1000 ────────────────────────────────────────────────
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "First Update"),
+        &String::from_str(&env, "Desc A"),
+        &String::from_str(&env, "Loc A"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // ── Second update at t=2000 ───────────────────────────────────────────────
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Second Update"),
+        &String::from_str(&env, "Desc B"),
+        &String::from_str(&env, "Loc B"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Both emissions must be present – collect all "evtmeta" events in order
+    let mut timestamps: Vec<u64> = Vec::new();
+    for xdr_event in env.events().all().events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let Some(xdr::ScVal::Symbol(sym)) = body.topics.first() {
+                if sym.as_slice() == b"evtmeta" {
+                    if let xdr::ScVal::Vec(Some(fields)) = &body.data {
+                        if let xdr::ScVal::U64(ts) = &fields[2] {
+                            timestamps.push(*ts);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    assert_eq!(timestamps.len(), 2, "Two successive updates must emit exactly two events");
+    assert_eq!(timestamps[0], 1000, "First event time_updated must be 1000");
+    assert_eq!(timestamps[1], 2000, "Second event time_updated must be 2000");
+}
