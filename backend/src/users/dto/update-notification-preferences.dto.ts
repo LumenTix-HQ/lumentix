@@ -26,4 +26,9 @@ export class UpdateNotificationPreferencesDto {
   @IsBoolean()
   @IsOptional()
   eventCompleted?: boolean;
+
+  @ApiPropertyOptional({ description: 'Opt out of all marketing/notification emails' })
+  @IsBoolean()
+  @IsOptional()
+  emailOptOut?: boolean;
 }

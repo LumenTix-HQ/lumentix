@@ -57,6 +57,9 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   balancesUpdatedAt: Date | null;
 
+  @Column({ default: false })
+  emailOptOut: boolean;
+
   @Column({
     type: 'jsonb',
     default: {
