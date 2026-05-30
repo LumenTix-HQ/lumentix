@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
@@ -14,6 +15,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiOperation,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -28,6 +30,9 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { WalletChallengeResponseDto } from './dto/wallet-challenge.dto';
+import { WalletVerifyDto } from './dto/wallet-challenge.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 
@@ -164,5 +169,78 @@ export class AuthController {
     const tokens = await this.authService.findOrCreateGoogleUser(req.user);
     const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/callback?accessToken=${tokens.accessToken}&refreshToken=${tokens.refreshToken}`;
     return res.redirect(redirectUrl);
+  }
+
+  // ─── Wallet Challenge ────────────────────────────────────────────────────────
+
+  @Post('wallet-challenge')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Generate wallet challenge nonce' })
+  @ApiResponse({ status: 201, description: 'Nonce generated' })
+  async walletChallenge(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<WalletChallengeResponseDto> {
+    const result = await this.authService.generateWalletChallenge(req.user.id);
+    return { nonce: result.nonce, message: result.message };
+  }
+
+  @Post('wallet-verify')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify wallet challenge signature and link wallet' })
+  @ApiResponse({ status: 200, description: 'Wallet linked successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired nonce' })
+  @ApiResponse({ status: 401, description: 'Invalid signature' })
+  async walletVerify(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: WalletVerifyDto,
+  ) {
+    return this.authService.verifyWalletChallenge(
+      req.user.id,
+      dto.nonce,
+      dto.signature,
+      dto.publicKey,
+    );
+  }
+
+  // ─── Email Verification ─────────────────────────────────────────────────────
+
+  @Post('verify-email')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify email with token' })
+  @ApiQuery({ name: 'token', required: true, type: String })
+  @ApiResponse({ status: 200, description: 'Email verified' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  async verifyEmail(
+    @Req() req: AuthenticatedRequest,
+    @Query('token') token: string,
+  ) {
+    return this.authService.verifyEmail(req.user.id, token);
+  }
+
+  @Post('resend-verification')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ global: { ttl: seconds(3600), limit: 3 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Resend verification email (max 3 per hour)' })
+  @ApiResponse({ status: 200, description: 'Verification email resent' })
+  async resendVerification(@Req() req: AuthenticatedRequest) {
+    await this.authService.resendVerificationEmail(req.user.id);
+    return { message: 'Verification email sent if account exists.' };
+  }
+
+  @Post('verify-email/unauthenticated')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify email without authentication (from email link)' })
+  @ApiResponse({ status: 200, description: 'Email verified' })
+  async verifyEmailUnauthenticated(
+    @Query('userId') userId: string,
+    @Query('token') token: string,
+  ) {
+    return this.authService.verifyEmail(userId, token);
   }
 }

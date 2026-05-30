@@ -460,6 +460,27 @@ export class StellarService implements OnModuleDestroy {
         minimumRequired.toFixed(7),
       );
     }
+
+  /**
+   * Transfer a ticket asset to a new owner on the Stellar network.
+   *
+   * NOTE: A full on-chain implementation requires the platform to control
+   * the issuing account, set up trustlines on both the sender and recipient
+   * accounts, and submit a payment operation. The stub below logs the intent
+   * and returns successfully so the DB transfer proceeds.
+   *
+   * TODO: Implement the full changeTrust + payment flow once the platform
+   *       Stellar asset issuance model is finalised.
+   */
+  async transferTicketAsset(
+    ticket: { id: string; assetCode: string; ownerId: string },
+    recipientPublicKey: string,
+  ): Promise<void> {
+    this.logger.log(
+      `transferTicketAsset: ticket=${ticket.id} asset=${ticket.assetCode} ` +
+        `from ownerId=${ticket.ownerId} to recipientPublicKey=${recipientPublicKey}`,
+    );
+    // Stub — full on-chain transfer deferred pending asset issuance model design.
   }
 
   onModuleDestroy(): void {

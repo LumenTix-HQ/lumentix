@@ -11,5 +11,6 @@ import { SponsorsModule } from '../sponsors/sponsors.module';
     SponsorsModule, // provides SponsorsService
   ],
   providers: [StellarWebhookService],
+  exports: [StellarWebhookService],
 })
 export class StellarWebhookModule {}

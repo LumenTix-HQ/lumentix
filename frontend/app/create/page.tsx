@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import EventForm from "@/components/events/EventForm";
+import EventPreviewOverlay from "@/components/EventPreviewOverlay";
 import { defaultCreateEventValues, type CreateEventFormValues } from "@/lib/schemas/create-event.schema";
 
 type EventRecord = { id: string; title: string; location?: string };
@@ -72,6 +73,14 @@ export default function CreateEventPage() {
         }
     };
 
+    const [showPreview, setShowPreview] = useState(false);
+    const [formData, setFormData] = useState<CreateEventFormValues | null>(null);
+
+    const handlePreview = useCallback((values: CreateEventFormValues) => {
+        setFormData(values);
+        setShowPreview(true);
+    }, []);
+
     const initialValues = {
         ...defaultCreateEventValues,
         authToken: typeof window === "undefined" ? "" : window.localStorage.getItem("lumentix_access_token") ?? "",
@@ -79,7 +88,29 @@ export default function CreateEventPage() {
     };
 
     return (
-        <main className="min-h-screen bg-gradient-to-tr from-black via-gray-900 to-purple-950 px-4 pb-16 pt-28 text-white sm:px-8">
+        <>
+            {showPreview && formData && (
+                <EventPreviewOverlay
+                    formValues={{
+                        title: formData.title,
+                        description: formData.description,
+                        location: formData.location,
+                        startDate: formData.startDate,
+                        endDate: formData.endDate,
+                        ticketPrice: formData.ticketPrice,
+                        currency: formData.currency,
+                        category: formData.category || '',
+                        maxAttendees: formData.maxAttendees ?? null,
+                        imageUrl: formData.imageUrl || '',
+                    }}
+                    onClose={() => setShowPreview(false)}
+                    onSubmit={() => {
+                        setShowPreview(false);
+                        handleSubmit(formData);
+                    }}
+                />
+            )}
+            <main className="min-h-screen bg-gradient-to-tr from-black via-gray-900 to-purple-950 px-4 pb-16 pt-28 text-white sm:px-8">
             <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-8 lg:grid-cols-2">
                 <section className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md sm:p-8">
                     <h1 className="mb-2 bg-gradient-to-r from-purple-300 to-pink-400 bg-clip-text text-3xl font-extrabold text-transparent sm:text-4xl">Create New Event</h1>

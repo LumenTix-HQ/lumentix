@@ -1,9 +1,12 @@
 import {
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -26,6 +29,7 @@ import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { RoleRequestStatus } from '../users/entities/role-request.entity';
 import { UserRole } from '../users/enums/user-role.enum';
 import { StellarService } from '../stellar/stellar.service';
+import { StellarWebhookService } from '../stellar/stellar-webhook.service';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -37,7 +41,26 @@ export class AdminController {
     private readonly adminService: AdminService,
     private readonly bruteForceService: BruteForceService,
     private readonly stellarService: StellarService,
+    private readonly stellarWebhookService: StellarWebhookService,
   ) {}
+
+  // ─── Stellar Stream Management ────────────────────────────────────────────
+
+  @Post('stellar/reconnect')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Manually reconnect the Stellar payment stream',
+    description:
+      'Admin-only endpoint. Restarts the Horizon SSE stream and resets the ' +
+      'consecutive-failure counter. Use after a STELLAR_STREAM_DEAD event.',
+  })
+  @ApiResponse({ status: 200, description: 'Stream reconnect initiated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  reconnectStellarStream(): { message: string } {
+    this.stellarWebhookService.reconnect();
+    return { message: 'Stellar stream reconnect initiated' };
+  }
 
   @Patch('security/unlock-ip/:ip')
   @ApiOperation({

@@ -11,6 +11,14 @@ import { StellarModule } from '../stellar/stellar.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Event, User, RoleRequest]), AuthModule, StellarModule],
+import { StellarWebhookModule } from '../stellar/stellar-webhook.module';
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([Event, User, RoleRequest]),
+    AuthModule,
+    StellarWebhookModule,
+  ],
   controllers: [AdminController],
   providers: [AdminService, RolesGuard],
   exports: [RolesGuard],

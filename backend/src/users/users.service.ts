@@ -315,6 +315,19 @@ export class UsersService {
     return this.usersRepository.save(user);
   }
 
+  async update(
+    userId: string,
+    data: Partial<User>,
+  ): Promise<Omit<User, 'passwordHash'>> {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`User with id ${userId} not found`);
+    }
+    Object.assign(user, data);
+    const saved = await this.usersRepository.save(user);
+    return this.sanitize(saved);
+  }
+
   private sanitize(user: User): Omit<User, 'passwordHash'> {
     const { passwordHash, ...sanitized } = user;
     return sanitized;

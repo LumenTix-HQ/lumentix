@@ -7,6 +7,7 @@ import { MailerService } from '../mailer/mailer.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
+import { WalletChallenge } from './entities/wallet-challenge.entity';
 import {
   UnauthorizedException,
   ConflictException,
@@ -22,6 +23,7 @@ describe('AuthService', () => {
   let mailerService: any;
   let passwordResetTokenRepository: any;
   let refreshTokenRepository: any;
+  let walletChallengeRepository: any;
 
   beforeEach(async () => {
     passwordResetTokenRepository = {
@@ -36,6 +38,12 @@ describe('AuthService', () => {
       findOne: jest.fn(),
     };
 
+    walletChallengeRepository = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -44,7 +52,10 @@ describe('AuthService', () => {
           useValue: {
             createUser: jest.fn(),
             findByEmail: jest.fn(),
+            findById: jest.fn(),
             updatePassword: jest.fn(),
+            updateWallet: jest.fn(),
+            update: jest.fn(),
           },
         },
         {
@@ -71,8 +82,11 @@ describe('AuthService', () => {
         },
         {
           provide: getRepositoryToken(RefreshToken),
-          useValue: { create: jest.fn(), save: jest.fn(), find: jest.fn() },
           useValue: refreshTokenRepository,
+        },
+        {
+          provide: getRepositoryToken(WalletChallenge),
+          useValue: walletChallengeRepository,
         },
       ],
     }).compile();
@@ -82,12 +96,14 @@ describe('AuthService', () => {
     jwtService = module.get(JwtService);
     configService = module.get(ConfigService);
     mailerService = module.get(MailerService);
-    // @InjectRepository uses string token in tests when manual provider is used
     passwordResetTokenRepository = module.get(
       getRepositoryToken(PasswordResetToken),
     );
     refreshTokenRepository = module.get(
       getRepositoryToken(RefreshToken),
+    );
+    walletChallengeRepository = module.get(
+      getRepositoryToken(WalletChallenge),
     );
   });
 
@@ -173,8 +189,6 @@ describe('AuthService', () => {
 
       const result = await authService.login(loginDto);
 
-      expect(result.access_token).toBe('token');
-      expect(result).toHaveProperty('refresh_token');
       expect(result).toHaveProperty('accessToken', 'token');
       expect(result).toHaveProperty('refreshToken');
       expect(usersService.findByEmail).toHaveBeenCalledWith(loginDto.email);
@@ -342,7 +356,7 @@ describe('AuthService', () => {
 
     it('refreshes successfully', async () => {
       const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 1); // tomorrow
+      expiresAt.setDate(expiresAt.getDate() + 1);
 
       refreshTokenRepository.findOne.mockResolvedValue({
         id: 'id',
@@ -368,12 +382,14 @@ describe('AuthService', () => {
       const tokenRecord = {
         id: 'id',
         token: 'hash',
+        userId: 'user-1',
         revoked: false,
       };
       refreshTokenRepository.findOne.mockResolvedValue(tokenRecord);
       jest.spyOn(bcrypt, 'compare').mockImplementation(async () => true);
 
-      await authService.logout('id:secret');
+      const result = await authService.logout('user-1', 'id:secret');
+      expect(result).toEqual({ message: 'Logged out successfully.' });
       expect(tokenRecord.revoked).toBe(true);
       expect(refreshTokenRepository.save).toHaveBeenCalledWith(tokenRecord);
     });

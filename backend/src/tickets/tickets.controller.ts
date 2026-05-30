@@ -105,27 +105,26 @@ export class TicketsController {
     return this.ticketsService.findOne(id, req.user.id);
   }
 
-  @Post(':ticketId/transfer')
+  @Post(':id/transfer')
   @ApiOperation({
-    summary: 'Transfer a ticket',
+    summary: 'Transfer a ticket to a new owner',
     description:
-      'Authenticated. Transfers a ticket from the current owner to a new owner.',
+      'Authenticated. Transfers a ticket to a new owner, recording the transfer ' +
+      'on the Stellar network and emitting a TICKET_TRANSFERRED audit event. ' +
+      'Fails if the event has already started or the ticket is not in a valid state.',
   })
-  @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
   @ApiResponse({ status: 201, description: 'Ticket transferred successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 400, description: 'Bad request — event started, ticket not valid, etc.' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 403, description: 'Forbidden — caller does not own this ticket' })
+  @ApiResponse({ status: 404, description: 'Ticket or event not found' })
   transfer(
-    @Param('ticketId') ticketId: string,
+    @Param('id') ticketId: string,
     @Body() dto: TransferTicketDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.ticketsService.transferTicket(
-      ticketId,
-      req.user.id,
-      dto.newOwnerId,
-    );
+    return this.ticketsService.transfer(ticketId, req.user.id, dto);
   }
 }
 

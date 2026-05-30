@@ -427,4 +427,50 @@ export const apiClient = {
     request<any>(`/events/${eventId}/capacity/snapshot/latest`, {
       headers: { Authorization: `Bearer ${token}` },
     }),
+
+  // ── User Profile ──────────────────────────────────────────────────────────
+  getMe: (token: string) =>
+    request<{
+      id: string;
+      email: string;
+      displayName: string | null;
+      walletAddress: string | null;
+      emailOptOut: boolean;
+      createdAt: string;
+    }>('/users/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  patchMe: (body: { displayName?: string }, token: string) =>
+    request<{ id: string; displayName: string | null }>('/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  patchPreferences: (body: { emailOptOut: boolean }, token: string) =>
+    request<{ emailOptOut: boolean }>('/users/me/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  walletChallenge: (token: string) =>
+    request<{ challenge: string; expiresAt: string }>('/auth/wallet-challenge', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  walletVerify: (body: { signedXdr: string; publicKey: string }, token: string) =>
+    request<{ walletAddress: string }>('/auth/wallet-verify', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  deactivateAccount: (token: string) =>
+    request<void>('/users/me', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }),
 };

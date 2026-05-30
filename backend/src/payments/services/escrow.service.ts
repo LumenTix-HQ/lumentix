@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 
-import { encrypt, decrypt } from './encryption.util';
+import { EncryptionService } from '../../common/encryption/encryption.service';
 import { Event, EventStatus } from 'src/events/entities/event.entity';
 import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
@@ -20,7 +20,6 @@ const SYSTEM_USER_ID = 'system';
 @Injectable()
 export class EscrowService {
   private readonly logger = new Logger(EscrowService.name);
-  private readonly encryptionSecret: string;
   private readonly funderSecret: string;
 
   constructor(
@@ -29,16 +28,13 @@ export class EscrowService {
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
+    private readonly encryptionService: EncryptionService,
   ) {
-    this.encryptionSecret =
-      this.configService.get<string>('ESCROW_ENCRYPTION_SECRET') ?? '';
     this.funderSecret =
       this.configService.get<string>('ESCROW_FUNDER_SECRET') ?? '';
 
-    if (!this.encryptionSecret || !this.funderSecret) {
-      this.logger.warn(
-        'ESCROW_ENCRYPTION_SECRET or ESCROW_FUNDER_SECRET is not set.',
-      );
+    if (!this.funderSecret) {
+      this.logger.warn('ESCROW_FUNDER_SECRET is not set.');
     }
   }
 
@@ -82,7 +78,7 @@ export class EscrowService {
     }
 
     // 3. Encrypt the secret before storing — private key never persisted in plain text
-    const escrowSecretEncrypted = encrypt(secret, this.encryptionSecret);
+    const escrowSecretEncrypted = this.encryptionService.encrypt(secret);
 
     // 4. Persist to event
     await this.eventRepository
@@ -115,8 +111,7 @@ export class EscrowService {
    */
 
   async decryptEscrowSecret(encryptedSecret: string): Promise<string> {
-    // Delegate to the imported decrypt utility.
-    return decrypt(encryptedSecret, this.encryptionSecret);
+    return this.encryptionService.decrypt(encryptedSecret);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -162,9 +157,8 @@ export class EscrowService {
     // 4. Decrypt secret and release funds via StellarService (account merge)
     let escrowSecret: string;
     try {
-      escrowSecret = decrypt(
+      escrowSecret = this.encryptionService.decrypt(
         event.escrowSecretEncrypted,
-        this.encryptionSecret,
       );
     } catch {
       throw new InternalServerErrorException(

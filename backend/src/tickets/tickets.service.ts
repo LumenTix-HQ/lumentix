@@ -2,14 +2,16 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
   Inject,
+  Logger,
   forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import * as qrcode from 'qrcode';
 
 import { TicketEntity } from './entities/ticket.entity';
@@ -17,15 +19,19 @@ import { TicketSigningService } from './ticket-signing.service';
 import { TicketPdfService } from './ticket-pdf.service';
 import { IssueTicketResponseDto } from './dto/issue-ticket-response.dto';
 import { BulkIssueResultDto } from './dto/bulk-issue-result.dto';
+import { TransferTicketDto } from './dto/transfer-ticket.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { PaymentStatus } from '../payments/entities/payment.entity';
 import { StellarService } from '../stellar/stellar.service';
 import { NotificationService } from '../notifications/notification.service';
+import { AuditService } from '../audit/audit.service';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class TicketsService {
+  private readonly logger = new Logger(TicketsService.name);
+
   constructor(
     @InjectRepository(TicketEntity)
     private readonly ticketRepo: Repository<TicketEntity>,
@@ -36,6 +42,8 @@ export class TicketsService {
     private readonly ticketSigningService: TicketSigningService,
     private readonly ticketPdfService: TicketPdfService,
     private readonly notificationService: NotificationService,
+    private readonly auditService: AuditService,
+    private readonly dataSource: DataSource,
     @InjectRepository(Event)
     private readonly eventRepo: Repository<Event>,
     @InjectRepository(User)
@@ -275,6 +283,137 @@ export class TicketsService {
     }
 
     ticket.ownerId = newOwnerId;
+    return this.ticketRepo.save(ticket);
+  }
+
+  /**
+   * Transfer a ticket to a new owner, recording the transfer on-chain (Stellar)
+   * and writing an audit event. The DB update is rolled back if Stellar fails.
+   */
+  async transfer(
+    ticketId: string,
+    requesterId: string,
+    dto: TransferTicketDto,
+  ): Promise<TicketEntity> {
+    // ── Validate ─────────────────────────────────────────────────────────────
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.ownerId !== requesterId) {
+      throw new ForbiddenException('You do not own this ticket');
+    }
+
+    if (ticket.status !== 'valid') {
+      throw new BadRequestException(
+        `Ticket cannot be transferred (status: ${ticket.status})`,
+      );
+    }
+
+    // Prevent double-transfer by checking transfer history for this recipient
+    const alreadyTransferred = ticket.transferHistory?.some(
+      (h) => h.to === dto.recipientUserId,
+    );
+    if (alreadyTransferred) {
+      throw new BadRequestException(
+        'Ticket has already been transferred to this recipient',
+      );
+    }
+
+    // Ensure the event has not already started
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Associated event not found');
+
+    if (new Date(event.startDate) <= new Date()) {
+      throw new BadRequestException(
+        'Cannot transfer a ticket after the event has started',
+      );
+    }
+
+    // ── DB transaction ────────────────────────────────────────────────────────
+    const previousOwnerId = ticket.ownerId;
+    const previousPublicKey = ticket.ownerPublicKey;
+
+    const saved = await this.dataSource.transaction(async (em) => {
+      ticket.ownerId = dto.recipientUserId;
+      ticket.ownerPublicKey = dto.recipientPublicKey;
+      ticket.transferHistory = [
+        ...(ticket.transferHistory ?? []),
+        {
+          from: previousOwnerId,
+          to: dto.recipientUserId,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+      return em.save(TicketEntity, ticket);
+    });
+
+    // ── Stellar transfer (best-effort; roll back DB on failure) ───────────────
+    try {
+      await this.stellarService.transferTicketAsset(ticket, dto.recipientPublicKey);
+    } catch (stellarErr) {
+      this.logger.error(
+        `Stellar transfer failed for ticket ${ticketId}; rolling back DB`,
+        stellarErr,
+      );
+
+      // Roll back the DB change
+      try {
+        await this.dataSource.transaction(async (em) => {
+          saved.ownerId = previousOwnerId;
+          saved.ownerPublicKey = previousPublicKey;
+          saved.transferHistory = ticket.transferHistory.slice(0, -1);
+          await em.save(TicketEntity, saved);
+        });
+      } catch (rollbackErr) {
+        this.logger.error(
+          `Rollback failed for ticket ${ticketId} — manual intervention required`,
+          rollbackErr,
+        );
+      }
+
+      throw new InternalServerErrorException(
+        'Stellar transfer failed; DB changes have been reverted',
+      );
+    }
+
+    // ── Audit event ───────────────────────────────────────────────────────────
+    try {
+      await this.auditService.log({
+        action: 'TICKET_TRANSFERRED',
+        userId: requesterId,
+        resourceId: ticketId,
+        meta: {
+          from: previousOwnerId,
+          to: dto.recipientUserId,
+          recipientPublicKey: dto.recipientPublicKey,
+          eventId: ticket.eventId,
+        },
+      });
+    } catch (auditErr) {
+      // Audit failure is non-fatal; log and continue
+      this.logger.warn(`Audit log failed for TICKET_TRANSFERRED ${ticketId}`, auditErr);
+    }
+
+    return saved;
+  }
+
+  /**
+   * Push a transfer history record onto a ticket's persistent transfer log.
+   * Creates the history array if it doesn't exist yet.
+   */
+  async appendTicketTransferHistory(
+    ticketId: string,
+    from: string,
+    to: string,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    ticket.transferHistory = [
+      ...(ticket.transferHistory ?? []),
+      { from, to, timestamp: new Date().toISOString() },
+    ];
+
     return this.ticketRepo.save(ticket);
   }
 

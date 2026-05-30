@@ -55,6 +55,20 @@ export class TicketEntity {
   @Column({ type: 'timestamptz', nullable: true })
   listedAt!: Date | null;
 
+  /**
+   * Stellar public key of the current ticket owner.
+   * Updated on transfer to enable on-chain asset transfer.
+   */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  ownerPublicKey!: string | null;
+
+  /**
+   * Persistent audit log of all ownership transfers for this ticket.
+   * Each entry: { from: string; to: string; timestamp: string }
+   */
+  @Column({ type: 'jsonb', default: [] })
+  transferHistory!: Array<{ from: string; to: string; timestamp: string }>;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

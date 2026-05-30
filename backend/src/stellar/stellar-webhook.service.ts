@@ -13,6 +13,7 @@ import { ContributionsService } from '../sponsors/contributions.service';
 const RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const BACKOFF_MULTIPLIER = 2;
+const MAX_CONSECUTIVE_FAILURES = 10;
 
 @Injectable()
 export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
@@ -22,6 +23,7 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = RECONNECT_DELAY_MS;
   private destroyed = false;
+  consecutiveFailures: number = 0;
 
   constructor(
     private readonly stellarService: StellarService,
@@ -44,6 +46,17 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Stellar payment stream shut down');
   }
 
+  // ─── Public reconnect (admin-triggered) ──────────────────────────────────
+
+  reconnect(): void {
+    this.logger.log('Manual reconnect requested — resetting retry counter');
+    this.consecutiveFailures = 0;
+    this.reconnectDelay = RECONNECT_DELAY_MS;
+    this.clearReconnectTimer();
+    this.closeStream();
+    this.connect();
+  }
+
   // ─── Connection management ────────────────────────────────────────────────
 
   private connect(): void {
@@ -56,11 +69,27 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
         (payment) => void this.handlePayment(payment),
       );
 
-      // Reset backoff on successful connection
+      // Reset backoff and failure counter on successful connection
       this.reconnectDelay = RECONNECT_DELAY_MS;
+      this.consecutiveFailures = 0;
       this.logger.log('Stellar payment stream connected');
     } catch (err) {
-      this.logger.error('Failed to open stream, scheduling reconnect', err);
+      this.consecutiveFailures += 1;
+      this.logger.error(
+        `Failed to open stream (consecutive failures: ${this.consecutiveFailures})`,
+        err,
+      );
+
+      if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        this.logger.fatal(
+          '[STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
+            `${this.consecutiveFailures} consecutive times and will no longer ` +
+            'attempt to reconnect automatically. ' +
+            'Use POST /admin/stellar/reconnect to restart manually.',
+        );
+        return;
+      }
+
       this.scheduleReconnect();
     }
   }
@@ -83,13 +112,14 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
     this.reconnectTimer = setTimeout(() => {
       this.closeStream();
-      this.connect();
 
-      // Exponential backoff capped at max delay
+      // Exponential backoff capped at max delay (advance before next connect attempt)
       this.reconnectDelay = Math.min(
         this.reconnectDelay * BACKOFF_MULTIPLIER,
         MAX_RECONNECT_DELAY_MS,
       );
+
+      this.connect();
     }, this.reconnectDelay);
   }
 

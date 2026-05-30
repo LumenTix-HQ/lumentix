@@ -37,6 +37,7 @@ import { VenuesModule } from './venues/venues.module';
 import { GamificationModule } from './gamification/gamification.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
 import { CategoriesModule } from './categories/categories.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 
 @Module({
@@ -116,7 +117,7 @@ import { CategoriesModule } from './categories/categories.module';
     AnalyticsModule,
     SchedulingModule,
     CategoriesModule,
-
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [
