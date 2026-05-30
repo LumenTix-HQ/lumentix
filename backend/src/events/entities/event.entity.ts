@@ -118,6 +118,13 @@ export class Event {
   @JoinTable({ name: 'event_categories' })
   categories: Category[];
 
+  /**
+   * Optional webhook URL for outbound payment status notifications.
+   * When set, a signed POST request is sent on each payment status transition.
+   */
+  @Column({ type: 'varchar', nullable: true, default: null })
+  webhookUrl: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

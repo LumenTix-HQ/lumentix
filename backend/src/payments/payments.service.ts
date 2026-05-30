@@ -7,10 +7,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
-import { Payment, PaymentStatus } from './entities/payment.entity';
-import { PaginationDto } from '../common/pagination/dto/pagination.dto';
-import { paginate } from '../common/pagination/pagination.helper';
-import { LessThan, Repository } from 'typeorm';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { AuditService } from '../audit/audit.service';
 import { PaginationDto } from '../common/pagination/pagination.dto';
@@ -20,11 +16,10 @@ import { EventStatus } from '../events/entities/event.entity';
 import { EventsService } from '../events/events.service';
 import { NotificationService } from '../notifications/notification.service';
 import { StellarService } from '../stellar/stellar.service';
-import { AuditService } from '../audit/audit.service';
-import { NotificationService } from '../notifications/notification.service';
 import { User } from '../users/entities/user.entity';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { Payment, PaymentStatus } from './entities/payment.entity';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 @Injectable()
 export class PaymentsService {
@@ -37,6 +32,8 @@ export class PaymentsService {
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
+    private readonly webhooksService: WebhooksService,
+    private readonly currenciesService: CurrenciesService,
   ) {}
 
   async getPaymentById(id: string): Promise<Payment> {
@@ -330,6 +327,8 @@ export class PaymentsService {
       },
     });
 
+    this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+
     return confirmed;
   }
 
@@ -396,7 +395,7 @@ export class PaymentsService {
 
   private async markFailed(payment: Payment, reason: string): Promise<void> {
     payment.status = PaymentStatus.FAILED;
-    await this.paymentsRepository.save(payment);
+    const saved = await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
       action: AuditAction.PAYMENT_FAILED,
@@ -415,6 +414,7 @@ export class PaymentsService {
         currency: payment.currency,
         reason,
       });
+      this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
     } catch (error) {
       console.error(
         `Failed to queue payment failure email for ${payment.id}:`,
