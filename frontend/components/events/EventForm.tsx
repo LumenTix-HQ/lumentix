@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useFieldArray, useForm, type SubmitHandler } from "react-hook-form";
+import { Controller, useFieldArray, useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
     createEventSchema,
@@ -10,6 +10,8 @@ import {
     type CreateEventFormValues,
 } from "@/lib/schemas/create-event.schema";
 import SponsorTierPreview from "@/components/SponsorTierPreview";
+import DateTimePicker from "@/components/DateTimePicker";
+import { getUserTimezone } from "@/lib/utils/datetime";
 
 export type EventFormDiff = {
     field: string;
@@ -17,15 +19,22 @@ export type EventFormDiff = {
     after: string;
 };
 
+/**
+ * Submit payload emitted by `EventForm`. The form augments the schema's values
+ * with the IANA timezone the organizer chose in the date picker, so callers
+ * can convert wall-clock datetimes to UTC before sending them to the API.
+ */
+export type EventFormSubmitValues = CreateEventFormValues & { timezone: string };
+
 type EventFormProps = {
     mode: "create" | "edit";
-    initialValues?: Partial<CreateEventFormInput>;
+    initialValues?: Partial<CreateEventFormInput> & { timezone?: string };
     submitLabel?: string;
     loadingLabel?: string;
     successMessage?: string | null;
     errorMessage?: string | null;
-    onSubmit: (values: CreateEventFormValues) => Promise<void>;
-    onPreviewSubmit?: (values: CreateEventFormValues) => EventFormDiff[] | null;
+    onSubmit: (values: EventFormSubmitValues) => Promise<void>;
+    onPreviewSubmit?: (values: EventFormSubmitValues) => EventFormDiff[] | null;
 };
 
 const MAX_TIERS = 5;
@@ -45,6 +54,20 @@ export default function EventForm({
 
     // Drag-and-drop state
     const dragIndexRef = useRef<number | null>(null);
+
+    // The organizer's chosen IANA timezone for both start and end pickers.
+    // We seed with the supplied initial timezone (e.g. when editing an event
+    // that already stores one) and otherwise default to the browser's zone.
+    const [timezone, setTimezone] = useState<string>(
+        () => initialValues?.timezone ?? "UTC",
+    );
+    useEffect(() => {
+        if (initialValues?.timezone) {
+            setTimezone(initialValues.timezone);
+        } else if (typeof window !== "undefined") {
+            setTimezone(getUserTimezone());
+        }
+    }, [initialValues?.timezone]);
 
     const defaultValues = useMemo<CreateEventFormInput>(() => ({
         ...defaultCreateEventValues,
@@ -76,13 +99,14 @@ export default function EventForm({
         : (submitLabel ?? (mode === "create" ? "Create Event" : "Save Changes"));
 
     const submitHandler: SubmitHandler<CreateEventFormValues> = async (values) => {
-        const previewDiffs = onPreviewSubmit?.(values);
+        const payload: EventFormSubmitValues = { ...values, timezone };
+        const previewDiffs = onPreviewSubmit?.(payload);
         if (previewDiffs) {
             setDiffs(previewDiffs);
-            setPendingValues(values);
+            setPendingValues(payload);
             return;
         }
-        await onSubmit(values);
+        await onSubmit(payload);
     };
 
     // -------------------------------------------------------------------------
@@ -127,18 +151,44 @@ export default function EventForm({
                     {errors.title ? <p className="mt-1 text-xs text-red-300">{errors.title.message}</p> : null}
                 </div>
 
-                {/* Dates */}
+                {/* Dates — timezone-aware pickers (one shared zone for the event) */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                        <label className="mb-2 block text-sm text-gray-300">Start Date & Time</label>
-                        <input type="datetime-local" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("startDate")} />
-                        {errors.startDate ? <p className="mt-1 text-xs text-red-300">{errors.startDate.message}</p> : null}
-                    </div>
-                    <div>
-                        <label className="mb-2 block text-sm text-gray-300">End Date & Time</label>
-                        <input type="datetime-local" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("endDate")} />
-                        {errors.endDate ? <p className="mt-1 text-xs text-red-300">{errors.endDate.message}</p> : null}
-                    </div>
+                    <Controller
+                        control={control}
+                        name="startDate"
+                        render={({ field }) => (
+                            <DateTimePicker
+                                label="Start Date & Time"
+                                name={field.name}
+                                value={field.value ?? ""}
+                                timezone={timezone}
+                                required
+                                error={errors.startDate?.message}
+                                onChange={({ value, timezone: nextTz }) => {
+                                    field.onChange(value);
+                                    if (nextTz !== timezone) setTimezone(nextTz);
+                                }}
+                            />
+                        )}
+                    />
+                    <Controller
+                        control={control}
+                        name="endDate"
+                        render={({ field }) => (
+                            <DateTimePicker
+                                label="End Date & Time"
+                                name={field.name}
+                                value={field.value ?? ""}
+                                timezone={timezone}
+                                required
+                                error={errors.endDate?.message}
+                                onChange={({ value, timezone: nextTz }) => {
+                                    field.onChange(value);
+                                    if (nextTz !== timezone) setTimezone(nextTz);
+                                }}
+                            />
+                        )}
+                    />
                 </div>
 
                 {/* Location */}

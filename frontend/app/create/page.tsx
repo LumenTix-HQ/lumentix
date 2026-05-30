@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import EventForm from "@/components/events/EventForm";
+import EventForm, { type EventFormSubmitValues } from "@/components/events/EventForm";
 import EventPreviewOverlay from "@/components/EventPreviewOverlay";
 import { defaultCreateEventValues, type CreateEventFormValues } from "@/lib/schemas/create-event.schema";
+import { localDateTimeToUTC } from "@/lib/utils/datetime";
 
 type EventRecord = { id: string; title: string; location?: string };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
-function toApiDate(value: string): string {
-    return new Date(value).toISOString();
+function toApiDate(value: string, timezone: string): string {
+    // The picker emits a wall-clock string like "2025-06-15T15:00". Interpret
+    // it in the organizer's chosen IANA zone and convert to a UTC ISO string.
+    return localDateTimeToUTC(value, timezone);
 }
 
 async function parseApiError(response: Response): Promise<string> {
@@ -42,7 +45,7 @@ export default function CreateEventPage() {
         void fetchEvents();
     }, []);
 
-    const handleSubmit = async (values: CreateEventFormValues) => {
+    const handleSubmit = async (values: EventFormSubmitValues) => {
         setSubmitError(null);
         setSubmitSuccess(null);
         try {
@@ -56,8 +59,9 @@ export default function CreateEventPage() {
                     title: values.title,
                     description: values.description || undefined,
                     location: values.location || undefined,
-                    startDate: toApiDate(values.startDate),
-                    endDate: toApiDate(values.endDate),
+                    startDate: toApiDate(values.startDate, values.timezone),
+                    endDate: toApiDate(values.endDate, values.timezone),
+                    timezone: values.timezone,
                     ticketPrice: values.ticketPrice,
                     currency: values.currency,
                     status: values.status,
@@ -74,9 +78,9 @@ export default function CreateEventPage() {
     };
 
     const [showPreview, setShowPreview] = useState(false);
-    const [formData, setFormData] = useState<CreateEventFormValues | null>(null);
+    const [formData, setFormData] = useState<EventFormSubmitValues | null>(null);
 
-    const handlePreview = useCallback((values: CreateEventFormValues) => {
+    const handlePreview = useCallback((values: EventFormSubmitValues) => {
         setFormData(values);
         setShowPreview(true);
     }, []);
@@ -132,5 +136,6 @@ export default function CreateEventPage() {
                 </section>
             </div>
         </main>
+        </>
     );
 }
