@@ -8,12 +8,16 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
-import { Event, EventStatus } from './entities/event.entity';
+import { Repository, SelectQueryBuilder, In } from 'typeorm';
+import { Event, EventStatus, EventCategory, EventAgeRestriction } from './entities/event.entity';
+import { EventSeries } from './entities/event-series.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
 import { DuplicateEventDto } from './dto/duplicate-event.dto';
+import { CreateEventSeriesDto } from './dto/create-event-series.dto';
+import { UpdateEventSeriesDto } from './dto/update-event-series.dto';
+import { BulkUpdateSeriesDto } from './dto/bulk-update-series.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
 import { EventStateService } from './state/event-state.service';
 import { NotificationService } from '../notifications/notification.service';
@@ -71,6 +75,8 @@ export class EventsService {
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
     private readonly currenciesService: CurrenciesService,
+    @InjectRepository(EventSeries)
+    private readonly eventSeriesRepository: Repository<EventSeries>,
   ) {}
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
@@ -397,6 +403,173 @@ export class EventsService {
     await this.notificationService.queueLifecycleEmail(event);
   }
 
+  async duplicateEvent(id: string, dto: DuplicateEventDto, organizerId: string): Promise<Event> {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+    const duplicated = this.eventRepository.create({
+      ...event,
+      id: undefined,
+      title: dto.title ?? `${event.title} (Copy)`,
+      startDate: new Date(dto.startDate),
+      endDate: new Date(dto.endDate),
+      status: EventStatus.DRAFT,
+      escrowPublicKey: null,
+      escrowSecretEncrypted: null,
+      createdAt: undefined,
+      updatedAt: undefined,
+    });
+    return this.eventRepository.save(duplicated);
+  }
+
+  async create_event_series(
+    dto: CreateEventSeriesDto,
+    organizerId: string,
+  ): Promise<{ series: EventSeries; events: Event[] }> {
+    const series = this.eventSeriesRepository.create({
+      title: dto.title,
+      description: dto.description ?? null,
+      location: dto.location ?? null,
+      ticketPrice: dto.ticketPrice ?? 0,
+      seasonPassPrice: dto.seasonPassPrice ?? null,
+      discountPercentage: dto.discountPercentage ?? null,
+      currency: dto.currency ?? 'USD',
+      organizerId,
+      maxAttendees: dto.maxAttendees ?? null,
+      category: dto.category ?? EventCategory.OTHER,
+      ageRestriction: dto.ageRestriction ?? EventAgeRestriction.NONE,
+      imageUrl: dto.imageUrl ?? null,
+    } as any) as any as EventSeries;
+    const savedSeries = await this.eventSeriesRepository.save(series);
+
+    const occurrences = dto.occurrencesCount ?? 5;
+    const start = new Date(dto.startDate);
+    const end = new Date(dto.endDate);
+    const durationMs = end.getTime() - start.getTime();
+
+    const events: Event[] = [];
+    for (let i = 0; i < occurrences; i++) {
+      const occurrenceStart = new Date(start);
+      if (dto.recurrencePattern === 'weekly') {
+        occurrenceStart.setDate(start.getDate() + i * 7);
+      } else if (dto.recurrencePattern === 'monthly') {
+        occurrenceStart.setMonth(start.getMonth() + i);
+      } else if (dto.recurrencePattern === 'annually') {
+        occurrenceStart.setFullYear(start.getFullYear() + i);
+      }
+
+      const occurrenceEnd = new Date(occurrenceStart.getTime() + durationMs);
+
+      const event = this.eventRepository.create({
+        title: `${dto.title} - Occurrence ${i + 1}`,
+        description: dto.description ?? null,
+        location: dto.location ?? null,
+        ticketPrice: dto.ticketPrice ?? 0,
+        currency: dto.currency ?? 'USD',
+        organizerId,
+        maxAttendees: dto.maxAttendees ?? null,
+        startDate: occurrenceStart,
+        endDate: occurrenceEnd,
+        status: EventStatus.DRAFT,
+        seriesId: savedSeries.id,
+        category: dto.category ?? EventCategory.OTHER,
+        ageRestriction: dto.ageRestriction ?? EventAgeRestriction.NONE,
+        imageUrl: dto.imageUrl ?? null,
+      } as any) as any as Event;
+      events.push(event);
+    }
+
+    const savedEvents = await this.eventRepository.save(events);
+    return { series: savedSeries, events: savedEvents };
+  }
+
+  async manage_series_settings(
+    seriesId: string,
+    dto: UpdateEventSeriesDto,
+    organizerId: string,
+  ): Promise<{ series: EventSeries; updatedEventsCount: number }> {
+    const series = await this.eventSeriesRepository.findOne({
+      where: { id: seriesId },
+    });
+    if (!series) throw new NotFoundException('Event series not found');
+    if (series.organizerId !== organizerId) {
+      throw new ForbiddenException('Not the organizer of this series');
+    }
+
+    Object.assign(series, dto);
+    const savedSeries = await this.eventSeriesRepository.save(series);
+
+    const events = await this.eventRepository.find({
+      where: { seriesId },
+    });
+
+    for (const event of events) {
+      if (dto.title !== undefined) {
+        event.title = dto.title;
+      }
+      if (dto.description !== undefined) {
+        event.description = dto.description;
+      }
+      if (dto.location !== undefined) {
+        event.location = dto.location;
+      }
+      if (dto.ticketPrice !== undefined) {
+        event.ticketPrice = dto.ticketPrice;
+      }
+      if (dto.currency !== undefined) {
+        event.currency = dto.currency;
+      }
+      if (dto.maxAttendees !== undefined) {
+        event.maxAttendees = dto.maxAttendees;
+      }
+      if (dto.category !== undefined) {
+        event.category = dto.category;
+      }
+      if (dto.ageRestriction !== undefined) {
+        event.ageRestriction = dto.ageRestriction;
+      }
+      if (dto.imageUrl !== undefined) {
+        event.imageUrl = dto.imageUrl;
+      }
+    }
+    await this.eventRepository.save(events);
+
+    return { series: savedSeries, updatedEventsCount: events.length };
+  }
+
+  async bulk_update_series(
+    seriesId: string,
+    dto: BulkUpdateSeriesDto,
+    organizerId: string,
+  ): Promise<{ updatedEvents: Event[] }> {
+    const series = await this.eventSeriesRepository.findOne({
+      where: { id: seriesId },
+    });
+    if (!series) throw new NotFoundException('Event series not found');
+    if (series.organizerId !== organizerId) {
+      throw new ForbiddenException('Not the organizer of this series');
+    }
+
+    const events = await this.eventRepository.find({
+      where: { seriesId },
+    });
+
+    const targetEvents = dto.eventIds && dto.eventIds.length > 0
+      ? events.filter((e) => dto.eventIds!.includes(e.id))
+      : events;
+
+    for (const event of targetEvents) {
+      if (dto.status !== undefined) {
+        event.status = dto.status;
+      }
+      if (dto.ticketPrice !== undefined) {
+        event.ticketPrice = dto.ticketPrice;
+      }
+    }
+
+    const saved = await this.eventRepository.save(targetEvents);
+    return { updatedEvents: saved };
   async addEventImage(eventId: string, organizerId: string, dto: AddEventImageDto): Promise<EventImage> {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');

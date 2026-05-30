@@ -114,7 +114,7 @@ export class AgeVerificationService {
       action: AuditAction.AGE_VERIFIED,
       userId,
       resourceId: saved.id,
-      metadata: {
+      meta: {
         eventId: dto.eventId,
         restriction: requiredRestriction,
         method,
@@ -161,7 +161,7 @@ export class AgeVerificationService {
       action: AuditAction.AGE_RESTRICTION_SET,
       userId: organizerId,
       resourceId: eventId,
-      metadata: { restriction: dto.ageRestriction },
+      meta: { restriction: dto.ageRestriction },
     });
 
     return { ageRestriction: dto.ageRestriction };

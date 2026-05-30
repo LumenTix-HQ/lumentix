@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { AuthenticatedRequest } from '../auth/interfaces/authenticated-request.interface';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { SchedulingService } from './scheduling.service';
 import { EventCategory } from '../events/entities/event.entity';
 import {

@@ -472,7 +472,7 @@ export class IotCapacityService {
   // Scheduled polling — runs every 2 minutes for all live events
   // ─────────────────────────────────────────────────────────────────────────
 
-  @Cron(CronExpression.EVERY_2_MINUTES)
+  @Cron('*/2 * * * *')
   async pollAllLiveEvents(): Promise<void> {
     // Find events that are currently running (started but not yet ended)
     const now = new Date();

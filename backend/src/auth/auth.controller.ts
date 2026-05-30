@@ -37,6 +37,28 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @Throttle({ global: { ttl: seconds(60), limit: 10 } })
+  @ApiOperation({
+    summary: 'Register a new user',
+    description: 'Public. Creates a new user account.',
+  })
+  @ApiBody({
+    type: RegisterDto,
+    examples: {
+      standard: {
+        summary: 'Standard user',
+        value: { email: 'user@example.com', password: 'password123' },
+      },
+      admin: {
+        summary: 'Admin user',
+        value: {
+          email: 'admin@example.com',
+          password: 'password123',
+          role: 'ADMIN',
+        },
+      },
+    },
+  })
   @Throttle({ default: { limit: 10, ttl: 900_000 } }) // 10 per 15 min
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, description: 'User registered successfully' })
@@ -50,6 +72,27 @@ export class AuthController {
   @UseGuards(LocalAuthGuard)
   @Throttle({ default: { limit: 10, ttl: 900_000 } }) // 10 per 15 min
   @HttpCode(HttpStatus.OK)
+  @Throttle({ global: { ttl: seconds(60), limit: 5 } })
+  @ApiOperation({
+    summary: 'Login',
+    description: 'Public. Authenticates a user and returns access credentials.',
+  })
+  @ApiResponse({ status: 200, description: 'Login successful' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  async login(@Body() dto: LoginDto, @Req() req: Request) {
+    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+
+    try {
+      const result = await this.authService.login(dto);
+      await this.bruteForceService.reset(ip);
+      return result;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        await this.bruteForceService.recordFailedAttempt(ip);
+      }
+
+      throw error;
+    }
   @ApiOperation({ summary: 'Authenticate user with email/password' })
   @ApiBody({ type: LoginDto })
   @ApiResponse({ status: 200, description: 'JWT tokens' })

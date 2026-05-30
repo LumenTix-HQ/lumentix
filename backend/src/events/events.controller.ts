@@ -35,6 +35,9 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { ListEventsDto } from './dto/list-events.dto';
 import { DuplicateEventDto } from './dto/duplicate-event.dto';
+import { CreateEventSeriesDto } from './dto/create-event-series.dto';
+import { UpdateEventSeriesDto } from './dto/update-event-series.dto';
+import { BulkUpdateSeriesDto } from './dto/bulk-update-series.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
@@ -304,6 +307,47 @@ export class EventsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.ticketsService.getEventTicketSummary(eventId, req.user.id);
+  }
+
+  @Post('series')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Create a recurring event series',
+    description: 'Organizer-only. Creates a series and child events.',
+  })
+  createSeries(
+    @Body() dto: CreateEventSeriesDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.create_event_series(dto, req.user.id);
+  }
+
+  @Put('series/:seriesId/settings')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Manage settings for a series',
+    description: 'Organizer-only. Propagates settings to all events in the series.',
+  })
+  manageSeriesSettings(
+    @Param('seriesId', ParseUUIDPipe) seriesId: string,
+    @Body() dto: UpdateEventSeriesDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.manage_series_settings(seriesId, dto, req.user.id);
+  }
+
+  @Patch('series/:seriesId/bulk')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Bulk update events in a series',
+    description: 'Organizer-only. Updates status/price in bulk.',
+  })
+  bulkUpdateSeries(
+    @Param('seriesId', ParseUUIDPipe) seriesId: string,
+    @Body() dto: BulkUpdateSeriesDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.bulk_update_series(seriesId, dto, req.user.id);
   }
 
   @Post(':id/duplicate')

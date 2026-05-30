@@ -1,27 +1,23 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 @Entity('refresh_tokens')
 export class RefreshToken {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
+  @Index()
   @Column()
-  userId: string;
+  userId!: string;
 
   @Column({ unique: true })
-  token: string;
+  tokenHash!: string;
 
   @Column({ type: 'timestamptz' })
-  expiresAt: Date;
+  expiresAt!: Date;
 
   @Column({ default: false })
-  revoked: boolean;
+  revoked!: boolean;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 }

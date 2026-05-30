@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { VenueSection } from './entities/venue-section.entity';
 import { Seat, SeatStatus } from './entities/seat.entity';
 import { CreateVenueLayoutDto } from './dto/create-venue-layout.dto';
@@ -110,8 +110,9 @@ export class VenuesService {
   async getAvailableSeats(eventId: string): Promise<Seat[]> {
     const sections = await this.sectionRepository.find({ where: { eventId } });
     const sectionIds = sections.map(s => s.id);
+    if (sectionIds.length === 0) return [];
     return this.seatRepository.find({
-      where: { sectionId: sectionIds.length > 0 ? sectionIds : undefined, status: SeatStatus.AVAILABLE },
+      where: { sectionId: In(sectionIds), status: SeatStatus.AVAILABLE },
       order: { row: 'ASC', number: 'ASC' },
     });
   }

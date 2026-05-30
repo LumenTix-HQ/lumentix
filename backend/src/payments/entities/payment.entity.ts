@@ -20,8 +20,14 @@ export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
-  eventId: string;
+  @Column({ nullable: true })
+  eventId: string | null;
+
+  @Column({ nullable: true })
+  seriesId: string | null;
+
+  @Column({ default: false })
+  isSeasonPass: boolean;
 
   @Column()
   userId: string;

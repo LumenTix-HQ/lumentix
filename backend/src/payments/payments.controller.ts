@@ -9,6 +9,8 @@ import {
   Query,
   Req,
   UseGuards,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,18 +22,23 @@ import {
 } from '@nestjs/swagger';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { PaginationDto } from '../common/pagination/pagination.dto';
-import { AuthenticatedRequest } from '../auth/interfaces/authenticated-request.interface';
+import { PaginationDto } from '../common/pagination/dto/pagination.dto';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { PaymentsService } from './payments.service';
+import { RefundService } from './refunds/refund.service';
 
 @ApiTags('Payments')
 @ApiBearerAuth()
 @Controller('payments')
 @UseGuards(JwtAuthGuard)
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    @Inject(forwardRef(() => RefundService))
+    private readonly refundService: RefundService,
+  ) {}
 
   @Get('history')
   @ApiOperation({ summary: 'Get payment history' })
@@ -71,7 +78,7 @@ export class PaymentsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.paymentsService.findPaymentPath(
-      req.user.stellarPublicKey,
+      (req.user as any).stellarPublicKey,
       sourceAsset,
       destAsset,
       amount,
@@ -122,5 +129,34 @@ export class PaymentsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.paymentsService.confirmPayment(dto, req.user.id);
+  }
+
+  @Post('series/:seriesId/season-pass')
+  @ApiOperation({
+    summary: 'Create season pass payment intent',
+    description: 'Authenticated. Creates a season pass intent for an event series.',
+  })
+  createSeasonPassIntent(
+    @Param('seriesId', ParseUUIDPipe) seriesId: string,
+    @Query('currency') currency: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.createSeasonPassIntent(seriesId, req.user.id, currency);
+  }
+
+  @Post(':id/refund')
+  @ApiOperation({
+    summary: 'Request ticket refund',
+    description: 'Authenticated. Attendees can request a refund for their confirmed payment.',
+  })
+  async requestRefund(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const payment = await this.paymentsService.getPaymentById(id);
+    if (payment.userId !== req.user.id) {
+      throw new ForbiddenException('You do not own this payment.');
+    }
+    return this.refundService.refundSinglePayment(id);
   }
 }

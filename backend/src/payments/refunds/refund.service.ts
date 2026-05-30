@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Payment, PaymentStatus } from '../entities/payment.entity';
 import { TicketEntity } from '../../tickets/entities/ticket.entity';
 import { Event, EventStatus } from '../../events/entities/event.entity';
+import { EventSeries } from '../../events/entities/event-series.entity';
 import { User } from '../../users/entities/user.entity';
 import { StellarService } from '../../stellar/stellar.service';
 import { AuditService } from '../../audit/audit.service';
@@ -32,6 +33,9 @@ export class RefundService {
 
     @InjectRepository(Event)
     private readonly eventsRepository: Repository<Event>,
+
+    @InjectRepository(EventSeries)
+    private readonly eventSeriesRepository: Repository<EventSeries>,
 
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
@@ -106,7 +110,8 @@ export class RefundService {
     for (const payment of confirmedPayments) {
       const result = await this.processSingleRefund(
         payment,
-        event,
+        event.title,
+        event.id,
         escrowSecret,
       );
       results.push(result);
@@ -190,6 +195,34 @@ export class RefundService {
       return { eligible: false, reason: 'No Stellar wallet linked', refundAmount: 0 };
     }
 
+    let startDate: Date | undefined;
+    if (payment.isSeasonPass) {
+      const events = await this.eventsRepository.find({
+        where: { seriesId: payment.seriesId as string },
+        order: { startDate: 'ASC' },
+      });
+      if (events.length > 0) {
+        startDate = events[0].startDate;
+      }
+    } else {
+      const event = await this.eventsRepository.findOne({
+        where: { id: payment.eventId as string },
+        select: ['id', 'startDate'],
+      });
+      if (event) {
+        startDate = event.startDate;
+      }
+    }
+
+    if (startDate) {
+      const cutoff = Number(process.env.REFUND_CUTOFF_HOURS ?? 24);
+      const hoursToEvent = (new Date(startDate).getTime() - Date.now()) / 3_600_000;
+      if (hoursToEvent < cutoff) {
+        return {
+          eligible: false,
+          reason: `Too close to event start`,
+          refundAmount: 0,
+        };
     // Check cutoff: no refund if event starts within REFUND_CUTOFF_HOURS
     const event = await this.eventsRepository.findOne({
       where: { id: payment.eventId },
@@ -262,21 +295,40 @@ export class RefundService {
     });
     if (!payment) throw new NotFoundException(`Payment "${paymentId}" not found.`);
 
-    const event = await this.eventsRepository.findOne({
-      where: { id: payment.eventId },
-      select: ['id', 'title', 'status', 'escrowPublicKey', 'escrowSecretEncrypted'],
-    });
-    if (!event) throw new NotFoundException(`Event not found.`);
+    let escrowSecret: string;
+    let title: string;
+    let resourceId: string;
 
-    if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
-      throw new BadRequestException('Event has no escrow account configured');
+    if (payment.isSeasonPass) {
+      const series = await this.eventSeriesRepository.findOne({
+        where: { id: payment.seriesId as string },
+      });
+      if (!series) throw new NotFoundException(`Event series not found.`);
+      if (!series.escrowPublicKey || !series.escrowSecretEncrypted) {
+        throw new BadRequestException('Series has no escrow account configured');
+      }
+      escrowSecret = await this.escrowService.decryptEscrowSecret(
+        series.escrowSecretEncrypted,
+      );
+      title = series.title;
+      resourceId = series.id;
+    } else {
+      const event = await this.eventsRepository.findOne({
+        where: { id: payment.eventId as string },
+        select: ['id', 'title', 'escrowPublicKey', 'escrowSecretEncrypted'],
+      });
+      if (!event) throw new NotFoundException(`Event not found.`);
+      if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
+        throw new BadRequestException('Event has no escrow account configured');
+      }
+      escrowSecret = await this.escrowService.decryptEscrowSecret(
+        event.escrowSecretEncrypted,
+      );
+      title = event.title;
+      resourceId = event.id;
     }
 
-    const escrowSecret = await this.escrowService.decryptEscrowSecret(
-      event.escrowSecretEncrypted,
-    );
-
-    return this.processSingleRefund(payment, event, escrowSecret);
+    return this.processSingleRefund(payment, title, resourceId, escrowSecret);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -285,7 +337,8 @@ export class RefundService {
 
   private async processSingleRefund(
     payment: Payment,
-    event: Event,
+    title: string,
+    resourceId: string,
     escrowSecret: string,
   ): Promise<RefundResultDto> {
     const base: Pick<
@@ -294,26 +347,24 @@ export class RefundService {
     > = {
       paymentId: payment.id,
       userId: payment.userId,
-      amount: Number(payment.amount), // updated below after eligibility check
+      amount: Number(payment.amount),
       currency: payment.currency,
     };
 
     try {
-      // 1. Check eligibility and compute refund amount per policy
       const eligibility = await this.checkRefundEligibility(payment.id);
       if (!eligibility.eligible) {
         throw new BadRequestException(eligibility.reason);
       }
 
       const amount = eligibility.refundAmount;
-      base.amount = amount; // reflect actual refund amount in result
+      base.amount = amount;
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new BadRequestException(
           `Computed refund amount is zero or invalid for payment "${payment.id}".`,
         );
       }
 
-      // 2. Resolve the user's Stellar public key
       const user = await this.usersRepository.findOne({
         where: { id: payment.userId },
         select: ['id', 'email', 'stellarPublicKey'],
@@ -329,7 +380,6 @@ export class RefundService {
         );
       }
 
-      // 3. Send computed amount back to the original payer via StellarService
       const txResponse = await this.stellarService.sendPayment(
         escrowSecret,
         user.stellarPublicKey,
@@ -340,23 +390,21 @@ export class RefundService {
       const txHash =
         typeof txResponse.hash === 'string' ? txResponse.hash : 'unknown';
 
-      // 4. Mark payment as refunded
       payment.status = PaymentStatus.REFUNDED;
       await this.paymentsRepository.save(payment);
 
-      // 5. Mark associated ticket as refunded
       await this.ticketsRepository.update(
-        { eventId: event.id, ownerId: payment.userId },
+        { transactionHash: payment.transactionHash as string },
         { status: 'refunded' },
       );
 
-      // 6. Audit log
       await this.auditService.log({
         action: 'REFUND_ISSUED',
         userId: payment.userId,
         resourceId: payment.id,
         meta: {
-          eventId: event.id,
+          resourceId,
+          title,
           amount,
           currency: payment.currency,
           transactionHash: txHash,
@@ -383,12 +431,11 @@ export class RefundService {
       const reason =
         error instanceof Error ? error.message : 'Unknown error during refund';
 
-      // Audit the failure but do NOT rethrow — we continue processing others
       await this.auditService.log({
         action: 'REFUND_FAILED',
         userId: payment.userId,
         resourceId: payment.id,
-        meta: { eventId: event.id, reason },
+        meta: { resourceId, reason },
       });
 
       this.logger.error(

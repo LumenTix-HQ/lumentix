@@ -100,7 +100,7 @@ export class RecommendationsService {
       action: AuditAction.RECOMMENDATIONS_GENERATED,
       userId,
       resourceId: userId,
-      metadata: { count: recommendations.length },
+      meta: { count: recommendations.length },
     });
 
     return {
@@ -138,7 +138,7 @@ export class RecommendationsService {
       action: AuditAction.PREFERENCES_UPDATED,
       userId,
       resourceId: userId,
-      metadata: { preferenceCount: count },
+      meta: { preferenceCount: count },
     });
 
     return { updated: count };
