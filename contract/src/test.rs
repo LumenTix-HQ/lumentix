@@ -2833,6 +2833,110 @@ fn test_event_status_changed_published_to_completed() {
     assert!(found, "EventCompleted event not found for completion");
 }
 
+#[test]
+fn test_generic_event_state_transition_emitted_on_status_update() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"genstsch" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 4);
+                    } else {
+                        panic!("Expected Vec data");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "GenericEventStateTransition event not found for status update");
+}
+
+#[test]
+fn test_generic_event_state_transition_emitted_on_cancel_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.cancel_event(&organizer, &event_id);
+
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"genstsch" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 4);
+                    } else {
+                        panic!("Expected Vec data");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "GenericEventStateTransition event not found for cancel event");
+}
+
+#[test]
+fn test_generic_event_state_transition_emitted_on_complete_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    env.ledger().with_mut(|li| li.timestamp = 2001);
+    client.complete_event(&organizer, &event_id);
+
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"genstsch" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 4);
+                    } else {
+                        panic!("Expected Vec data");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "GenericEventStateTransition event not found for complete event");
+}
+
 // ============================================================================
 // CHANGE ADMIN TESTS
 // ============================================================================
@@ -6197,14 +6301,14 @@ fn test_event_metadata_updated_successive_updates_emit_independent_events_with_f
     );
 
     // Both emissions must be present – collect all "evtmeta" events in order
-    let mut timestamps: Vec<u64> = Vec::new();
+    let mut timestamps = soroban_sdk::Vec::new(&env);
     for xdr_event in env.events().all().events() {
         if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
             if let Some(xdr::ScVal::Symbol(sym)) = body.topics.first() {
                 if sym.as_slice() == b"evtmeta" {
                     if let xdr::ScVal::Vec(Some(fields)) = &body.data {
                         if let xdr::ScVal::U64(ts) = &fields[2] {
-                            timestamps.push(*ts);
+                            timestamps.push_back(*ts);
                         }
                     }
                 }
@@ -6213,6 +6317,6 @@ fn test_event_metadata_updated_successive_updates_emit_independent_events_with_f
     }
 
     assert_eq!(timestamps.len(), 2, "Two successive updates must emit exactly two events");
-    assert_eq!(timestamps[0], 1000, "First event time_updated must be 1000");
-    assert_eq!(timestamps[1], 2000, "Second event time_updated must be 2000");
+    assert_eq!(timestamps.get(0).unwrap(), 1000, "First event time_updated must be 1000");
+    assert_eq!(timestamps.get(1).unwrap(), 2000, "Second event time_updated must be 2000");
 }
