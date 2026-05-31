@@ -7,6 +7,7 @@ import {
   ManyToMany,
   JoinTable,
 } from 'typeorm';
+import { CancellationReason } from '../../payments/refunds/enums';
 import { Category } from '../../categories/entities/category.entity';
 
 export enum EventStatus {
@@ -117,6 +118,25 @@ export class Event {
   })
   ageRestriction: EventAgeRestriction;
 
+  /**
+   * Reason for event cancellation (if applicable).
+   * Drives refund policy determination.
+   */
+  @Column({ type: 'varchar', nullable: true })
+  cancellationReason: CancellationReason | null;
+
+  /**
+   * Additional context about the cancellation.
+   * Stored as JSONB for flexible metadata.
+   */
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  cancellationDetails: Record<string, any> | null;
+
+  /**
+   * Timestamp when event was cancelled.
+   */
+  @Column({ type: 'timestamp', nullable: true })
+  cancelledAt: Date | null;
   @ManyToMany(() => Category, (c) => c.events)
   @JoinTable({ name: 'event_categories' })
   categories: Category[];
