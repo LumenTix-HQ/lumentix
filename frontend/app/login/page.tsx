@@ -111,6 +111,11 @@ export default function LoginPage() {
             {errors.password && (
               <p className="mt-1.5 text-sm text-red-400">{errors.password.message}</p>
             )}
+            <div className="mt-2 text-right">
+              <a href="/forgot-password" className="text-sm text-blue-400 hover:underline">
+                Forgot password?
+              </a>
+            </div>
           </div>
 
           <button
