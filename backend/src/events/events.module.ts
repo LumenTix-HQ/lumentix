@@ -4,6 +4,7 @@ import { Event } from './entities/event.entity';
 import { EventsService } from './events.service';
 import { EventsController } from './events.controller';
 import { EventStateService } from './state/event-state.service';
+import { EventCacheService } from './cache/event-cache.service';
 import { TicketsModule } from '../tickets/tickets.module';
 import { NotificationModule } from '../notifications/notification.module';
 import { EscrowModule } from '../payments/escrow.module';
@@ -24,7 +25,7 @@ import { RefundModule } from '../payments/refunds/refund.module';
     forwardRef(() => RefundModule),
   ],
   controllers: [EventsController],
-  providers: [EventsService, EventStateService],
+  providers: [EventsService, EventStateService, EventCacheService],
   exports: [EventsService],
 })
 export class EventsModule {}

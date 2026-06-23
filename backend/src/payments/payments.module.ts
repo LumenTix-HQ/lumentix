@@ -10,6 +10,7 @@ import { EventsModule } from '../events/events.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationModule } from '../notifications/notification.module';
+import { MultisigModule } from './multisig/multisig.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { NotificationModule } from '../notifications/notification.module';
     StellarModule,            // Issue #129 – path payments
     AuditModule,              // Issue #127 – audit logging on expiry
     NotificationModule,       // Issue #127 – email on expiry
+    MultisigModule,           // Multi-signature payout support
   ],
   controllers: [PaymentsController],
   providers: [

@@ -16,6 +16,7 @@ import { ListEventsDto } from './dto/list-events.dto';
 import { DuplicateEventDto } from './dto/duplicate-event.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
 import { EventStateService } from './state/event-state.service';
+import { EventCacheService } from './cache/event-cache.service';
 import { NotificationService } from '../notifications/notification.service';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
@@ -56,6 +57,7 @@ export class EventsService {
     @InjectRepository(SponsorContribution)
     private readonly contributionRepository: Repository<SponsorContribution>,
     private readonly eventStateService: EventStateService,
+    private readonly eventCacheService: EventCacheService,
     private readonly notificationService: NotificationService,
     private readonly auditService: AuditService,
     private readonly escrowService: EscrowService,
@@ -125,6 +127,7 @@ export class EventsService {
     }
 
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
 
     if (dto.status !== undefined && dto.status !== previousStatus) {
       this.queueLifecycleEmail(saved).catch(() => undefined);
@@ -173,6 +176,7 @@ export class EventsService {
 
     event.status = EventStatus.COMPLETED;
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
 
     await this.auditService.log({
       action: AuditAction.EVENT_COMPLETED,
@@ -196,6 +200,7 @@ export class EventsService {
 
     event.status = EventStatus.CANCELLED;
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
 
     await this.auditService.log({
       action: AuditAction.EVENT_CANCELLED,
@@ -221,9 +226,15 @@ export class EventsService {
     }
 
     await this.eventRepository.remove(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
   }
 
   async getEventById(id: string): Promise<EventWithCapacity> {
+    const cached = await this.eventCacheService.fetchCachedMetadata(id);
+    if (cached) {
+      return cached;
+    }
+
     const event = await this.eventRepository.findOne({ where: { id } });
     if (!event) {
       throw new NotFoundException(`Event with id "${id}" not found`);
@@ -233,11 +244,14 @@ export class EventsService {
       where: { eventId: id, status: 'valid' },
     });
 
-    return {
+    const result = {
       ...event,
       soldTickets,
       remainingCapacity: event.maxAttendees !== null ? event.maxAttendees - soldTickets : null,
     };
+
+    await this.eventCacheService.cacheEventMetadata(id, result);
+    return result;
   }
 
   async listEvents(filterDto: ListEventsDto): Promise<PaginatedResult<EventWithCapacity>> {
