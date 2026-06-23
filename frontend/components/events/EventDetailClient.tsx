@@ -1,9 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { Event, VipTier, SeatCategoryName } from "@/types/event";
 import { formatPrice } from "@/types/event";
 import SeatMap from "@/components/venues/SeatMap";
 import { useState } from "react";
+import {
+    formatDateTimeInTimezone,
+    formatLocalWithOriginalTimezone,
+    getUserTimezone,
+} from "@/lib/utils/datetime";
 
 interface EventDetailClientProps {
   event: Event;
@@ -28,19 +34,43 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
   const vipTiers = event.vipTiers ?? [];
   const accessibilityInventory = event.accessibilityInventory ?? [];
 
+  // The event's source-of-truth timezone (set by the organizer at creation
+  // time). Falls back to UTC for legacy records that don't carry one.
+  const eventTimezone = (event as Event & { timezone?: string }).timezone ?? "UTC";
+  const viewerTimezone = getUserTimezone();
+  const startDateLabel = formatDateTimeInTimezone(event.startDate, viewerTimezone, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const startTimeLabel = formatLocalWithOriginalTimezone(event.startDate, eventTimezone, viewerTimezone);
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       {/* Event Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">{event.title}</h1>
-        <div className="flex items-center gap-3 text-sm text-gray-400">
-          <span>{event.location}</span>
-          <span>·</span>
-          <span>{new Date(event.startDate).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span>
-          <span>·</span>
-          <span className="text-lg font-bold text-white">
-            {event.ticketPrice === 0 ? "Free" : formatPrice(event.ticketPrice, event.currency)}
-          </span>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">{event.title}</h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-400">
+              <span>{event.location}</span>
+              <span>·</span>
+              <span>{startDateLabel}</span>
+              <span>·</span>
+              <span title={`Event timezone: ${eventTimezone}`}>{startTimeLabel}</span>
+              <span>·</span>
+              <span className="text-lg font-bold text-white">
+                {event.ticketPrice === 0 ? "Free" : formatPrice(event.ticketPrice, event.currency)}
+              </span>
+            </div>
+          </div>
+          <Link
+            href={`/events/${event.id}/analytics`}
+            className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20"
+          >
+            View analytics
+          </Link>
         </div>
       </div>
 

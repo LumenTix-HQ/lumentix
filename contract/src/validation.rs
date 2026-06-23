@@ -78,6 +78,69 @@ pub fn validate_currency_code(code: &String) -> Result<(), LumentixError> {
     Ok(())
 }
 
+/// Validate that a wasm hash is not all zeros
+pub fn validate_wasm_hash(hash: &soroban_sdk::BytesN<32>) -> Result<(), LumentixError> {
+    let mut all_zero = true;
+    for i in 0..32 {
+        if hash.get(i) != Some(0) {
+            all_zero = false;
+            break;
+        }
+    }
+    if all_zero {
+        return Err(LumentixError::InvalidAmount);
+    }
+    Ok(())
+}
+
+/// Validate that a governance approval percentage is within valid range
+pub fn validate_approval_percentage(pct: u32) -> Result<(), LumentixError> {
+    if pct == 0 || pct > 100 {
+        return Err(LumentixError::InvalidPlatformFee);
+    }
+    Ok(())
+}
+
+/// Validate that a voting period is reasonable (min 1 hour, max 90 days)
+pub fn validate_voting_period(seconds: u64) -> Result<(), LumentixError> {
+    if seconds < 3600 || seconds > 7776000 {
+        return Err(LumentixError::InvalidTimeRange);
+    }
+    Ok(())
+}
+
+/// Validate that a chain name is non-empty and supported format
+pub fn validate_chain_name(chain: &String) -> Result<(), LumentixError> {
+    if chain.len() == 0 {
+        return Err(LumentixError::EmptyString);
+    }
+    Ok(())
+}
+
+/// Validate that a carbon project ID is non-empty
+pub fn validate_carbon_project_id(project_id: &String) -> Result<(), LumentixError> {
+    if project_id.len() == 0 {
+        return Err(LumentixError::CarbonOffsetProjectNotFound);
+    }
+    Ok(())
+}
+
+/// Validate that a carbon offset amount is positive
+pub fn validate_offset_amount(amount: i128) -> Result<(), LumentixError> {
+    if amount <= 0 {
+        return Err(LumentixError::InvalidAmount);
+    }
+    Ok(())
+}
+
+/// Validate identity verification level is within supported range
+pub fn validate_identity_level(level: u32) -> Result<(), LumentixError> {
+    if level == 0 || level > 5 {
+        return Err(LumentixError::InvalidIdentityProof);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

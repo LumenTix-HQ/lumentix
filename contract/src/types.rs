@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 pub const INSTANCE_LIFETIME: u32 = 535_680; // ~30 days
 pub const PERSISTENT_LIFETIME: u32 = 535_680; // ~30 days
@@ -168,4 +168,371 @@ pub struct CurrencyConfig {
 pub struct WaitlistOffer {
     pub quantity: u32,
     pub expires_at: u64,
+}
+
+// ── Dynamic pricing ────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PriceTier {
+    EarlyBird,
+    Standard,
+    Late,
+    LastMinute,
+}
+
+/// Organizer-configurable multipliers (basis points) for time-based pricing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PricingSchedule {
+    pub early_bird_multiplier_bps: u32,
+    pub standard_multiplier_bps: u32,
+    pub late_multiplier_bps: u32,
+    pub last_minute_multiplier_bps: u32,
+    pub early_bird_days: u32,
+    pub standard_days: u32,
+    pub last_minute_hours: u32,
+}
+
+/// Rolling batch-mint resource usage snapshot for fee optimization.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MintGasUsage {
+    pub total_mints: u32,
+    pub total_tickets_minted: u32,
+    pub total_resource_units: u64,
+    pub last_batch_quantity: u32,
+    pub last_batch_resource_units: u64,
+    pub last_updated: u64,
+}
+
+/// CDN / adaptive streaming delivery configuration for hybrid events.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamDeliveryConfig {
+    pub cdn_endpoint: String,
+    pub stream_url: String,
+    pub quality_profile: String,
+    pub adaptive_bitrate: bool,
+    pub target_bitrate_kbps: u32,
+}
+
+/// Observed streaming performance metrics for virtual attendees.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamPerformanceMetrics {
+    pub event_id: u64,
+    pub avg_bitrate_kbps: u32,
+    pub rebuffer_ratio_bps: u32,
+    pub concurrent_viewers: u32,
+    pub quality_score: u32,
+    pub last_measured_at: u64,
+}
+
+// ── Insurance System ───────────────────────────────────────────────────────
+
+/// Cancellation reason enum for insurance claims
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CancellationReason {
+    EventCancelledByOrganizer,
+    ForceMajeure,
+    VenueUnavailable,
+    ArtistPerformerUnavailable,
+    HealthSafetyConcerns,
+    GovernmentRestriction,
+    Other,
+}
+
+/// Insurance policy for a ticket
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsurancePolicy {
+    pub id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub holder: Address,
+    pub premium_paid: i128,
+    pub coverage_amount: i128,
+    pub purchase_time: u64,
+    pub active: bool,
+    pub claim_processed: bool,
+}
+
+/// Insurance pool balance managed by smart contract
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsurancePool {
+    pub total_balance: i128,
+    pub total_policies: u32,
+    pub total_claims_paid: i128,
+}
+
+// ── Review & Reputation System ─────────────────────────────────────────────
+
+/// A single event review submitted by a verified attendee
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventReview {
+    pub id: u64,
+    pub event_id: u64,
+    pub reviewer: Address,
+    pub organizer: Address,
+    pub ticket_id: u64,
+    /// Star rating 1–5
+    pub rating: u32,
+    pub comment: String,
+    pub attendance_verified: bool,
+    pub timestamp: u64,
+}
+
+/// Aggregated reputation score for an organizer
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrganizerReputation {
+    pub organizer: Address,
+    /// Weighted score 0–10000 (divide by 100 for 0.00–100.00)
+    pub reputation_score: u32,
+    /// Average rating × 100 (e.g. 420 = 4.20 stars)
+    pub average_rating_x100: u32,
+    pub total_reviews: u32,
+    pub total_ratings_sum: u32,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Smart Contract Upgrade Mechanism
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Represents the current state of an upgrade proposal
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UpgradeState {
+    Pending,
+    Approved,
+    Executed,
+    Rejected,
+}
+
+/// An upgrade proposal to replace the contract WASM
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposal {
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub new_wasm_hash: BytesN<32>,
+    pub description: String,
+    pub created_at: u64,
+    pub voting_deadline: u64,
+    pub state: UpgradeState,
+    pub yes_votes: u32,
+    pub no_votes: u32,
+    pub required_yes_votes: u32,
+    pub total_voters: u32,
+}
+
+/// A record of a single vote on an upgrade proposal
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeVote {
+    pub voter: Address,
+    pub proposal_id: u64,
+    pub vote_yes: bool,
+    pub timestamp: u64,
+}
+
+/// Governance configuration for the upgrade mechanism
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeGovernanceConfig {
+    pub voting_period_seconds: u64,
+    pub required_approval_percentage: u32,
+    pub governance_members: Vec<Address>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Carbon Offset Program
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Result of a carbon footprint calculation
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CarbonFootprint {
+    pub event_id: u64,
+    pub venue_footprint_kg: i128,
+    pub attendance_footprint_kg: i128,
+    pub travel_footprint_kg: i128,
+    pub total_footprint_kg: i128,
+    pub calculated_at: u64,
+}
+
+/// A carbon offset purchase record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CarbonOffsetPurchase {
+    pub purchase_id: u64,
+    pub event_id: u64,
+    pub purchaser: Address,
+    pub offset_amount_kg: i128,
+    pub cost: i128,
+    pub project_id: String,
+    pub timestamp: u64,
+    pub verified: bool,
+}
+
+/// Aggregated environmental impact tracking for an event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnvironmentalImpact {
+    pub event_id: u64,
+    pub total_footprint_kg: i128,
+    pub total_offset_kg: i128,
+    pub net_impact_kg: i128,
+    pub total_purchases: u32,
+    pub neutral_status: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Blockchain-Based Identity Verification
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Supported identity provider types
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IdentityProvider {
+    Stellar,
+    Ethereum,
+    Solana,
+    Polygon,
+    Other(String),
+}
+
+/// An identity credential issued on-chain
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdentityCredential {
+    pub credential_id: u64,
+    pub subject: Address,
+    pub provider: IdentityProvider,
+    pub provider_id: String,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub revoked: bool,
+    pub metadata_hash: BytesN<32>,
+    pub level: u32,
+}
+
+/// Verification proof for an identity credential
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdentityProof {
+    pub credential_id: u64,
+    pub subject: Address,
+    pub signature: BytesN<64>,
+    pub timestamp: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Chain Ticket Portability
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of a cross-chain transfer
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CrossChainTransferStatus {
+    Initiated,
+    BridgeValidated,
+    Completed,
+    Failed,
+    Expired,
+}
+
+/// A cross-chain ticket transfer request
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CrossChainTransfer {
+    pub transfer_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub sender: Address,
+    pub recipient: Address,
+    pub source_chain: String,
+    pub target_chain: String,
+    pub status: CrossChainTransferStatus,
+    pub initiated_at: u64,
+    pub bridge_tx_hash: Option<String>,
+    pub completed_at: Option<u64>,
+}
+
+/// A validated bridge transaction for cross-chain transfer
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BridgeTransaction {
+    pub tx_hash: String,
+    pub source_chain: String,
+    pub target_chain: String,
+    pub sender: Address,
+    pub recipient: Address,
+    pub ticket_id: u64,
+    pub validated: bool,
+    pub validation_time: u64,
+    pub block_number: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Merchandise & NFT Collectibles
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Rarity tier for NFT collectibles
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RarityTier {
+    Common,
+    Uncommon,
+    Rare,
+    Epic,
+    Legendary,
+}
+
+/// Event merchandise item
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventMerchandise {
+    pub id: u64,
+    pub event_id: u64,
+    pub name: String,
+    pub description: String,
+    pub price: i128,
+    pub total_supply: u32,
+    pub remaining_supply: u32,
+    pub organizer: Address,
+    pub active: bool,
+}
+
+/// A commemorative NFT collectible for a special event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NftCollectible {
+    pub id: u64,
+    pub event_id: u64,
+    pub name: String,
+    pub description: String,
+    pub rarity: RarityTier,
+    pub owner: Address,
+    pub minted_at: u64,
+    pub transferable: bool,
+    pub metadata_hash: BytesN<32>,
+}
+
+/// Collectible inventory tracking per event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectibleInventory {
+    pub event_id: u64,
+    pub total_minted: u32,
+    pub max_supply: u32,
+    pub common_minted: u32,
+    pub uncommon_minted: u32,
+    pub rare_minted: u32,
+    pub epic_minted: u32,
+    pub legendary_minted: u32,
 }

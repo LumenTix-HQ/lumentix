@@ -1,0 +1,23 @@
+<p>Hi {{name}},</p>
+<p>Your ticket for <strong>{{eventTitle}}</strong> is ready!</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0">
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Event Date</td>
+    <td style="padding:8px 0;font-weight:600">{{eventDate}}</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Location</td>
+    <td style="padding:8px 0;font-weight:600">{{eventLocation}}</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Ticket ID</td>
+    <td style="padding:8px 0;font-weight:600;font-family:monospace">{{ticketId}}</td>
+  </tr>
+</table>
+{{#if qrCodeUrl}}
+<p style="text-align:center">
+  <img src="{{qrCodeUrl}}" alt="Ticket QR code" style="width:180px;height:180px" />
+</p>
+{{/if}}
+<p>Present this QR code at the venue entrance for check-in.</p>
+<p style="color:#6B7280;font-size:13px">See you there!</p>

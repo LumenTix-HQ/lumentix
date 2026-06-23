@@ -1,6 +1,6 @@
 #![allow(deprecated)]
 
-use soroban_sdk::{symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{symbol_short, Address, BytesN, Env, String, Symbol, Vec};
 
 /// A type for transfer of event
 pub struct TransferEvent;
@@ -73,7 +73,12 @@ impl PlatformFeeUpdated {
 pub struct PlatformFeeRecipientUpdated;
 
 impl PlatformFeeRecipientUpdated {
-    pub fn emit(env: &Env, admin_executor: Address, old_recipient: Address, new_recipient: Address) {
+    pub fn emit(
+        env: &Env,
+        admin_executor: Address,
+        old_recipient: Address,
+        new_recipient: Address,
+    ) {
         env.events().publish(
             (symbol_short!("feerecip"),),
             (admin_executor, old_recipient, new_recipient),
@@ -245,10 +250,8 @@ pub struct BatchTicketsTransferred;
 
 impl BatchTicketsTransferred {
     pub fn emit(env: &Env, from: Address, to: Address, ticket_ids: Vec<u64>) {
-        env.events().publish(
-            (symbol_short!("batchtrn"),),
-            (from, to, ticket_ids),
-        );
+        env.events()
+            .publish((symbol_short!("batchtrn"),), (from, to, ticket_ids));
     }
 }
 
@@ -282,10 +285,8 @@ pub struct WaitlistJoined;
 
 impl WaitlistJoined {
     pub fn emit(env: &Env, event_id: u64, buyer: Address, position: u32) {
-        env.events().publish(
-            (symbol_short!("wjoin"),),
-            (event_id, buyer, position),
-        );
+        env.events()
+            .publish((symbol_short!("wjoin"),), (event_id, buyer, position));
     }
 }
 
@@ -509,7 +510,13 @@ impl AccessibilityInventoryUpdated {
 pub struct AccessibilityBooked;
 
 impl AccessibilityBooked {
-    pub fn emit(env: &Env, booking_id: u64, event_id: u64, attendee: Address, accommodation_type: String) {
+    pub fn emit(
+        env: &Env,
+        booking_id: u64,
+        event_id: u64,
+        attendee: Address,
+        accommodation_type: String,
+    ) {
         env.events().publish(
             (symbol_short!("accbooked"),),
             (booking_id, event_id, attendee, accommodation_type),
@@ -526,10 +533,8 @@ pub struct VenueLayoutCreated;
 
 impl VenueLayoutCreated {
     pub fn emit(env: &Env, event_id: u64, sections: u32) {
-        env.events().publish(
-            (symbol_short!("vencreate"),),
-            (event_id, sections),
-        );
+        env.events()
+            .publish((symbol_short!("vencreate"),), (event_id, sections));
     }
 }
 
@@ -550,10 +555,8 @@ pub struct SeatHoldReleased;
 
 impl SeatHoldReleased {
     pub fn emit(env: &Env, event_id: u64, seat_id: String) {
-        env.events().publish(
-            (symbol_short!("seatrele"),),
-            (event_id, seat_id),
-        );
+        env.events()
+            .publish((symbol_short!("seatrele"),), (event_id, seat_id));
     }
 }
 
@@ -566,10 +569,8 @@ pub struct EventCurrencySet;
 
 impl EventCurrencySet {
     pub fn emit(env: &Env, event_id: u64, currency: String) {
-        env.events().publish(
-            (symbol_short!("curset"),),
-            (event_id, currency),
-        );
+        env.events()
+            .publish((symbol_short!("curset"),), (event_id, currency));
     }
 }
 
@@ -578,9 +579,533 @@ pub struct OraclePriceUpdated;
 
 impl OraclePriceUpdated {
     pub fn emit(env: &Env, currency: String, price: i128, timestamp: u64) {
+        env.events()
+            .publish((symbol_short!("oracleprc"),), (currency, price, timestamp));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INSURANCE EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Event emitted when insurance is purchased for a ticket
+pub struct InsurancePurchased;
+
+impl InsurancePurchased {
+    pub fn emit(
+        env: &Env,
+        policy_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        holder: Address,
+        premium_paid: i128,
+        coverage_amount: i128,
+    ) {
         env.events().publish(
-            (symbol_short!("oracleprc"),),
-            (currency, price, timestamp),
+            (symbol_short!("insbuy"),),
+            (
+                policy_id,
+                ticket_id,
+                event_id,
+                holder,
+                premium_paid,
+                coverage_amount,
+            ),
+        );
+    }
+}
+
+/// Event emitted when an insurance claim is processed
+pub struct InsuranceClaimProcessed;
+
+impl InsuranceClaimProcessed {
+    pub fn emit(
+        env: &Env,
+        policy_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        claimant: Address,
+        claim_amount: i128,
+        reason: crate::types::CancellationReason,
+    ) {
+        env.events().publish(
+            (symbol_short!("insclaim"),),
+            (
+                policy_id,
+                ticket_id,
+                event_id,
+                claimant,
+                claim_amount,
+                reason,
+            ),
+        );
+    }
+}
+
+/// Event emitted when insurance pool balance is updated
+pub struct InsurancePoolUpdated;
+
+impl InsurancePoolUpdated {
+    pub fn emit(env: &Env, total_balance: i128, total_policies: u32, total_claims_paid: i128) {
+        env.events().publish(
+            (symbol_short!("inspool"),),
+            (total_balance, total_policies, total_claims_paid),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REVIEW & REPUTATION EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a verified attendee submits an event review
+pub struct ReviewSubmitted;
+
+impl ReviewSubmitted {
+    pub fn emit(
+        env: &Env,
+        review_id: u64,
+        event_id: u64,
+        reviewer: Address,
+        organizer: Address,
+        rating: u32,
+        attendance_verified: bool,
+    ) {
+        env.events().publish(
+            (symbol_short!("revsubmt"),),
+            (
+                review_id,
+                event_id,
+                reviewer,
+                organizer,
+                rating,
+                attendance_verified,
+            ),
+        );
+    }
+}
+
+/// Emitted when a reviewer's attendance is confirmed
+pub struct AttendanceVerified;
+
+impl AttendanceVerified {
+    pub fn emit(env: &Env, review_id: u64, event_id: u64, reviewer: Address, ticket_id: u64) {
+        env.events().publish(
+            (symbol_short!("attverif"),),
+            (review_id, event_id, reviewer, ticket_id),
+        );
+    }
+}
+
+/// Emitted when an attendance verification attempt fails
+pub struct AttendanceVerificationFailed;
+
+impl AttendanceVerificationFailed {
+    pub fn emit(env: &Env, review_id: u64, reviewer: Address) {
+        env.events()
+            .publish((symbol_short!("attfail"),), (review_id, reviewer));
+    }
+}
+
+/// Emitted when an organizer's reputation score is recalculated
+pub struct ReputationUpdated;
+
+impl ReputationUpdated {
+    pub fn emit(
+        env: &Env,
+        organizer: Address,
+        reputation_score: u32,
+        average_rating_x100: u32,
+        total_reviews: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("repupdt"),),
+            (
+                organizer,
+                reputation_score,
+                average_rating_x100,
+                total_reviews,
+            ),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UPGRADE MECHANISM EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an upgrade proposal is created
+pub struct UpgradeProposed;
+
+impl UpgradeProposed {
+    pub fn emit(
+        env: &Env,
+        proposal_id: u64,
+        proposer: Address,
+        new_wasm_hash: BytesN<32>,
+        description: String,
+        voting_deadline: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgprop"),),
+            (
+                proposal_id,
+                proposer,
+                new_wasm_hash,
+                description,
+                voting_deadline,
+            ),
+        );
+    }
+}
+
+/// Emitted when a vote is cast on an upgrade proposal
+pub struct UpgradeVoteCast;
+
+impl UpgradeVoteCast {
+    pub fn emit(
+        env: &Env,
+        proposal_id: u64,
+        voter: Address,
+        vote_yes: bool,
+        total_yes: u32,
+        total_no: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgvote"),),
+            (proposal_id, voter, vote_yes, total_yes, total_no),
+        );
+    }
+}
+
+/// Emitted when an upgrade proposal is executed
+pub struct UpgradeExecuted;
+
+impl UpgradeExecuted {
+    pub fn emit(env: &Env, proposal_id: u64, executor: Address, new_wasm_hash: BytesN<32>) {
+        env.events().publish(
+            (symbol_short!("upgexec"),),
+            (proposal_id, executor, new_wasm_hash),
+        );
+    }
+}
+
+/// Emitted when governance config is updated
+pub struct UpgradeGovernanceConfigUpdated;
+
+impl UpgradeGovernanceConfigUpdated {
+    pub fn emit(
+        env: &Env,
+        admin: Address,
+        voting_period_seconds: u64,
+        required_approval_percentage: u32,
+        member_count: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgcfg"),),
+            (
+                admin,
+                voting_period_seconds,
+                required_approval_percentage,
+                member_count,
+            ),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CARBON OFFSET EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a carbon footprint is calculated for an event
+pub struct CarbonFootprintCalculated;
+
+impl CarbonFootprintCalculated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        total_footprint_kg: i128,
+        venue_kg: i128,
+        attendance_kg: i128,
+        travel_kg: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("carboncal"),),
+            (
+                event_id,
+                total_footprint_kg,
+                venue_kg,
+                attendance_kg,
+                travel_kg,
+            ),
+        );
+    }
+}
+
+/// Emitted when a carbon offset is purchased
+pub struct CarbonOffsetPurchased;
+
+impl CarbonOffsetPurchased {
+    pub fn emit(
+        env: &Env,
+        purchase_id: u64,
+        event_id: u64,
+        purchaser: Address,
+        offset_amount_kg: i128,
+        cost: i128,
+        project_id: String,
+    ) {
+        env.events().publish(
+            (symbol_short!("carbonpur"),),
+            (
+                purchase_id,
+                event_id,
+                purchaser,
+                offset_amount_kg,
+                cost,
+                project_id,
+            ),
+        );
+    }
+}
+
+/// Emitted when environmental impact is tracked/updated
+pub struct EnvironmentalImpactUpdated;
+
+impl EnvironmentalImpactUpdated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        total_footprint_kg: i128,
+        total_offset_kg: i128,
+        net_impact_kg: i128,
+        neutral: bool,
+    ) {
+        env.events().publish(
+            (symbol_short!("envimp"),),
+            (
+                event_id,
+                total_footprint_kg,
+                total_offset_kg,
+                net_impact_kg,
+                neutral,
+            ),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IDENTITY VERIFICATION EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an identity credential is issued
+pub struct IdentityCredentialIssued;
+
+impl IdentityCredentialIssued {
+    pub fn emit(
+        env: &Env,
+        credential_id: u64,
+        subject: Address,
+        provider: crate::types::IdentityProvider,
+        level: u32,
+        expires_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("idcrdiss"),),
+            (credential_id, subject, provider, level, expires_at),
+        );
+    }
+}
+
+/// Emitted when a blockchain identity is verified
+pub struct BlockchainIdentityVerified;
+
+impl BlockchainIdentityVerified {
+    pub fn emit(
+        env: &Env,
+        credential_id: u64,
+        subject: Address,
+        provider: crate::types::IdentityProvider,
+        verified: bool,
+    ) {
+        env.events().publish(
+            (symbol_short!("idverif"),),
+            (credential_id, subject, provider, verified),
+        );
+    }
+}
+
+/// Emitted when an identity credential is revoked
+pub struct IdentityCredentialRevoked;
+
+impl IdentityCredentialRevoked {
+    pub fn emit(env: &Env, credential_id: u64, subject: Address, admin: Address) {
+        env.events()
+            .publish((symbol_short!("idrevok"),), (credential_id, subject, admin));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CROSS-CHAIN TICKET PORTABILITY EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a cross-chain transfer is initiated
+pub struct CrossChainTransferInitiated;
+
+impl CrossChainTransferInitiated {
+    pub fn emit(
+        env: &Env,
+        transfer_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        sender: Address,
+        source_chain: String,
+        target_chain: String,
+    ) {
+        env.events().publish(
+            (symbol_short!("cctinit"),),
+            (
+                transfer_id,
+                ticket_id,
+                event_id,
+                sender,
+                source_chain,
+                target_chain,
+            ),
+        );
+    }
+}
+
+/// Emitted when a bridge transaction is validated
+pub struct BridgeTransactionValidated;
+
+impl BridgeTransactionValidated {
+    pub fn emit(env: &Env, transfer_id: u64, tx_hash: String, valid: bool, validator: Address) {
+        env.events().publish(
+            (symbol_short!("brgval"),),
+            (transfer_id, tx_hash, valid, validator),
+        );
+    }
+}
+
+/// Emitted when a cross-chain transfer is completed
+pub struct CrossChainTransferCompleted;
+
+impl CrossChainTransferCompleted {
+    pub fn emit(
+        env: &Env,
+        transfer_id: u64,
+        ticket_id: u64,
+        recipient: Address,
+        target_chain: String,
+    ) {
+        env.events().publish(
+            (symbol_short!("cctcomp"),),
+            (transfer_id, ticket_id, recipient, target_chain),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MERCHANDISE & NFT COLLECTIBLE EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when event merchandise is created
+pub struct MerchandiseCreated;
+
+impl MerchandiseCreated {
+    pub fn emit(
+        env: &Env,
+        merchandise_id: u64,
+        event_id: u64,
+        organizer: Address,
+        name: String,
+        price: i128,
+        total_supply: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("merch_crt"),),
+            (
+                merchandise_id,
+                event_id,
+                organizer,
+                name,
+                price,
+                total_supply,
+            ),
+        );
+    }
+}
+
+/// Emitted when a merchandise item is purchased
+pub struct MerchandisePurchased;
+
+impl MerchandisePurchased {
+    pub fn emit(
+        env: &Env,
+        merchandise_id: u64,
+        event_id: u64,
+        buyer: Address,
+        price: i128,
+        remaining_supply: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("mercbuy"),),
+            (
+                merchandise_id,
+                event_id,
+                buyer,
+                price,
+                remaining_supply,
+            ),
+        );
+    }
+}
+
+/// Emitted when a commemorative NFT is minted
+pub struct NftMinted;
+
+impl NftMinted {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        event_id: u64,
+        owner: Address,
+        rarity: crate::types::RarityTier,
+        minted_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("nftmint"),),
+            (nft_id, event_id, owner, rarity, minted_at),
+        );
+    }
+}
+
+/// Emitted when an NFT collectible is traded/transferred
+pub struct NftTraded;
+
+impl NftTraded {
+    pub fn emit(env: &Env, nft_id: u64, event_id: u64, from: Address, to: Address) {
+        env.events().publish(
+            (symbol_short!("nfttrade"),),
+            (nft_id, event_id, from, to),
+        );
+    }
+}
+
+/// Emitted when collectible inventory is configured or updated
+pub struct CollectibleInventoryUpdated;
+
+impl CollectibleInventoryUpdated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        max_supply: u32,
+        total_minted: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("colinvup"),),
+            (event_id, max_supply, total_minted),
         );
     }
 }

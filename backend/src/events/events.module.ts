@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Event } from './entities/event.entity';
+import { EventSeries } from './entities/event-series.entity';
 import { EventsService } from './events.service';
 import { EventsController } from './events.controller';
 import { EventStateService } from './state/event-state.service';
@@ -13,15 +14,18 @@ import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { SponsorContribution } from '../sponsors/entities/sponsor-contribution.entity';
 import { RefundModule } from '../payments/refunds/refund.module';
+import { EventImage } from './entities/event-image.entity';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Event, User, TicketEntity, Payment, SponsorContribution]),
+    TypeOrmModule.forFeature([Event, EventSeries, User, TicketEntity, Payment, SponsorContribution]),
     forwardRef(() => TicketsModule),
     NotificationModule,
     EscrowModule,
     AuditModule,
     forwardRef(() => RefundModule),
+    WebhooksModule,
   ],
   controllers: [EventsController],
   providers: [EventsService, EventStateService],

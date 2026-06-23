@@ -46,3 +46,22 @@ body {
 		text-wrap: balance;
 	}
 }
+
+/* ── WCAG 2.1 AA — visible focus rings for all interactive elements ── */
+:focus-visible {
+	outline: 2px solid #60a5fa;
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+
+/* Remove focus ring for mouse users only */
+:focus:not(:focus-visible) {
+	outline: none;
+}
+
+/* Ensure sufficient colour contrast on disabled elements */
+[disabled],
+[aria-disabled='true'] {
+	cursor: not-allowed;
+	opacity: 0.5;
+}

@@ -1,3 +1,4 @@
+#![allow(warnings)]
 #![allow(irrefutable_let_patterns)]
 
 use crate::error::LumentixError;
@@ -6,7 +7,7 @@ use crate::storage;
 use crate::types::{EventStatus, Ticket};
 use soroban_sdk::xdr;
 use soroban_sdk::{
-    testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, String,
+    testutils::Address as _, testutils::Events, testutils::Ledger, token, Address, Env, String,
 };
 
 fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
@@ -34,13 +35,14 @@ fn create_and_publish_event(
     client: &LumentixContractClient,
     organizer: &Address,
 ) -> u64 {
+    let now = env.ledger().timestamp();
     let event_id = client.create_event(
         organizer,
         &String::from_str(env, "Test Event"),
         &String::from_str(env, "Description"),
         &String::from_str(env, "Location"),
-        &1000u64,
-        &2000u64,
+        &(now + 1_000),
+        &(now + 2_000),
         &100i128,
         &50u32,
     );
@@ -395,6 +397,81 @@ fn test_batch_purchase_tickets_charges_list_price_per_ticket() {
     let tids = client.batch_purchase_tickets(&event_id, &2u32, &buyer);
     assert_eq!(tids.len(), 2);
     assert_eq!(client.get_escrow_balance(&event_id), 200i128);
+}
+
+#[test]
+fn test_batch_purchase_ten_tickets_reduces_availability_charges_tokens_and_maps_owners() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, contract_id, client) = create_test_contract_with_id(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_address = token_contract.address();
+    let token_client = token::Client::new(&env, &token_address);
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+    let initial_balance = 10_000i128;
+
+    token_admin_client.mint(&buyer, &initial_balance);
+    client.set_token(&admin, &token_address);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let before_buyer_balance = token_client.balance(&buyer);
+    let before_contract_balance = token_client.balance(&contract_id);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &10u32, &buyer);
+    let event = client.get_event(&event_id);
+    let total_price = 10i128 * event.ticket_price;
+
+    assert_eq!(ticket_ids.len(), 10);
+    assert_eq!(event.max_tickets - event.tickets_sold, 40);
+    assert_eq!(
+        before_buyer_balance - token_client.balance(&buyer),
+        total_price
+    );
+    assert_eq!(
+        token_client.balance(&contract_id) - before_contract_balance,
+        total_price
+    );
+
+    for i in 0..10u32 {
+        let ticket_id = ticket_ids.get(i).unwrap();
+        assert_eq!(ticket_id, i as u64 + 1);
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert_eq!(ticket.owner, buyer);
+        assert_eq!(ticket.event_id, event_id);
+    }
+}
+
+#[test]
+fn test_batch_purchase_exceeding_venue_capacity_fails_without_partial_mints() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Limited Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &5u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let result = client.try_batch_purchase_tickets(&event_id, &10u32, &buyer);
+    assert_eq!(result, Err(Ok(LumentixError::EventSoldOut)));
+    assert_eq!(client.get_event(&event_id).tickets_sold, 0);
+    assert_eq!(
+        client.try_get_ticket_info(&1u64),
+        Err(Ok(LumentixError::TicketNotFound))
+    );
 }
 
 // ============================================================================
@@ -2006,12 +2083,18 @@ fn test_get_events_by_status_mixed_statuses_filters_correctly() {
     let published_events = client.get_events_by_status(&EventStatus::Published);
     assert_eq!(published_events.len(), 1);
     assert_eq!(published_events.get(0).unwrap().id, published_event);
-    assert_eq!(published_events.get(0).unwrap().status, EventStatus::Published);
+    assert_eq!(
+        published_events.get(0).unwrap().status,
+        EventStatus::Published
+    );
 
     let cancelled_events = client.get_events_by_status(&EventStatus::Cancelled);
     assert_eq!(cancelled_events.len(), 1);
     assert_eq!(cancelled_events.get(0).unwrap().id, cancelled_event);
-    assert_eq!(cancelled_events.get(0).unwrap().status, EventStatus::Cancelled);
+    assert_eq!(
+        cancelled_events.get(0).unwrap().status,
+        EventStatus::Cancelled
+    );
 }
 
 #[test]
@@ -2767,12 +2850,116 @@ fn test_event_status_changed_published_to_completed() {
     assert!(found, "EventCompleted event not found for completion");
 }
 
+#[test]
+fn test_generic_event_state_transition_emitted_on_status_update() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Test Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"genstsch" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 4);
+                    } else {
+                        panic!("Expected Vec data");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "GenericEventStateTransition event not found for status update");
+}
+
+#[test]
+fn test_generic_event_state_transition_emitted_on_cancel_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.cancel_event(&organizer, &event_id);
+
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"genstsch" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 4);
+                    } else {
+                        panic!("Expected Vec data");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "GenericEventStateTransition event not found for cancel event");
+}
+
+#[test]
+fn test_generic_event_state_transition_emitted_on_complete_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    env.ledger().with_mut(|li| li.timestamp = 2001);
+    client.complete_event(&organizer, &event_id);
+
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"genstsch" {
+                    found = true;
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(data_vec.len(), 4);
+                    } else {
+                        panic!("Expected Vec data");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "GenericEventStateTransition event not found for complete event");
+}
+
 // ============================================================================
 // CHANGE ADMIN TESTS
 // ============================================================================
 
 #[test]
-fn test_change_admin_success() {
+fn test_update_platform_fee_recipient_success() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2780,7 +2967,7 @@ fn test_change_admin_success() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    let result = client.try_change_admin(&admin, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&admin, &new_admin);
     assert!(result.is_ok());
 
     // Verify new admin can call admin functions
@@ -2796,7 +2983,7 @@ fn test_change_admin_success() {
 }
 
 #[test]
-fn test_change_admin_unauthorized() {
+fn test_update_platform_fee_recipient_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2805,7 +2992,7 @@ fn test_change_admin_unauthorized() {
     let new_admin = Address::generate(&env);
 
     // Try to change admin as unauthorized user
-    let result = client.try_change_admin(&unauthorized, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&unauthorized, &new_admin);
     assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
 
     // Verify admin is still the original
@@ -2814,14 +3001,14 @@ fn test_change_admin_unauthorized() {
 }
 
 #[test]
-fn test_change_admin_to_same_address_fails() {
+fn test_update_platform_fee_recipient_to_same_address_fails() {
     let env = Env::default();
     env.mock_all_auths();
 
     let (admin, client) = create_test_contract(&env);
 
     // Try to change admin to the same address
-    let result = client.try_change_admin(&admin, &admin);
+    let result = client.try_update_platform_fee_recipient(&admin, &admin);
     assert_eq!(result, Err(Ok(LumentixError::InvalidAddress)));
 
     // Verify admin is unchanged
@@ -2830,7 +3017,7 @@ fn test_change_admin_to_same_address_fails() {
 }
 
 #[test]
-fn test_change_admin_get_admin_returns_new_address() {
+fn test_update_platform_fee_recipient_get_admin_returns_new_address() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2838,7 +3025,7 @@ fn test_change_admin_get_admin_returns_new_address() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // Verify get_admin returns the new admin
     let current_admin = client.get_admin();
@@ -2846,7 +3033,7 @@ fn test_change_admin_get_admin_returns_new_address() {
 }
 
 #[test]
-fn test_change_admin_set_platform_fee_with_new_admin() {
+fn test_update_platform_fee_recipient_set_platform_fee_with_new_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2854,7 +3041,7 @@ fn test_change_admin_set_platform_fee_with_new_admin() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // New admin should be able to set platform fee
     let result = client.try_set_platform_fee(&new_admin, &500u32);
@@ -2866,7 +3053,7 @@ fn test_change_admin_set_platform_fee_with_new_admin() {
 }
 
 #[test]
-fn test_change_admin_withdraw_platform_fees_with_new_admin() {
+fn test_update_platform_fee_recipient_withdraw_platform_fees_with_new_admin() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2881,7 +3068,7 @@ fn test_change_admin_withdraw_platform_fees_with_new_admin() {
     client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // New admin should be able to withdraw fees
     let withdrawn = client.withdraw_platform_fees(&new_admin);
@@ -2893,7 +3080,7 @@ fn test_change_admin_withdraw_platform_fees_with_new_admin() {
 }
 
 #[test]
-fn test_change_admin_chain_a_to_b_to_c() {
+fn test_update_platform_fee_recipient_chain_a_to_b_to_c() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2902,14 +3089,14 @@ fn test_change_admin_chain_a_to_b_to_c() {
     let admin_c = Address::generate(&env);
 
     // A -> B
-    client.change_admin(&admin_a, &admin_b);
+    client.update_platform_fee_recipient(&admin_a, &admin_b);
 
     // Verify B is now admin
     let current_admin = client.get_admin();
     assert_eq!(current_admin, admin_b);
 
     // B -> C
-    client.change_admin(&admin_b, &admin_c);
+    client.update_platform_fee_recipient(&admin_b, &admin_c);
 
     // Verify C is now admin
     let current_admin = client.get_admin();
@@ -2929,7 +3116,7 @@ fn test_change_admin_chain_a_to_b_to_c() {
 }
 
 #[test]
-fn test_change_admin_emits_event() {
+fn test_update_platform_fee_recipient_emits_event() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -2937,7 +3124,7 @@ fn test_change_admin_emits_event() {
     let new_admin = Address::generate(&env);
 
     // Change admin
-    client.change_admin(&admin, &new_admin);
+    client.update_platform_fee_recipient(&admin, &new_admin);
 
     // Verify AdminChanged event was emitted
     let events = env.events().all();
@@ -3429,7 +3616,10 @@ fn test_escrow_balance_zero_before_any_tickets_sold() {
 
     // Escrow balance should be 0
     let escrow_balance = client.get_escrow_balance(&event_id);
-    assert_eq!(escrow_balance, 0i128, "Escrow balance should be 0 before any tickets are sold");
+    assert_eq!(
+        escrow_balance, 0i128,
+        "Escrow balance should be 0 before any tickets are sold"
+    );
 }
 
 #[test]
@@ -3613,7 +3803,10 @@ fn test_escrow_balance_with_ten_percent_platform_fee() {
 
     // Verify platform balance is 40
     let platform_balance = client.get_platform_balance();
-    assert_eq!(platform_balance, 40i128, "Platform should collect 40 in fees");
+    assert_eq!(
+        platform_balance, 40i128,
+        "Platform should collect 40 in fees"
+    );
 }
 
 #[test]
@@ -3667,15 +3860,14 @@ fn test_escrow_balance_multiple_events_independent() {
     );
 
     // Total escrow across both events
-    assert_eq!(
-        escrow_1 + escrow_2,
-        665i128,
-        "Total escrow should be 665"
-    );
+    assert_eq!(escrow_1 + escrow_2, 665i128, "Total escrow should be 665");
 
     // Verify platform collected total fees: 15 + 20 = 35
     let platform_balance = client.get_platform_balance();
-    assert_eq!(platform_balance, 35i128, "Platform should collect 35 total fees");
+    assert_eq!(
+        platform_balance, 35i128,
+        "Platform should collect 35 total fees"
+    );
 }
 
 #[test]
@@ -4266,7 +4458,6 @@ fn test_get_tickets_by_buyer_populates_all_ticket_fields() {
     assert_eq!(listed.refunded, ticket_info.refunded);
 }
 
-
 #[test]
 fn test_concurrent_event_operations_multiple_organizers() {
     let env = Env::default();
@@ -4314,7 +4505,7 @@ fn test_concurrent_event_operations_multiple_organizers() {
     // 3. Verify get_tickets_by_buyer returns tickets from both events
     let buyer_tickets = client.get_tickets_by_buyer(&buyer);
     assert_eq!(buyer_tickets.len(), 2);
-    
+
     let mut has_a = false;
     let mut has_b = false;
     for ticket in buyer_tickets.iter() {
@@ -4369,7 +4560,7 @@ fn test_concurrent_event_operations_multiple_organizers() {
     // Event A had 1 ticket sold, but was refunded (tickets_sold = 0)
     // Event B had 1 ticket sold (tickets_sold = 1)
     assert_eq!(client.get_total_tickets_sold(), 1);
-    
+
     assert_eq!(client.get_organizer_total_revenue(&organizer_a), 0);
     assert_eq!(client.get_organizer_total_revenue(&organizer_b), 200);
 }
@@ -4395,7 +4586,7 @@ fn test_withdraw_funds_success() {
     // Withdraw funds
     let withdraw_amount = 200i128;
     let new_balance = client.withdraw_funds(&organizer, &event_id, &withdraw_amount);
-    
+
     // Verify balance updated correctly
     assert_eq!(new_balance, 300i128);
     assert_eq!(client.get_escrow_balance(&event_id), 300i128);
@@ -4423,7 +4614,7 @@ fn test_withdraw_funds_by_admin() {
     // Admin withdraws funds
     let withdraw_amount = 200i128;
     let new_balance = client.withdraw_funds(&admin, &event_id, &withdraw_amount);
-    
+
     // Verify balance updated correctly
     assert_eq!(new_balance, 300i128);
     assert_eq!(client.get_escrow_balance(&event_id), 300i128);
@@ -4559,7 +4750,7 @@ fn test_withdraw_all_funds() {
 
     // Withdraw all funds
     let new_balance = client.withdraw_funds(&organizer, &event_id, &deposit_amount);
-    
+
     // Verify balance is zero
     assert_eq!(new_balance, 0i128);
     assert_eq!(client.get_escrow_balance(&event_id), 0i128);
@@ -4592,7 +4783,6 @@ fn test_multiple_withdrawals() {
 
     // Final balance should be zero
     assert_eq!(client.get_escrow_balance(&event_id), 0i128);
-
 }
 
 // ============================================================================
@@ -4613,7 +4803,10 @@ fn test_bump_ticket_ttl_single_extends_without_error() {
 
     // Single TTL bump must succeed and ticket must still be readable
     let result = client.try_bump_ticket_ttl(&ticket_id);
-    assert!(result.is_ok(), "bump_ticket_ttl should succeed for existing ticket");
+    assert!(
+        result.is_ok(),
+        "bump_ticket_ttl should succeed for existing ticket"
+    );
 
     // Ticket state must be unchanged after TTL extension
     let ticket = client.get_ticket_info(&ticket_id);
@@ -4687,10 +4880,16 @@ fn test_bump_ticket_ttl_used_ticket_still_extends() {
     client.use_ticket(&ticket_id, &organizer);
 
     let result = client.try_bump_ticket_ttl(&ticket_id);
-    assert!(result.is_ok(), "bump_ticket_ttl should succeed for used ticket");
+    assert!(
+        result.is_ok(),
+        "bump_ticket_ttl should succeed for used ticket"
+    );
 
     let ticket = client.get_ticket_info(&ticket_id);
-    assert!(ticket.used, "ticket must still be marked used after TTL bump");
+    assert!(
+        ticket.used,
+        "ticket must still be marked used after TTL bump"
+    );
 }
 
 #[test]
@@ -4771,7 +4970,11 @@ fn test_update_event_metadata_published_event_emits_event() {
                     found = true;
                     // Verify data: (event_id, organizer, time_updated)
                     if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
-                        assert_eq!(data_vec.len(), 3, "EventMetadataUpdated must carry 3 fields");
+                        assert_eq!(
+                            data_vec.len(),
+                            3,
+                            "EventMetadataUpdated must carry 3 fields"
+                        );
                     } else {
                         panic!("Expected Vec data for EventMetadataUpdated");
                     }
@@ -4880,7 +5083,7 @@ fn test_update_event_metadata_persists_changes() {
 // ============================================================================
 
 #[test]
-fn test_treasury_rotation_non_admin_cannot_change_admin() {
+fn test_treasury_rotation_non_admin_cannot_update_platform_fee_recipient() {
     // Non-admin attempts to rotate recipient, fails auth.
     let env = Env::default();
     env.mock_all_auths();
@@ -4889,7 +5092,7 @@ fn test_treasury_rotation_non_admin_cannot_change_admin() {
     let attacker = Address::generate(&env);
     let new_admin = Address::generate(&env);
 
-    let result = client.try_change_admin(&attacker, &new_admin);
+    let result = client.try_update_platform_fee_recipient(&attacker, &new_admin);
     assert_eq!(
         result,
         Err(Ok(LumentixError::Unauthorized)),
@@ -4909,7 +5112,7 @@ fn test_treasury_rotation_admin_rotates_recipient_a_to_b() {
     let (addr_a, client) = create_test_contract(&env);
     let addr_b = Address::generate(&env);
 
-    let result = client.try_change_admin(&addr_a, &addr_b);
+    let result = client.try_update_platform_fee_recipient(&addr_a, &addr_b);
     assert!(result.is_ok(), "Admin must be able to rotate recipient");
 
     assert_eq!(
@@ -4943,7 +5146,7 @@ fn test_treasury_rotation_subsequent_withdrawal_resolves_to_new_recipient() {
     assert_eq!(client.get_platform_balance(), 20i128);
 
     // Rotate recipient from A to B
-    client.change_admin(&addr_a, &addr_b);
+    client.update_platform_fee_recipient(&addr_a, &addr_b);
 
     // Address_A must no longer be able to withdraw
     let old_withdraw = client.try_withdraw_platform_fees(&addr_a);
@@ -4975,7 +5178,7 @@ fn test_treasury_rotation_escrow_release_after_rotation_goes_to_organizer_not_ad
     client.purchase_ticket(&buyer, &event_id, &100i128);
 
     // Rotate admin
-    client.change_admin(&addr_a, &addr_b);
+    client.update_platform_fee_recipient(&addr_a, &addr_b);
 
     // Complete event and release escrow — must go to organizer
     env.ledger().with_mut(|li| li.timestamp = 2001);
@@ -5014,7 +5217,11 @@ fn test_pause_ticket_sales_emits_event_sales_paused() {
                 if topic_sym.as_slice() == b"salespaus" {
                     found = true;
                     if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
-                        assert_eq!(data_vec.len(), 3, "EventSalesPaused must carry (event_id, organizer, timestamp)");
+                        assert_eq!(
+                            data_vec.len(),
+                            3,
+                            "EventSalesPaused must carry (event_id, organizer, timestamp)"
+                        );
                     } else {
                         panic!("Expected Vec data for EventSalesPaused");
                     }
@@ -5049,7 +5256,11 @@ fn test_resume_ticket_sales_emits_event_sales_resumed() {
                 if topic_sym.as_slice() == b"salesrsm" {
                     found = true;
                     if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
-                        assert_eq!(data_vec.len(), 3, "EventSalesResumed must carry (event_id, organizer, timestamp)");
+                        assert_eq!(
+                            data_vec.len(),
+                            3,
+                            "EventSalesResumed must carry (event_id, organizer, timestamp)"
+                        );
                     } else {
                         panic!("Expected Vec data for EventSalesResumed");
                     }
@@ -5226,7 +5437,9 @@ fn test_set_event_capacity() {
     client.update_event_status(&event_id, &EventStatus::Published, &organizer);
 
     // Increase to 200
-    assert!(client.try_set_event_capacity(&organizer, &event_id, &200u32).is_ok());
+    assert!(client
+        .try_set_event_capacity(&organizer, &event_id, &200u32)
+        .is_ok());
 
     // Buy 50
     for _ in 0..5 {
@@ -5238,7 +5451,9 @@ fn test_set_event_capacity() {
     assert_eq!(res, Err(Ok(LumentixError::CapacityExceeded)));
 
     // Decrease to 50 should succeed
-    assert!(client.try_set_event_capacity(&organizer, &event_id, &50u32).is_ok());
+    assert!(client
+        .try_set_event_capacity(&organizer, &event_id, &50u32)
+        .is_ok());
 }
 
 #[test]
@@ -5249,28 +5464,43 @@ fn test_calculate_dynamic_price_time_tiers() {
     let organizer = Address::generate(&env);
 
     env.ledger().with_mut(|li| li.timestamp = 1_000);
+    let start_far = 1_000 + (31 * 24 * 60 * 60);
     let event_id = client.create_event(
         &organizer,
         &String::from_str(&env, "Dynamic"),
         &String::from_str(&env, "Pricing"),
         &String::from_str(&env, "Venue"),
-        &2_000u64,
-        &(1_000 + (31 * 24 * 60 * 60)),
+        &start_far,
+        &(start_far + 3_600),
         &100i128,
         &100u32,
     );
     client.update_event_status(&event_id, &EventStatus::Published, &organizer);
 
+    use crate::types::PricingSchedule;
+    let schedule = PricingSchedule {
+        early_bird_multiplier_bps: 8_000,
+        standard_multiplier_bps: 10_000,
+        late_multiplier_bps: 10_000,
+        last_minute_multiplier_bps: 15_000,
+        early_bird_days: 30,
+        standard_days: 7,
+        last_minute_hours: 24,
+    };
+    assert!(client
+        .try_set_pricing_schedule(&organizer, &event_id, &schedule)
+        .is_ok());
+
     let early = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
     assert_eq!(early, 80i128);
 
     env.ledger()
-        .with_mut(|li| li.timestamp = 1_000 + (10 * 24 * 60 * 60));
+        .with_mut(|li| li.timestamp = start_far - (10 * 24 * 60 * 60));
     let normal = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
     assert_eq!(normal, 100i128);
 
     env.ledger()
-        .with_mut(|li| li.timestamp = (1_000 + (31 * 24 * 60 * 60)) - (12 * 60 * 60));
+        .with_mut(|li| li.timestamp = start_far - (12 * 60 * 60));
     let last_minute = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
     assert_eq!(last_minute, 150i128);
 }
@@ -5290,8 +5520,8 @@ fn test_waitlist_fifo_offer_and_reserved_capacity() {
         &String::from_str(&env, "Waitlist Event"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Loc"),
-        &1000u64,
-        &2000u64,
+        &(env.ledger().timestamp() + 1_000),
+        &(env.ledger().timestamp() + 2_000),
         &100i128,
         &1u32,
     );
@@ -5314,4 +5544,1176 @@ fn test_waitlist_fifo_offer_and_reserved_capacity() {
     assert!(client
         .try_purchase_ticket(&buyer_b, &event_id, &100i128)
         .is_ok());
+}
+
+#[test]
+fn test_pricing_schedule_and_current_tier() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_000);
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Tiered"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &(1_000 + (10 * 24 * 60 * 60)),
+        &(1_000 + (11 * 24 * 60 * 60)),
+        &100i128,
+        &50u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    use crate::types::{PriceTier, PricingSchedule};
+    let schedule = PricingSchedule {
+        early_bird_multiplier_bps: 8_000,
+        standard_multiplier_bps: 10_000,
+        late_multiplier_bps: 10_000,
+        last_minute_multiplier_bps: 15_000,
+        early_bird_days: 30,
+        standard_days: 7,
+        last_minute_hours: 24,
+    };
+    assert!(client
+        .try_set_pricing_schedule(&organizer, &event_id, &schedule)
+        .is_ok());
+
+    let tier = client.get_current_price_tier(&event_id);
+    assert_eq!(tier, PriceTier::Standard);
+
+    let price = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
+    assert_eq!(price, 100i128);
+}
+
+#[test]
+fn test_mint_batch_tickets_tracks_gas_usage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let optimal = client.optimize_mint_gas(&event_id, &3u32);
+    assert!(optimal >= 1);
+
+    let ticket_ids = client.mint_batch_tickets(&event_id, &3u32, &buyer);
+    assert_eq!(ticket_ids.len(), 3);
+
+    let usage = client.track_mint_gas_usage(&event_id);
+    assert_eq!(usage.total_mints, 1);
+    assert_eq!(usage.total_tickets_minted, 3);
+    assert!(usage.total_resource_units > 0);
+}
+
+#[test]
+fn test_hybrid_streaming_delivery_and_performance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = client.create_hybrid_event(
+        &organizer,
+        &String::from_str(&env, "Hybrid Conf"),
+        &100i128,
+        &100u32,
+        &1_000_000u64,
+        &2_000_000u64,
+        &String::from_str(&env, "https://cdn.example/live/master.m3u8"),
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    let delivery = client.manage_content_delivery(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "https://cdn.lumentix.example"),
+        &String::from_str(&env, "https://stream.lumentix.example/live.m3u8"),
+        &String::from_str(&env, "auto"),
+    );
+    assert_eq!(delivery.target_bitrate_kbps, 2_500);
+
+    let tuned = client.optimize_stream_quality(&organizer, &event_id, &4_500u32);
+    assert_eq!(tuned.target_bitrate_kbps, 4_500);
+
+    let metrics = client.monitor_streaming_performance(&event_id, &3_800u32, &150u32, &42u32);
+    assert_eq!(metrics.concurrent_viewers, 42);
+    assert!(metrics.quality_score >= 60);
+}
+
+// ============================================================================
+// ADMINISTRATIVE OVERSIGHT OPERATIONS TESTS
+// ============================================================================
+
+#[test]
+fn test_normal_user_revoke_fails_auth_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let normal_user = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_revoke_ticket(&normal_user, &ticket_id);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_admin_executes_revoke_on_valid_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    let result = client.try_revoke_ticket(&admin, &ticket_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_valid_ticket_gets_flagged_invalid_after_revoke() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Verify ticket is initially valid
+    assert!(client.get_ticket_validity(&ticket_id));
+
+    // Revoke the ticket
+    client.revoke_ticket(&admin, &ticket_id);
+
+    // Verify ticket is now invalid
+    assert!(!client.get_ticket_validity(&ticket_id));
+}
+
+#[test]
+fn test_regular_check_in_use_ticket_flags_revoked_ticket_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Revoke the ticket
+    client.revoke_ticket(&admin, &ticket_id);
+
+    // Attempt to use the revoked ticket should fail
+    let result = client.try_use_ticket(&ticket_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::RevokedTicket)));
+}
+
+#[test]
+fn test_transfer_attempts_on_revoked_tickets_crash() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&owner, &event_id, &100i128);
+
+    // Revoke the ticket
+    client.revoke_ticket(&admin, &ticket_id);
+
+    // Attempt to transfer the revoked ticket should fail
+    let result = client.try_transfer_ticket(&ticket_id, &owner, &recipient);
+    assert_eq!(result, Err(Ok(LumentixError::RevokedTicket)));
+}
+
+// ============================================================================
+// STORAGE EXTENSIONS TESTS
+// ============================================================================
+
+#[test]
+fn test_extending_single_ttl_logic_executes_properly() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Extend TTL for the ticket - this should execute without error
+    let result = client.try_bump_ticket_ttl(&ticket_id);
+    assert!(result.is_ok());
+
+    // Extend TTL for the event - this should execute without error
+    let result = client.try_bump_event_ttl(&event_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_batch_operations_extend_ttls_dynamically() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Purchase multiple tickets
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &4u32, &buyer);
+
+    // Extend TTL for multiple tickets to prevent accidental expiration during deep modifications
+    for ticket_id in ticket_ids.iter() {
+        let result = client.try_bump_ticket_ttl(&ticket_id);
+        assert!(result.is_ok());
+    }
+
+    // Extend TTL for the event as well
+    let result = client.try_bump_event_ttl(&event_id);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_correct_state_of_minimum_and_max_ttl_allocations() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Test that TTL extension operations work correctly
+    // The PERSISTENT_LIFETIME constant provides the TTL allocation
+    let result = client.try_bump_ticket_ttl(&ticket_id);
+    assert!(result.is_ok());
+
+    let result = client.try_bump_event_ttl(&event_id);
+    assert!(result.is_ok());
+
+    // Verify that the ticket and event still exist after TTL extension
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket.id, ticket_id);
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.id, event_id);
+}
+
+// ============================================================================
+// MULTI-CHECK-IN FLOWS TESTS
+// ============================================================================
+
+#[test]
+fn test_batch_check_in_4_valid_tickets_changes_all_state_to_used() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Purchase 4 tickets for the same user
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &4u32, &buyer);
+
+    // Batch check-in all 4 tickets
+    let result = client.try_batch_use_tickets(&ticket_ids, &organizer);
+    assert!(result.is_ok());
+
+    // Verify all tickets are marked as used
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert!(ticket.used, "Ticket {} should be marked as used", ticket_id);
+    }
+}
+
+#[test]
+fn test_batch_check_in_different_user_succeeds_if_same_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer1 = Address::generate(&env);
+    let buyer2 = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Purchase 3 tickets for buyer1 and 1 ticket for buyer2
+    let mut ticket_ids = client.batch_purchase_tickets(&event_id, &3u32, &buyer1);
+    let buyer2_ticket = client.purchase_ticket(&buyer2, &event_id, &100i128);
+    ticket_ids.push_back(buyer2_ticket);
+
+    // Batch check-in should succeed since all tickets belong to the same event with same organizer
+    let result = client.try_batch_use_tickets(&ticket_ids, &organizer);
+    assert!(
+        result.is_ok(),
+        "Batch check-in should succeed when organizer is authorized for all tickets"
+    );
+
+    // Verify all tickets were marked as used
+    for ticket_id in ticket_ids.iter() {
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert!(
+            ticket.used,
+            "All tickets should be marked as used after successful batch operation"
+        );
+    }
+}
+
+#[test]
+fn test_already_used_ids_in_batch_gracefully_reject_tx() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Purchase 4 tickets
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &4u32, &buyer);
+
+    // Use one ticket individually first
+    let first_ticket = ticket_ids.get(0).unwrap();
+    client.use_ticket(&first_ticket, &organizer);
+
+    // Attempt batch check-in including the already used ticket
+    let result = client.try_batch_use_tickets(&ticket_ids, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::TicketAlreadyUsed)));
+
+    // Verify state consistency: other tickets should remain unused
+    for i in 1..ticket_ids.len() {
+        let ticket_id = ticket_ids.get(i).unwrap();
+        let ticket = client.get_ticket_info(&ticket_id);
+        assert!(
+            !ticket.used,
+            "Unused tickets should remain unused after failed batch operation"
+        );
+    }
+}
+
+// ============================================================================
+// EXTEND EVENT END TIME TESTS
+// ============================================================================
+
+#[test]
+fn test_extend_event_end_time_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_extend_event_end_time(&organizer, &event_id, &88400u64);
+    assert!(result.is_ok());
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.end_time, 88400u64);
+}
+
+#[test]
+fn test_extend_event_end_time_allows_subsequent_extensions() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let first = client.try_extend_event_end_time(&organizer, &event_id, &88400u64);
+    assert!(first.is_ok());
+
+    let second = client.try_extend_event_end_time(&organizer, &event_id, &174800u64);
+    assert!(second.is_ok());
+    assert_eq!(client.get_event(&event_id).end_time, 174800u64);
+}
+
+#[test]
+fn test_extend_event_end_time_unauthorized_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_extend_event_end_time(&attacker, &event_id, &3000u64);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+
+    // End time must remain unchanged
+    let event = client.get_event(&event_id);
+    assert_eq!(event.end_time, 2000u64);
+}
+
+#[test]
+fn test_extend_event_end_time_draft_event_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create but do NOT publish — stays Draft
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let result = client.try_extend_event_end_time(&organizer, &event_id, &3000u64);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+#[test]
+fn test_extend_event_end_time_new_time_not_after_current_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Same end time — must fail
+    let same = client.try_extend_event_end_time(&organizer, &event_id, &2000u64);
+    assert_eq!(same, Err(Ok(LumentixError::InvalidTimeRange)));
+
+    // Earlier end time — must also fail
+    let earlier = client.try_extend_event_end_time(&organizer, &event_id, &1500u64);
+    assert_eq!(earlier, Err(Ok(LumentixError::InvalidTimeRange)));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #15)")]
+fn test_extend_event_end_time_backward_panics_on_non_try_client() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.extend_event_end_time(&organizer, &event_id, &1500u64);
+}
+
+#[test]
+fn test_extend_event_end_time_allows_completion_at_new_time() {
+    // After extending end_time, the event must NOT be completable before the new
+    // end_time but MUST be completable after it.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Extend end time to 4000
+    client.extend_event_end_time(&organizer, &event_id, &4000u64);
+
+    // Timestamp just past original end (2001) — should still fail
+    env.ledger().with_mut(|li| li.timestamp = 2001);
+    let too_early = client.try_complete_event(&organizer, &event_id);
+    assert_eq!(too_early, Err(Ok(LumentixError::InvalidStatusTransition)));
+
+    // Timestamp past new end (4001) — should succeed
+    env.ledger().with_mut(|li| li.timestamp = 4001);
+    let result = client.try_complete_event(&organizer, &event_id);
+    assert!(result.is_ok());
+
+    let event = client.get_event(&event_id);
+    assert_eq!(event.status, EventStatus::Completed);
+}
+
+#[test]
+fn test_extend_event_end_time_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.extend_event_end_time(&organizer, &event_id, &5000u64);
+
+    // Verify EventTimeExtended was emitted with topic "timeext"
+    let events = env.events().all();
+    let mut found = false;
+    for xdr_event in events.events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
+                if topic_sym.as_slice() == b"timeext" {
+                    found = true;
+                    // Verify data: (event_id, previous_end_time, new_end_time)
+                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
+                        assert_eq!(
+                            data_vec.len(),
+                            3,
+                            "EventTimeExtended must carry (event_id, previous_end_time, new_end_time)"
+                        );
+                    } else {
+                        panic!("Expected Vec data for EventTimeExtended");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    assert!(found, "EventTimeExtended event not emitted");
+}
+
+// ============================================================================
+// AUTH CONSTRAINTS TESTS
+// ============================================================================
+
+#[test]
+fn test_valid_organizer_successfully_updates_draft_event_fields() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Original Description"),
+        &String::from_str(&env, "Original Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Valid organizer should successfully update string name, location, and metadata fields
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event Name"),
+        &String::from_str(&env, "Updated Description with metadata"),
+        &String::from_str(&env, "Updated Location"),
+        &1500u64,
+        &2500u64,
+        &150i128,
+        &75u32,
+    );
+    assert!(result.is_ok());
+
+    // Verify the updates were applied
+    let event = client.get_event(&event_id);
+    assert_eq!(event.name, String::from_str(&env, "Updated Event Name"));
+    assert_eq!(
+        event.description,
+        String::from_str(&env, "Updated Description with metadata")
+    );
+    assert_eq!(event.location, String::from_str(&env, "Updated Location"));
+}
+
+#[test]
+fn test_non_organizer_account_gets_auth_error_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let non_organizer = Address::generate(&env);
+
+    // Create a draft event
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Original Event"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Non-organizer account calling the method should get Auth Error
+    let result = client.try_update_event(
+        &non_organizer,
+        &event_id,
+        &String::from_str(&env, "Unauthorized Update"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "Location"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_modifying_details_post_publish_correctly_surfaces_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create and publish event (sales have begun)
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Test modifying details post-publish - business rules forbid editing location after sales begin
+    let result = client.try_update_event(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Updated Event Name"),
+        &String::from_str(&env, "Updated Description"),
+        &String::from_str(&env, "Updated Location"), // This should not be allowed after publish
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    // Assert the panic correctly surfaces as InvalidStatusTransition
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+}
+
+// ============================================================================
+// ISSUE #539 – EventMetadataUpdated EMISSION FIELD-LEVEL TESTS
+// Verifies that EventMetadataUpdated carries the correct (event_id, organizer,
+// time_updated) values and is NOT emitted on error paths.
+// ============================================================================
+
+/// Helper: find the first ContractEvent whose first topic symbol equals `needle`.
+/// Returns the raw data ScVal for further inspection.
+/// Used by both the #539 (evtmeta) and #541 (capchng) test suites.
+fn find_event_by_topic(env: &Env, needle: &[u8]) -> Option<xdr::ScVal> {
+    for xdr_event in env.events().all().events() {
+        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
+            if let Some(xdr::ScVal::Symbol(sym)) = body.topics.first() {
+                if sym.as_slice() == needle {
+                    return Some(body.data.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn capacity_change_from_event(data: xdr::ScVal) -> (u32, u32) {
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        let old = match &fields[1] {
+            xdr::ScVal::U32(v) => *v,
+            other => panic!("expected U32 for old_capacity, got {:?}", other),
+        };
+        let new = match &fields[2] {
+            xdr::ScVal::U32(v) => *v,
+            other => panic!("expected U32 for new_capacity, got {:?}", other),
+        };
+        (old, new)
+    } else {
+        panic!("EventCapacityChanged data must be a Vec");
+    }
+}
+
+fn metadata_timestamp_from_event(data: xdr::ScVal) -> u64 {
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        match &fields[2] {
+            xdr::ScVal::U64(v) => *v,
+            other => panic!("expected U64 for time_updated, got {:?}", other),
+        }
+    } else {
+        panic!("EventMetadataUpdated data must be a Vec");
+    }
+}
+
+/// EventMetadataUpdated emits the correct event_id as the first data field.
+#[test]
+fn test_event_metadata_updated_emits_correct_event_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 9000);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let data = find_event_by_topic(&env, b"evtmeta").expect("EventMetadataUpdated not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        // field[0] = event_id (u64)
+        let emitted_id = match &fields[0] {
+            xdr::ScVal::U64(v) => *v,
+            other => panic!("expected U64 event_id, got {:?}", other),
+        };
+        assert_eq!(
+            emitted_id, event_id,
+            "emitted event_id must match the updated event"
+        );
+    } else {
+        panic!("EventMetadataUpdated data must be a Vec");
+    }
+}
+
+/// EventMetadataUpdated emits the correct organizer address as the second field.
+#[test]
+fn test_event_metadata_updated_emits_correct_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 9001);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let data = find_event_by_topic(&env, b"evtmeta").expect("EventMetadataUpdated not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        // field[1] = organizer (Address) — encoded as ScVal::Address
+        match &fields[1] {
+            xdr::ScVal::Address(_) => { /* correct type */ }
+            other => panic!("expected ScVal::Address for organizer, got {:?}", other),
+        }
+    } else {
+        panic!("EventMetadataUpdated data must be a Vec");
+    }
+}
+
+/// EventMetadataUpdated emits the ledger timestamp as time_updated (third field).
+#[test]
+fn test_event_metadata_updated_emits_correct_time_updated() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let fixed_ts: u64 = 42_000;
+    env.ledger().with_mut(|li| li.timestamp = fixed_ts);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Name"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let data = find_event_by_topic(&env, b"evtmeta").expect("EventMetadataUpdated not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        // field[2] = time_updated (u64) – must equal the ledger timestamp at call time
+        let emitted_ts = match &fields[2] {
+            xdr::ScVal::U64(v) => *v,
+            other => panic!("expected U64 time_updated, got {:?}", other),
+        };
+        assert_eq!(
+            emitted_ts, fixed_ts,
+            "time_updated must equal the ledger timestamp at the moment of the call"
+        );
+    } else {
+        panic!("EventMetadataUpdated data must be a Vec");
+    }
+}
+
+/// No EventMetadataUpdated event is emitted when the caller is not the organizer.
+#[test]
+fn test_event_metadata_updated_not_emitted_on_unauthorized_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // This call must fail – no event should be emitted
+    let result = client.try_update_event_metadata(
+        &attacker,
+        &event_id,
+        &String::from_str(&env, "Hacked"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+
+    // Confirm EventMetadataUpdated was NOT emitted
+    assert!(
+        find_event_by_topic(&env, b"evtmeta").is_none(),
+        "EventMetadataUpdated must NOT be emitted when authorization fails"
+    );
+}
+
+/// No EventMetadataUpdated event is emitted when the event is in Draft status.
+#[test]
+fn test_event_metadata_updated_not_emitted_on_draft_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    // Create but do NOT publish (leaves status as Draft)
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Draft Event"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+
+    let result = client.try_update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "New Name"),
+        &String::from_str(&env, "New Desc"),
+        &String::from_str(&env, "New Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
+
+    // Confirm EventMetadataUpdated was NOT emitted
+    assert!(
+        find_event_by_topic(&env, b"evtmeta").is_none(),
+        "EventMetadataUpdated must NOT be emitted for a Draft event"
+    );
+}
+
+/// Successive updates each emit a separate EventMetadataUpdated event, and the
+/// time_updated in the second event reflects the updated ledger timestamp.
+#[test]
+fn test_event_metadata_updated_successive_updates_emit_independent_events_with_fresh_timestamps() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // ── First update at t=1000 ────────────────────────────────────────────────
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "First Update"),
+        &String::from_str(&env, "Desc A"),
+        &String::from_str(&env, "Loc A"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    let first_meta = find_event_by_topic(&env, b"evtmeta").expect("first evtmeta not emitted");
+    assert_eq!(
+        metadata_timestamp_from_event(first_meta),
+        1000,
+        "first event time_updated must be 1000"
+    );
+
+    // ── Second update at t=2000 ───────────────────────────────────────────────
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+    client.update_event_metadata(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "Second Update"),
+        &String::from_str(&env, "Desc B"),
+        &String::from_str(&env, "Loc B"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &50u32,
+    );
+    let second_meta = find_event_by_topic(&env, b"evtmeta").expect("second evtmeta not emitted");
+    assert_eq!(
+        metadata_timestamp_from_event(second_meta),
+        2000,
+        "second event time_updated must be 2000"
+    );
+}
+
+// ============================================================================
+// ISSUE #541 – EventCapacityChanged EMISSION FIELD-LEVEL TESTS
+// Verifies that EventCapacityChanged carries the correct
+// (event_id, old_capacity, new_capacity) values and is NOT emitted on error
+// paths. Complements the existing business-logic test_set_event_capacity which
+// does not inspect the event at all.
+// ============================================================================
+
+/// EventCapacityChanged is emitted when capacity is successfully increased.
+#[test]
+fn test_event_capacity_changed_emitted_on_increase() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_event_capacity(&organizer, &event_id, &200u32);
+
+    assert!(
+        find_event_by_topic(&env, b"capchng").is_some(),
+        "EventCapacityChanged must be emitted when capacity is successfully increased"
+    );
+}
+
+/// EventCapacityChanged field[0] carries the correct event_id.
+#[test]
+fn test_event_capacity_changed_emits_correct_event_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_event_capacity(&organizer, &event_id, &300u32);
+
+    let data = find_event_by_topic(&env, b"capchng").expect("EventCapacityChanged not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        let emitted_id = match &fields[0] {
+            xdr::ScVal::U64(v) => *v,
+            other => panic!("expected U64 for event_id, got {:?}", other),
+        };
+        assert_eq!(
+            emitted_id, event_id,
+            "field[0] (event_id) must equal the ID of the updated event"
+        );
+    } else {
+        panic!("EventCapacityChanged data must be a Vec");
+    }
+}
+
+/// EventCapacityChanged field[1] carries old_capacity (the original max_tickets).
+/// create_and_publish_event uses 50 as max_tickets.
+#[test]
+fn test_event_capacity_changed_emits_correct_old_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    // create_and_publish_event creates the event with max_tickets = 50
+    let expected_old: u32 = 50;
+
+    client.set_event_capacity(&organizer, &event_id, &250u32);
+
+    let data = find_event_by_topic(&env, b"capchng").expect("EventCapacityChanged not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        let old_cap = match &fields[1] {
+            xdr::ScVal::U32(v) => *v,
+            other => panic!("expected U32 for old_capacity, got {:?}", other),
+        };
+        assert_eq!(
+            old_cap, expected_old,
+            "field[1] (old_capacity) must equal max_tickets before the call"
+        );
+    } else {
+        panic!("EventCapacityChanged data must be a Vec");
+    }
+}
+
+/// EventCapacityChanged field[2] carries new_capacity (the value passed into the call).
+#[test]
+fn test_event_capacity_changed_emits_correct_new_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let requested_new: u32 = 400;
+
+    client.set_event_capacity(&organizer, &event_id, &requested_new);
+
+    let data = find_event_by_topic(&env, b"capchng").expect("EventCapacityChanged not emitted");
+
+    if let xdr::ScVal::Vec(Some(fields)) = data {
+        let new_cap = match &fields[2] {
+            xdr::ScVal::U32(v) => *v,
+            other => panic!("expected U32 for new_capacity, got {:?}", other),
+        };
+        assert_eq!(
+            new_cap, requested_new,
+            "field[2] (new_capacity) must equal the value passed to set_event_capacity"
+        );
+    } else {
+        panic!("EventCapacityChanged data must be a Vec");
+    }
+}
+
+/// No EventCapacityChanged event is emitted when the caller is not the organizer.
+#[test]
+fn test_event_capacity_changed_not_emitted_on_unauthorized_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_set_event_capacity(&attacker, &event_id, &999u32);
+    assert_eq!(
+        result,
+        Err(Ok(LumentixError::Unauthorized)),
+        "non-organizer call must return Unauthorized"
+    );
+
+    assert!(
+        find_event_by_topic(&env, b"capchng").is_none(),
+        "EventCapacityChanged must NOT be emitted when authorization fails"
+    );
+}
+
+/// No EventCapacityChanged event is emitted when new_capacity < tickets_sold.
+#[test]
+fn test_event_capacity_changed_not_emitted_when_capacity_below_tickets_sold() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Create event with max 5 tickets
+    let event_id = client.create_event(
+        &organizer,
+        &String::from_str(&env, "Capacity Test"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Loc"),
+        &1000u64,
+        &2000u64,
+        &100i128,
+        &5u32,
+    );
+    client.update_event_status(&event_id, &EventStatus::Published, &organizer);
+
+    // Sell 3 tickets
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // Try to reduce capacity to 2 (below 3 sold) — must fail
+    let result = client.try_set_event_capacity(&organizer, &event_id, &2u32);
+    assert_eq!(
+        result,
+        Err(Ok(LumentixError::CapacityExceeded)),
+        "reducing capacity below tickets_sold must return CapacityExceeded"
+    );
+
+    assert!(
+        find_event_by_topic(&env, b"capchng").is_none(),
+        "EventCapacityChanged must NOT be emitted when the call fails with CapacityExceeded"
+    );
+}
+
+/// Successive capacity changes emit independent EventCapacityChanged events, each
+/// carrying the correct old/new values relative to that specific call.
+#[test]
+fn test_event_capacity_changed_successive_calls_emit_independent_events_with_correct_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    // create_and_publish_event starts at max_tickets = 50
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // First change: 50 → 200
+    client.set_event_capacity(&organizer, &event_id, &200u32);
+    let first_change = find_event_by_topic(&env, b"capchng").expect("first capchng not emitted");
+    assert_eq!(
+        capacity_change_from_event(first_change),
+        (50, 200),
+        "first event: old=50 new=200"
+    );
+
+    // Second change: 200 → 150
+    client.set_event_capacity(&organizer, &event_id, &150u32);
+    let second_change = find_event_by_topic(&env, b"capchng").expect("second capchng not emitted");
+    assert_eq!(
+        capacity_change_from_event(second_change),
+        (200, 150),
+        "second event: old=200 new=150"
+    );
 }

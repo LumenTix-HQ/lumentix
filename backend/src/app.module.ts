@@ -9,6 +9,8 @@ import { ThrottlerStorageRedisService } from 'nestjs-throttler-storage-redis';
 import Redis from 'ioredis';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
+import { LoggerService } from './common/logging/logger.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -28,6 +30,15 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { InsuranceModule } from './insurance/insurance.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { VenuesModule } from './venues/venues.module';
+import { GamificationModule } from './gamification/gamification.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
+import { CategoriesModule } from './categories/categories.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { StreamingModule } from './streaming/streaming.module';
 
 
 @Module({
@@ -104,14 +115,23 @@ import { RegistrationsModule } from './registrations/registrations.module';
     TicketsModule,
     AdminModule,
     RegistrationsModule,
-
+    AnalyticsModule,
+    SchedulingModule,
+    CategoriesModule,
+    WebhooksModule,
+    StreamingModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    LoggerService,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CorrelationIdInterceptor,
     },
     {
       provide: APP_INTERCEPTOR,

@@ -34,6 +34,7 @@ impl SponsorsContract {
         env.storage().persistent().set(&key, &tier);
 
         // Emit SponsorTierRegistered event
+        #[allow(deprecated)]
         env.events().publish(
             (symbol_short!("sponstier"),),
             (event_id, tier_id, price, max_sponsors),
@@ -69,6 +70,7 @@ impl SponsorsContract {
         tier.sponsor_count = tier.sponsor_count.saturating_add(1);
         env.storage().persistent().set(&key, &tier);
 
+        #[allow(deprecated)]
         env.events().publish(
             (Symbol::new(&env, "SponsorContributed"),),
             (event_id, tier_id, sponsor, amount, tier.sponsor_count),
@@ -159,6 +161,7 @@ mod sponsor_tests {
         assert_eq!(events.events().len(), 1);
 
         let xdr_event = events.events().get(0).unwrap();
+        #[allow(irrefutable_let_patterns)]
         if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
             assert_eq!(body.topics.len(), 1);
             if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
@@ -217,33 +220,55 @@ mod sponsor_tests {
     }
 }
 
-mod contract;
-mod error;
-mod events;
+pub mod contract;
+pub mod error;
+pub mod events;
 pub mod lumentix_contract;
-mod models;
+pub mod models;
 pub mod storage;
 pub mod types;
 pub mod validation;
 
 #[cfg(test)]
-mod test;
+pub mod test;
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 #[cfg(test)]
-mod get_protocol_fee_test;
+pub mod get_protocol_fee_test;
 
 #[cfg(test)]
-mod withdraw_platform_fees_test;
+pub mod withdraw_platform_fees_test;
 
 #[cfg(test)]
-mod vip_accessibility_currency_seat_tests;
+pub mod vip_accessibility_currency_seat_tests;
+
+#[cfg(test)]
+mod upgrade_carbon_identity_crosschain_tests;
+
+#[cfg(test)]
+mod merchandise_nft_tests;
 
 pub use contract::TicketContract;
 pub use error::LumentixError;
-pub use events::{CheckInEvent, EventCancelled, EventMetadataUpdated, EventSalesPaused, EventSalesResumed, TransferEvent};
+pub use events::{
+    AttendanceVerificationFailed, AttendanceVerified, BlockchainIdentityVerified,
+    BridgeTransactionValidated, CarbonFootprintCalculated, CarbonOffsetPurchased,
+    CheckInEvent, CollectibleInventoryUpdated, CrossChainTransferCompleted,
+    CrossChainTransferInitiated, EnvironmentalImpactUpdated, EventCancelled, EventMetadataUpdated,
+    EventSalesPaused, EventSalesResumed, IdentityCredentialIssued, IdentityCredentialRevoked,
+    InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased, MerchandiseCreated,
+    MerchandisePurchased, NftMinted, NftTraded, ReputationUpdated, ReviewSubmitted, TransferEvent,
+    UpgradeExecuted, UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast,
+};
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
-pub use types::{Event, EventStatus, Ticket as LumentixTicket};
+pub use types::{
+    BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
+    CollectibleInventory, CrossChainTransfer, CrossChainTransferStatus, EnvironmentalImpact,
+    Event, EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,
+    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation,
+    RarityTier, Ticket as LumentixTicket, UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
+    UpgradeVote,
+};

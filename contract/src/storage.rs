@@ -1,10 +1,14 @@
 use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, CurrencyConfig, Event, Seat, Ticket,
-    TicketTransferRecord, VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME,
-    PERSISTENT_LIFETIME,
+    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
+    CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer, CurrencyConfig,
+    EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
+    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation, Seat,
+    Ticket, TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
+    VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
+    StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
 };
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
 // Storage keys
 const INITIALIZED: &str = "INIT";
@@ -29,6 +33,17 @@ const WAITLIST_QUEUE_PREFIX: &str = "WQUEUE_";
 const WAITLIST_OFFER_PREFIX: &str = "WOFFER_";
 const WAITLIST_OFFER_RECIPIENTS_PREFIX: &str = "WOFRECS_";
 const WAITLIST_RESERVED_PREFIX: &str = "WRESV_";
+const PRICING_SCHEDULE_PREFIX: &str = "PRSCHED_";
+const MINT_GAS_PREFIX: &str = "MINTGAS_";
+const STREAM_DELIVERY_PREFIX: &str = "STRMDEL_";
+const STREAM_PERF_PREFIX: &str = "STRMPERF_";
+const INSURANCE_POLICY_PREFIX: &str = "INSPOL_";
+const INSURANCE_POLICY_ID_COUNTER: &str = "INSPOL_CTR";
+const INSURANCE_POOL: &str = "INSPOOL";
+const REVIEW_PREFIX: &str = "REVIEW_";
+const REVIEW_ID_COUNTER: &str = "REVIEW_CTR";
+const REVIEWER_EVENT_PREFIX: &str = "REVEVT_";
+const ORGANIZER_REPUTATION_PREFIX: &str = "ORGREP_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -287,10 +302,7 @@ pub fn append_ticket_transfer_history(env: &Env, ticket_id: u64, record: TicketT
 }
 
 /// Get the full transfer history for a ticket
-pub fn get_ticket_transfer_history(
-    env: &Env,
-    ticket_id: u64,
-) -> Vec<TicketTransferRecord> {
+pub fn get_ticket_transfer_history(env: &Env, ticket_id: u64) -> Vec<TicketTransferRecord> {
     let key = (TRANSFER_HISTORY_PREFIX, ticket_id);
     let history: Vec<TicketTransferRecord> = env
         .storage()
@@ -317,7 +329,11 @@ pub fn set_vip_tier(env: &Env, event_id: u64, tier_name: &String, tier: &VipTier
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_vip_tier(env: &Env, event_id: u64, tier_name: &String) -> Result<VipTier, LumentixError> {
+pub fn get_vip_tier(
+    env: &Env,
+    event_id: u64,
+    tier_name: &String,
+) -> Result<VipTier, LumentixError> {
     let key = (VIP_TIER_PREFIX, event_id, tier_name.clone());
     let tier = env
         .storage()
@@ -347,7 +363,10 @@ pub fn set_accessibility_inventory(env: &Env, event_id: u64, inv: &Accessibility
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_accessibility_inventory(env: &Env, event_id: u64) -> Result<AccessibilityInventory, LumentixError> {
+pub fn get_accessibility_inventory(
+    env: &Env,
+    event_id: u64,
+) -> Result<AccessibilityInventory, LumentixError> {
     let key = (ACCESSIBILITY_INV_PREFIX, event_id);
     let inv = env
         .storage()
@@ -361,7 +380,11 @@ pub fn get_accessibility_inventory(env: &Env, event_id: u64) -> Result<Accessibi
 }
 
 pub fn get_next_accessibility_booking_id(env: &Env) -> u64 {
-    let id = env.storage().instance().get(&ACC_BOOKING_COUNTER).unwrap_or(1);
+    let id = env
+        .storage()
+        .instance()
+        .get(&ACC_BOOKING_COUNTER)
+        .unwrap_or(1);
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
@@ -384,7 +407,10 @@ pub fn set_accessibility_booking(env: &Env, booking_id: u64, booking: &Accessibi
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_accessibility_booking(env: &Env, booking_id: u64) -> Result<AccessibilityBooking, LumentixError> {
+pub fn get_accessibility_booking(
+    env: &Env,
+    booking_id: u64,
+) -> Result<AccessibilityBooking, LumentixError> {
     let key = (ACCESSIBILITY_BOOKING_PREFIX, booking_id);
     let booking = env
         .storage()
@@ -564,4 +590,894 @@ pub fn set_waitlist_reserved(env: &Env, event_id: u64, reserved: u32) {
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRICING SCHEDULE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_pricing_schedule(env: &Env, event_id: u64, schedule: &PricingSchedule) {
+    let key = (PRICING_SCHEDULE_PREFIX, event_id);
+    env.storage().persistent().set(&key, schedule);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_pricing_schedule(env: &Env, event_id: u64) -> Option<PricingSchedule> {
+    let key = (PRICING_SCHEDULE_PREFIX, event_id);
+    let schedule: Option<PricingSchedule> = env.storage().persistent().get(&key);
+    if schedule.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    schedule
+}
+
+pub fn has_pricing_schedule(env: &Env, event_id: u64) -> bool {
+    let key = (PRICING_SCHEDULE_PREFIX, event_id);
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MINT GAS TRACKING STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn get_mint_gas_usage(env: &Env, event_id: u64) -> MintGasUsage {
+    let key = (MINT_GAS_PREFIX, event_id);
+    let usage: MintGasUsage = env.storage().persistent().get(&key).unwrap_or(MintGasUsage {
+        total_mints: 0,
+        total_tickets_minted: 0,
+        total_resource_units: 0,
+        last_batch_quantity: 0,
+        last_batch_resource_units: 0,
+        last_updated: 0,
+    });
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    usage
+}
+
+pub fn record_mint_gas_usage(env: &Env, event_id: u64, quantity: u32, resource_units: u64) {
+    let key = (MINT_GAS_PREFIX, event_id);
+    let mut usage = get_mint_gas_usage(env, event_id);
+    usage.total_mints = usage.total_mints.saturating_add(1);
+    usage.total_tickets_minted = usage.total_tickets_minted.saturating_add(quantity);
+    usage.total_resource_units = usage.total_resource_units.saturating_add(resource_units);
+    usage.last_batch_quantity = quantity;
+    usage.last_batch_resource_units = resource_units;
+    usage.last_updated = env.ledger().timestamp();
+    env.storage().persistent().set(&key, &usage);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STREAMING DELIVERY STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_stream_delivery_config(env: &Env, event_id: u64, config: &StreamDeliveryConfig) {
+    let key = (STREAM_DELIVERY_PREFIX, event_id);
+    env.storage().persistent().set(&key, config);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_stream_delivery_config(env: &Env, event_id: u64) -> Option<StreamDeliveryConfig> {
+    let key = (STREAM_DELIVERY_PREFIX, event_id);
+    let config: Option<StreamDeliveryConfig> = env.storage().persistent().get(&key);
+    if config.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    config
+}
+
+pub fn set_stream_performance_metrics(env: &Env, event_id: u64, metrics: &StreamPerformanceMetrics) {
+    let key = (STREAM_PERF_PREFIX, event_id);
+    env.storage().persistent().set(&key, metrics);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_stream_performance_metrics(env: &Env, event_id: u64) -> Option<StreamPerformanceMetrics> {
+    let key = (STREAM_PERF_PREFIX, event_id);
+    let metrics: Option<StreamPerformanceMetrics> = env.storage().persistent().get(&key);
+    if metrics.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    metrics
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INSURANCE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get next insurance policy ID
+pub fn get_next_insurance_policy_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&INSURANCE_POLICY_ID_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment insurance policy ID counter
+pub fn increment_insurance_policy_id(env: &Env) {
+    let next_id = get_next_insurance_policy_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&INSURANCE_POLICY_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set insurance policy
+pub fn set_insurance_policy(env: &Env, policy_id: u64, policy: &InsurancePolicy) {
+    let key = (INSURANCE_POLICY_PREFIX, policy_id);
+    env.storage().persistent().set(&key, policy);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get insurance policy
+pub fn get_insurance_policy(env: &Env, policy_id: u64) -> Result<InsurancePolicy, LumentixError> {
+    let key = (INSURANCE_POLICY_PREFIX, policy_id);
+    let policy = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::InsurancePolicyNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(policy)
+}
+
+/// Get insurance policy by ticket ID
+pub fn get_insurance_policy_by_ticket(
+    env: &Env,
+    ticket_id: u64,
+) -> Result<InsurancePolicy, LumentixError> {
+    // Note: In a production system, you'd want a more efficient lookup
+    // For now, we'll iterate through policies (this is simplified)
+    let policy_id = get_next_insurance_policy_id(env);
+    for i in 1..policy_id {
+        let key = (INSURANCE_POLICY_PREFIX, i);
+        if let Some(policy) = env
+            .storage()
+            .persistent()
+            .get::<(&str, u64), InsurancePolicy>(&key)
+        {
+            if policy.ticket_id == ticket_id {
+                env.storage().persistent().extend_ttl(
+                    &key,
+                    PERSISTENT_LIFETIME,
+                    PERSISTENT_LIFETIME,
+                );
+                return Ok(policy);
+            }
+        }
+    }
+    Err(LumentixError::InsurancePolicyNotFound)
+}
+
+/// Get insurance pool
+pub fn get_insurance_pool(env: &Env) -> InsurancePool {
+    let pool: InsurancePool =
+        env.storage()
+            .instance()
+            .get(&INSURANCE_POOL)
+            .unwrap_or(InsurancePool {
+                total_balance: 0,
+                total_policies: 0,
+                total_claims_paid: 0,
+            });
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    pool
+}
+
+/// Set insurance pool
+pub fn set_insurance_pool(env: &Env, pool: &InsurancePool) {
+    env.storage().instance().set(&INSURANCE_POOL, pool);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Add to insurance pool balance
+pub fn add_to_insurance_pool(env: &Env, amount: i128) {
+    let mut pool = get_insurance_pool(env);
+    pool.total_balance += amount;
+    set_insurance_pool(env, &pool);
+}
+
+/// Deduct from insurance pool balance
+pub fn deduct_from_insurance_pool(env: &Env, amount: i128) -> Result<(), LumentixError> {
+    let mut pool = get_insurance_pool(env);
+    if pool.total_balance < amount {
+        return Err(LumentixError::InsufficientInsurancePool);
+    }
+    pool.total_balance -= amount;
+    pool.total_claims_paid += amount;
+    set_insurance_pool(env, &pool);
+    Ok(())
+}
+
+/// Increment total policies count in insurance pool
+pub fn increment_total_policies(env: &Env) {
+    let mut pool = get_insurance_pool(env);
+    pool.total_policies += 1;
+    set_insurance_pool(env, &pool);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REVIEW & REPUTATION STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get next review ID
+pub fn get_next_review_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&REVIEW_ID_COUNTER)
+        .unwrap_or(1u64);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment review ID counter
+pub fn increment_review_id(env: &Env) {
+    let next_id = get_next_review_id(env) + 1;
+    env.storage().instance().set(&REVIEW_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist a review
+pub fn set_review(env: &Env, review_id: u64, review: &EventReview) {
+    let key = (REVIEW_PREFIX, review_id);
+    env.storage().persistent().set(&key, review);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a review by ID
+pub fn get_review(env: &Env, review_id: u64) -> Result<EventReview, LumentixError> {
+    let key = (REVIEW_PREFIX, review_id);
+    let review = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::ReviewNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(review)
+}
+
+/// Record that a reviewer has already reviewed an event (duplicate guard).
+/// Key: (reviewer, event_id) → review_id
+pub fn set_reviewer_event(env: &Env, reviewer: &Address, event_id: u64, review_id: u64) {
+    let key = (REVIEWER_EVENT_PREFIX, reviewer.clone(), event_id);
+    env.storage().persistent().set(&key, &review_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Check whether a reviewer has already reviewed an event
+pub fn has_reviewer_reviewed(env: &Env, reviewer: &Address, event_id: u64) -> bool {
+    let key = (REVIEWER_EVENT_PREFIX, reviewer.clone(), event_id);
+    env.storage().persistent().has(&key)
+}
+
+/// Persist an organizer's reputation record
+pub fn set_organizer_reputation(env: &Env, organizer: &Address, rep: &OrganizerReputation) {
+    let key = (ORGANIZER_REPUTATION_PREFIX, organizer.clone());
+    env.storage().persistent().set(&key, rep);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch an organizer's reputation record
+pub fn get_organizer_reputation(env: &Env, organizer: &Address) -> OrganizerReputation {
+    let key = (ORGANIZER_REPUTATION_PREFIX, organizer.clone());
+    let rep: OrganizerReputation =
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(OrganizerReputation {
+                organizer: organizer.clone(),
+                reputation_score: 0,
+                average_rating_x100: 0,
+                total_reviews: 0,
+                total_ratings_sum: 0,
+            });
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    rep
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UPGRADE MECHANISM STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const UPGRADE_PROPOSAL_COUNTER: &str = "UPGRADE_CTR";
+const UPGRADE_PROPOSAL_PREFIX: &str = "UPROP_";
+const UPGRADE_VOTE_PREFIX: &str = "UVOTE_";
+const UPGRADE_GOVERNANCE_CONFIG: &str = "UPGRADE_GOV";
+const UPGRADE_PROPOSAL_HASH_PREFIX: &str = "UPROPHASH_";
+
+pub fn get_next_upgrade_proposal_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&UPGRADE_PROPOSAL_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_upgrade_proposal_id(env: &Env) {
+    let next_id = get_next_upgrade_proposal_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&UPGRADE_PROPOSAL_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_upgrade_proposal(env: &Env, proposal_id: u64, proposal: &UpgradeProposal) {
+    let key = (UPGRADE_PROPOSAL_PREFIX, proposal_id);
+    env.storage().persistent().set(&key, proposal);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_upgrade_proposal(env: &Env, proposal_id: u64) -> Result<UpgradeProposal, LumentixError> {
+    let key = (UPGRADE_PROPOSAL_PREFIX, proposal_id);
+    let proposal = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::UpgradeProposalNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(proposal)
+}
+
+pub fn has_upgrade_proposal_by_hash(env: &Env, wasm_hash: &BytesN<32>) -> bool {
+    let key = (UPGRADE_PROPOSAL_HASH_PREFIX, wasm_hash.clone());
+    env.storage().persistent().has(&key)
+}
+
+pub fn set_upgrade_proposal_hash(env: &Env, wasm_hash: &BytesN<32>, proposal_id: u64) {
+    let key = (UPGRADE_PROPOSAL_HASH_PREFIX, wasm_hash.clone());
+    env.storage().persistent().set(&key, &proposal_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn set_upgrade_governance_config(env: &Env, config: &UpgradeGovernanceConfig) {
+    env.storage()
+        .instance()
+        .set(&UPGRADE_GOVERNANCE_CONFIG, config);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn get_upgrade_governance_config(env: &Env) -> UpgradeGovernanceConfig {
+    let config: UpgradeGovernanceConfig = env
+        .storage()
+        .instance()
+        .get(&UPGRADE_GOVERNANCE_CONFIG)
+        .unwrap_or(UpgradeGovernanceConfig {
+            voting_period_seconds: 604800, // 7 days
+            required_approval_percentage: 60,
+            governance_members: Vec::new(env),
+        });
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    config
+}
+
+pub fn set_upgrade_vote(env: &Env, proposal_id: u64, voter: &Address, vote: &UpgradeVote) {
+    let key = (UPGRADE_VOTE_PREFIX, proposal_id, voter.clone());
+    env.storage().persistent().set(&key, vote);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_upgrade_vote(env: &Env, proposal_id: u64, voter: &Address) -> Option<UpgradeVote> {
+    let key = (UPGRADE_VOTE_PREFIX, proposal_id, voter.clone());
+    let vote: Option<UpgradeVote> = env.storage().persistent().get(&key);
+    if vote.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    vote
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CARBON OFFSET STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CARBON_FOOTPRINT_PREFIX: &str = "CFOOT_";
+const CARBON_OFFSET_PURCHASE_PREFIX: &str = "COFFSET_";
+const CARBON_OFFSET_PURCHASE_COUNTER: &str = "COFFSET_CTR";
+const ENVIRONMENTAL_IMPACT_PREFIX: &str = "ENVIMP_";
+
+pub fn get_next_carbon_offset_purchase_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&CARBON_OFFSET_PURCHASE_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_carbon_offset_purchase_id(env: &Env) {
+    let next_id = get_next_carbon_offset_purchase_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&CARBON_OFFSET_PURCHASE_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_carbon_footprint(env: &Env, event_id: u64, footprint: &CarbonFootprint) {
+    let key = (CARBON_FOOTPRINT_PREFIX, event_id);
+    env.storage().persistent().set(&key, footprint);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_carbon_footprint(env: &Env, event_id: u64) -> Option<CarbonFootprint> {
+    let key = (CARBON_FOOTPRINT_PREFIX, event_id);
+    let footprint: Option<CarbonFootprint> = env.storage().persistent().get(&key);
+    if footprint.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    footprint
+}
+
+pub fn set_carbon_offset_purchase(env: &Env, purchase_id: u64, purchase: &CarbonOffsetPurchase) {
+    let key = (CARBON_OFFSET_PURCHASE_PREFIX, purchase_id);
+    env.storage().persistent().set(&key, purchase);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_carbon_offset_purchase(
+    env: &Env,
+    purchase_id: u64,
+) -> Result<CarbonOffsetPurchase, LumentixError> {
+    let key = (CARBON_OFFSET_PURCHASE_PREFIX, purchase_id);
+    let purchase = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::CarbonOffsetNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(purchase)
+}
+
+pub fn set_environmental_impact(env: &Env, event_id: u64, impact: &EnvironmentalImpact) {
+    let key = (ENVIRONMENTAL_IMPACT_PREFIX, event_id);
+    env.storage().persistent().set(&key, impact);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_environmental_impact(env: &Env, event_id: u64) -> EnvironmentalImpact {
+    let key = (ENVIRONMENTAL_IMPACT_PREFIX, event_id);
+    let impact: EnvironmentalImpact =
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(EnvironmentalImpact {
+                event_id,
+                total_footprint_kg: 0,
+                total_offset_kg: 0,
+                net_impact_kg: 0,
+                total_purchases: 0,
+                neutral_status: false,
+            });
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    impact
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IDENTITY VERIFICATION STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const IDENTITY_CREDENTIAL_PREFIX: &str = "IDCRED_";
+const IDENTITY_CREDENTIAL_COUNTER: &str = "IDCRED_CTR";
+const IDENTITY_CREDENTIAL_BY_SUBJECT_PREFIX: &str = "IDSUB_";
+const IDENTITY_PROVIDER_PREFIX: &str = "IDPROV_";
+
+pub fn get_next_identity_credential_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&IDENTITY_CREDENTIAL_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_identity_credential_id(env: &Env) {
+    let next_id = get_next_identity_credential_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&IDENTITY_CREDENTIAL_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_identity_credential(env: &Env, credential_id: u64, credential: &IdentityCredential) {
+    let key = (IDENTITY_CREDENTIAL_PREFIX, credential_id);
+    env.storage().persistent().set(&key, credential);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_identity_credential(
+    env: &Env,
+    credential_id: u64,
+) -> Result<IdentityCredential, LumentixError> {
+    let key = (IDENTITY_CREDENTIAL_PREFIX, credential_id);
+    let credential = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::IdentityCredentialNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(credential)
+}
+
+pub fn set_identity_credential_by_subject(
+    env: &Env,
+    subject: &Address,
+    provider: &IdentityProvider,
+    credential_id: u64,
+) {
+    let key = (
+        IDENTITY_CREDENTIAL_BY_SUBJECT_PREFIX,
+        subject.clone(),
+        provider.clone(),
+    );
+    env.storage().persistent().set(&key, &credential_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_identity_credential_by_subject(
+    env: &Env,
+    subject: &Address,
+    provider: &IdentityProvider,
+) -> Option<u64> {
+    let key = (
+        IDENTITY_CREDENTIAL_BY_SUBJECT_PREFIX,
+        subject.clone(),
+        provider.clone(),
+    );
+    let id: Option<u64> = env.storage().persistent().get(&key);
+    if id.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    id
+}
+
+pub fn register_identity_provider(env: &Env, provider: &IdentityProvider, supported: bool) {
+    let key = (IDENTITY_PROVIDER_PREFIX, provider.clone());
+    env.storage().instance().set(&key, &supported);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn is_identity_provider_supported(env: &Env, provider: &IdentityProvider) -> bool {
+    let key = (IDENTITY_PROVIDER_PREFIX, provider.clone());
+    env.storage().instance().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CROSS-CHAIN TICKET PORTABILITY STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CROSS_CHAIN_TRANSFER_PREFIX: &str = "CCTRANS_";
+const CROSS_CHAIN_TRANSFER_COUNTER: &str = "CCTRANS_CTR";
+const BRIDGE_TRANSACTION_PREFIX: &str = "BRIDGETX_";
+const BRIDGE_PAUSED_KEY: &str = "BRIDGE_PAUSED";
+const SUPPORTED_CHAIN_PREFIX: &str = "SUPCHAIN_";
+
+pub fn get_next_cross_chain_transfer_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&CROSS_CHAIN_TRANSFER_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_cross_chain_transfer_id(env: &Env) {
+    let next_id = get_next_cross_chain_transfer_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&CROSS_CHAIN_TRANSFER_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_cross_chain_transfer(env: &Env, transfer_id: u64, transfer: &CrossChainTransfer) {
+    let key = (CROSS_CHAIN_TRANSFER_PREFIX, transfer_id);
+    env.storage().persistent().set(&key, transfer);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_cross_chain_transfer(
+    env: &Env,
+    transfer_id: u64,
+) -> Result<CrossChainTransfer, LumentixError> {
+    let key = (CROSS_CHAIN_TRANSFER_PREFIX, transfer_id);
+    let transfer = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::CrossChainTransferNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(transfer)
+}
+
+pub fn set_bridge_transaction(env: &Env, tx_hash: &String, tx: &BridgeTransaction) {
+    let key = (BRIDGE_TRANSACTION_PREFIX, tx_hash.clone());
+    env.storage().persistent().set(&key, tx);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_bridge_transaction(env: &Env, tx_hash: &String) -> Option<BridgeTransaction> {
+    let key = (BRIDGE_TRANSACTION_PREFIX, tx_hash.clone());
+    let tx: Option<BridgeTransaction> = env.storage().persistent().get(&key);
+    if tx.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    tx
+}
+
+pub fn set_bridge_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&BRIDGE_PAUSED_KEY, &paused);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn is_bridge_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&BRIDGE_PAUSED_KEY)
+        .unwrap_or(false)
+}
+
+pub fn register_supported_chain(env: &Env, chain: &String, supported: bool) {
+    let key = (SUPPORTED_CHAIN_PREFIX, chain.clone());
+    env.storage().instance().set(&key, &supported);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn is_chain_supported(env: &Env, chain: &String) -> bool {
+    let key = (SUPPORTED_CHAIN_PREFIX, chain.clone());
+    env.storage().instance().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MERCHANDISE & NFT COLLECTIBLE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MERCHANDISE_PREFIX: &str = "MERCH_";
+const MERCHANDISE_COUNTER: &str = "MERCH_CTR";
+const NFT_PREFIX: &str = "NFT_";
+const NFT_COUNTER: &str = "NFT_CTR";
+const COLLECTIBLE_INVENTORY_PREFIX: &str = "COLINV_";
+
+/// Get next merchandise ID
+pub fn get_next_merchandise_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&MERCHANDISE_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment merchandise ID counter
+pub fn increment_merchandise_id(env: &Env) {
+    let next_id = get_next_merchandise_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&MERCHANDISE_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set merchandise item
+pub fn set_merchandise(env: &Env, merchandise_id: u64, item: &EventMerchandise) {
+    let key = (MERCHANDISE_PREFIX, merchandise_id);
+    env.storage().persistent().set(&key, item);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get merchandise item
+pub fn get_merchandise(
+    env: &Env,
+    merchandise_id: u64,
+) -> Result<EventMerchandise, LumentixError> {
+    let key = (MERCHANDISE_PREFIX, merchandise_id);
+    let item = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::MerchandiseNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(item)
+}
+
+/// Get next NFT ID
+pub fn get_next_nft_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&NFT_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment NFT ID counter
+pub fn increment_nft_id(env: &Env) {
+    let next_id = get_next_nft_id(env) + 1;
+    env.storage().instance().set(&NFT_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set NFT collectible
+pub fn set_nft(env: &Env, nft_id: u64, nft: &NftCollectible) {
+    let key = (NFT_PREFIX, nft_id);
+    env.storage().persistent().set(&key, nft);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get NFT collectible
+pub fn get_nft(env: &Env, nft_id: u64) -> Result<NftCollectible, LumentixError> {
+    let key = (NFT_PREFIX, nft_id);
+    let nft = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::NftNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(nft)
+}
+
+/// Set collectible inventory for an event
+pub fn set_collectible_inventory(env: &Env, event_id: u64, inv: &CollectibleInventory) {
+    let key = (COLLECTIBLE_INVENTORY_PREFIX, event_id);
+    env.storage().persistent().set(&key, inv);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get collectible inventory for an event
+pub fn get_collectible_inventory(
+    env: &Env,
+    event_id: u64,
+) -> Result<CollectibleInventory, LumentixError> {
+    let key = (COLLECTIBLE_INVENTORY_PREFIX, event_id);
+    let inv = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::CollectibleInventoryNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(inv)
+}
+
+/// Check if collectible inventory exists for an event
+pub fn has_collectible_inventory(env: &Env, event_id: u64) -> bool {
+    let key = (COLLECTIBLE_INVENTORY_PREFIX, event_id);
+    env.storage().persistent().has(&key)
 }

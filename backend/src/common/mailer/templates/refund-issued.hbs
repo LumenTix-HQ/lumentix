@@ -1,0 +1,24 @@
+<p>Hi {{name}},</p>
+<p>Your refund has been processed successfully.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0">
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Event</td>
+    <td style="padding:8px 0;font-weight:600">{{eventTitle}}</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Refund Amount</td>
+    <td style="padding:8px 0;font-weight:600">{{amount}} {{currency}}</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Reference</td>
+    <td style="padding:8px 0;font-weight:600">{{refundId}}</td>
+  </tr>
+  {{#if transactionHash}}
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Transaction</td>
+    <td style="padding:8px 0;font-size:12px;word-break:break-all">{{transactionHash}}</td>
+  </tr>
+  {{/if}}
+</table>
+<p>The funds have been sent to your registered Stellar wallet and should arrive shortly.</p>
+<p style="color:#6B7280;font-size:13px">If you have any questions, please contact our support team.</p>

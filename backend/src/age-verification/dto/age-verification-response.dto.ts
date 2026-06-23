@@ -8,7 +8,7 @@ export class AgeVerificationResponseDto {
   @ApiProperty({ enum: AgeRestriction, description: 'Required age restriction' })
   requiredRestriction: AgeRestriction;
 
-  @ApiPropertyOptional({ enum: VerificationStatus, description: 'Current verification status' })
+  @ApiPropertyOptional({ enum: ['pending', 'verified', 'failed', 'expired'], description: 'Current verification status' })
   verificationStatus?: VerificationStatus;
 
   @ApiPropertyOptional({ enum: VerificationMethod, description: 'Method used for verification' })

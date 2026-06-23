@@ -17,10 +17,31 @@ import { RolesGuard } from '../admin/roles.guard';
 import { Roles } from '../admin/roles.decorator';
 import { UserRole } from '../users/enums/user-role.enum';
 
+import { CurrencyRateService }
+  from './services/currency-rate.service';
+
 @ApiTags('Currencies')
 @Controller('currencies')
 export class CurrenciesController {
   constructor(private readonly currenciesService: CurrenciesService) {}
+
+    @Get('rates')
+  async getRates(
+    @Res({ passthrough: true })
+    response: Response,
+  ) {
+    const result =
+      await this.currencyRateService.getRates();
+
+    if (result.stale) {
+      response.setHeader(
+        'X-Rate-Stale',
+        'true',
+      );
+    }
+
+    return result.data;
+  }
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)

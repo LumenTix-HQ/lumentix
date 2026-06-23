@@ -17,7 +17,11 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "migration:generate": "typeorm-ts-node-commonjs migration:generate --dataSource src/database/data-source.ts",
+    "migration:run": "typeorm-ts-node-commonjs migration:run --dataSource src/database/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert --dataSource src/database/data-source.ts",
+    "check-migrations": "typeorm-ts-node-commonjs migration:show --dataSource src/database/data-source.ts 2>&1 | tee /tmp/migration-status.txt; grep -q \"\\[ \\]\" /tmp/migration-status.txt && (echo \"Pending migrations found!\" && exit 1) || echo \"All migrations applied\""
   },
   "dependencies": {
     "@nestjs/bull": "^11.0.4",
@@ -40,6 +44,7 @@
     "bull": "^4.16.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
+    "handlebars": "^4.7.8",
     "helmet": "^8.1.0",
     "ioredis": "^5.9.3",
     "joi": "^17.13.3",
@@ -47,6 +52,7 @@
     "nestjs-throttler-storage-redis": "^0.5.1",
     "nodemailer": "^8.0.4",
     "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",
     "pdfkit": "^0.18.0",
     "pg": "^8.18.0",
@@ -64,6 +70,7 @@
     "@swc/cli": "^0.6.0",
     "@swc/core": "^1.10.7",
     "@types/bcrypt": "^6.0.0",
+    "@types/handlebars": "^4.1.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/bull": "^3.15.9",
     "@types/express": "^5.0.0",
@@ -72,6 +79,7 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.7",
     "@types/nodemailer": "^7.0.11",
+    "@types/passport-google-oauth20": "^2.0.16",
     "@types/passport-jwt": "^4.0.1",
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^6.0.2",
@@ -108,6 +116,14 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "coverageThreshold": {
+      "global": {
+        "branches": 80,
+        "functions": 80,
+        "lines": 80,
+        "statements": 80
+      }
+    }
   }
 }

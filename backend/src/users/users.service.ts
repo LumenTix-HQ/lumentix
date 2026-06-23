@@ -298,6 +298,36 @@ export class UsersService {
     return this.roleRequestRepository.save(request);
   }
 
+  async findByGoogleId(googleId: string) {
+    return this.usersRepository.findOne({ where: { googleId } });
+  }
+
+  async updateGoogleId(userId: string, googleId: string) {
+    await this.usersRepository.update(userId, { googleId });
+  }
+
+  async createGoogleUser(data: { email: string; googleId: string; displayName?: string }) {
+    const user = this.usersRepository.create({
+      email: data.email,
+      googleId: data.googleId,
+      passwordHash: '',
+    });
+    return this.usersRepository.save(user);
+  }
+
+  async update(
+    userId: string,
+    data: Partial<User>,
+  ): Promise<Omit<User, 'passwordHash'>> {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`User with id ${userId} not found`);
+    }
+    Object.assign(user, data);
+    const saved = await this.usersRepository.save(user);
+    return this.sanitize(saved);
+  }
+
   private sanitize(user: User): Omit<User, 'passwordHash'> {
     const { passwordHash, ...sanitized } = user;
     return sanitized;

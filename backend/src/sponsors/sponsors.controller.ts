@@ -13,10 +13,13 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+
 import {
   ApiTags,
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
+  ApiParam,
   ApiResponse,
 } from '@nestjs/swagger';
 import { SponsorsService } from './sponsors.service';
@@ -46,7 +49,10 @@ export class SponsorsController {
   @Roles(Role.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create sponsor tier', description: 'Organizer-only. Creates a new sponsorship tier for an event.' })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
+  @ApiBody({ type: CreateSponsorTierDto })
   @ApiResponse({ status: 201, description: 'Tier created' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   create(
     @Param('eventId', ParseUUIDPipe) eventId: string,
@@ -58,7 +64,9 @@ export class SponsorsController {
 
   @Get()
   @ApiOperation({ summary: 'List sponsor tiers', description: 'Public. Shows available sponsorship tiers for an event.' })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
   @ApiResponse({ status: 200, description: 'List of tiers' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   list(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.sponsorsService.listTiers(eventId);
   }
@@ -78,7 +86,11 @@ export class SponsorsController {
   @Roles(Role.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update sponsor tier', description: 'Organizer-only. Updates tier details.' })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
+  @ApiParam({ name: 'id', description: 'Tier UUID' })
+  @ApiBody({ type: UpdateSponsorTierDto })
   @ApiResponse({ status: 200, description: 'Tier updated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -93,7 +105,10 @@ export class SponsorsController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete sponsor tier', description: 'Organizer-only. Removes a tier if no contributions exist.' })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
+  @ApiParam({ name: 'id', description: 'Tier UUID' })
   @ApiResponse({ status: 204, description: 'Tier deleted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   delete(
     @Param('id', ParseUUIDPipe) id: string,
@@ -165,5 +180,31 @@ export class SponsorsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.sponsorsService.distributeEscrow(eventId, req.user.id, req.user.role);
+  }
+}
+
+@ApiTags('Sponsors')
+@Controller('events/:eventId/sponsors')
+export class EventSponsorsController {
+  constructor(private readonly sponsorsService: SponsorsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Event sponsor leaderboard', description: 'Public. Returns sponsors sorted by total contribution.' })
+  @ApiResponse({ status: 200, description: 'Sponsor leaderboard' })
+  getLeaderboard(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.sponsorsService.getEventLeaderboard(eventId);
+  }
+}
+
+@ApiTags('Sponsors')
+@Controller('sponsors')
+export class SponsorProfileController {
+  constructor(private readonly sponsorsService: SponsorsService) {}
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Sponsor public profile', description: 'Public. Returns sponsor profile and sponsored events.' })
+  @ApiResponse({ status: 200, description: 'Sponsor profile' })
+  getProfile(@Param('id', ParseUUIDPipe) id: string) {
+    return this.sponsorsService.getSponsorProfile(id);
   }
 }

@@ -1,0 +1,19 @@
+<p>Hi {{name}},</p>
+<p>We regret to inform you that <strong>{{eventTitle}}</strong> has been cancelled.</p>
+<table style="width:100%;border-collapse:collapse;margin:16px 0">
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Original Date</td>
+    <td style="padding:8px 0;font-weight:600">{{eventDate}}</td>
+  </tr>
+  <tr>
+    <td style="padding:8px 0;color:#6B7280">Organiser</td>
+    <td style="padding:8px 0;font-weight:600">{{organizerName}}</td>
+  </tr>
+</table>
+{{#if refundEligible}}
+<p style="background:#EEF2FF;border-left:4px solid #4F46E5;padding:12px 16px;border-radius:4px">
+  A refund is being processed for your ticket purchase. You will receive a separate email once
+  your refund has been issued.
+</p>
+{{/if}}
+<p>We apologise for any inconvenience. We hope to see you at future Lumentix events.</p>

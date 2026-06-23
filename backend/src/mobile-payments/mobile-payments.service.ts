@@ -66,7 +66,7 @@ export class MobilePaymentsService {
         action: AuditAction.MOBILE_PAYMENT_FAILED,
         userId,
         resourceId: dto.eventId,
-        metadata: { walletType: dto.walletType, reason: 'Invalid wallet credentials' },
+        meta: { walletType: dto.walletType, reason: 'Invalid wallet credentials' },
       });
       throw new UnauthorizedException('Invalid wallet credentials or token');
     }
@@ -116,7 +116,7 @@ export class MobilePaymentsService {
         action: AuditAction.MOBILE_PAYMENT_FAILED,
         userId,
         resourceId: saved.id,
-        metadata: { walletType: dto.walletType, error: (error as Error).message },
+        meta: { walletType: dto.walletType, error: (error as Error).message },
       });
 
       throw new BadRequestException(
@@ -128,7 +128,7 @@ export class MobilePaymentsService {
       action: AuditAction.MOBILE_PAYMENT_PROCESSED,
       userId,
       resourceId: saved.id,
-      metadata: {
+      meta: {
         walletType: dto.walletType,
         amount: dto.amount,
         currency,

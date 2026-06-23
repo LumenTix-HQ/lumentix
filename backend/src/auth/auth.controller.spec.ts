@@ -6,8 +6,14 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import { MailerService } from '../mailer/mailer.service';
 import { BruteForceService } from '../common/services/brute-force.service';
 import { BruteForceGuard } from '../common/guards/brute-force.guard';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { WalletChallenge } from './entities/wallet-challenge.entity';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -23,8 +29,11 @@ describe('AuthController', () => {
           provide: UsersService,
           useValue: {
             findByEmail: jest.fn(),
-            create: jest.fn(),
-            findOne: jest.fn(),
+            findById: jest.fn(),
+            createUser: jest.fn(),
+            updatePassword: jest.fn(),
+            updateWallet: jest.fn(),
+            update: jest.fn(),
           },
         },
         {
@@ -35,10 +44,46 @@ describe('AuthController', () => {
           },
         },
         {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn().mockReturnValue('http://localhost:3000'),
+          },
+        },
+        {
+          provide: MailerService,
+          useValue: {
+            send: jest.fn(),
+          },
+        },
+        {
           provide: BruteForceService,
           useValue: {
             reset: jest.fn(),
             recordFailedAttempt: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(PasswordResetToken),
+          useValue: {
+            create: jest.fn(),
+            save: jest.fn(),
+            findOne: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(RefreshToken),
+          useValue: {
+            create: jest.fn(),
+            save: jest.fn(),
+            findOne: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(WalletChallenge),
+          useValue: {
+            create: jest.fn(),
+            save: jest.fn(),
+            findOne: jest.fn(),
           },
         },
       ],
@@ -61,13 +106,13 @@ describe('AuthController', () => {
     const bruteForceService = module.get<BruteForceService>(BruteForceService);
     jest
       .spyOn(authService, 'login')
-      .mockResolvedValue({ access_token: 'token' } as any);
+      .mockResolvedValue({ accessToken: 'token', refreshToken: 'refresh' } as any);
 
     const loginDto = { email: 'x', password: 'y' } as unknown as any;
     const request = { ip: '1.1.1.1' } as unknown as Request;
 
     const result = await controller.login(loginDto, request);
-    expect(result).toEqual({ access_token: 'token' });
+    expect(result).toEqual({ accessToken: 'token', refreshToken: 'refresh' });
     expect(bruteForceService.reset).toHaveBeenCalledWith('1.1.1.1');
   });
 

@@ -7,9 +7,18 @@ import { Event } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
 import { RoleRequest } from '../users/entities/role-request.entity';
 import { AuthModule } from '../auth/auth.module';
+import { StellarModule } from '../stellar/stellar.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Event, User, RoleRequest]), AuthModule],
+  imports: [TypeOrmModule.forFeature([Event, User, RoleRequest]), AuthModule, StellarModule],
+import { StellarWebhookModule } from '../stellar/stellar-webhook.module';
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([Event, User, RoleRequest]),
+    AuthModule,
+    StellarWebhookModule,
+  ],
   controllers: [AdminController],
   providers: [AdminService, RolesGuard],
   exports: [RolesGuard],

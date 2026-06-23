@@ -37,6 +37,9 @@ export class User {
   })
   status: UserStatus;
 
+  @Column({ nullable: true, type: 'varchar', unique: true })
+  googleId: string | null;
+
   @Column({ nullable: true, type: 'varchar' })
   stellarPublicKey: string | null;
 
@@ -54,6 +57,9 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   balancesUpdatedAt: Date | null;
 
+  @Column({ default: false })
+  emailOptOut: boolean;
+
   @Column({
     type: 'jsonb',
     default: {
@@ -66,11 +72,43 @@ export class User {
   })
   notificationPreferences: Record<string, boolean>;
 
+  /**
+   * User's refund preferences.
+   * Default: full refunds preferred, immediate processing, no store credit.
+   */
+  @Column({
+    type: 'jsonb',
+    default: {
+      preferFullRefund: true,
+      preferInstantProcessing: true,
+      acceptStoreCredit: false,
+      acceptVouchers: true,
+      minRefundAmount: null,
+    },
+    nullable: true,
+  })
+  refundPreferences: {
+    preferFullRefund?: boolean;
+    preferInstantProcessing?: boolean;
+    acceptStoreCredit?: boolean;
+    acceptVouchers?: boolean;
+    minRefundAmount?: number | null;
+  } | null;
+
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ default: false })
+  emailVerified: boolean;
+
+  @Column({ nullable: true, type: 'varchar' })
+  emailVerificationToken: string | null;
+
+  @Column({ nullable: true, type: 'timestamptz' })
+  emailVerificationTokenExpiresAt: Date | null;
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
   deletedAt: Date | null;

@@ -1,3 +1,4 @@
+#![allow(warnings)]
 #![cfg(test)]
 
 use crate::error::LumentixError;
@@ -18,7 +19,11 @@ fn create_test_contract(env: &Env) -> (Address, LumentixContractClient<'_>) {
     (admin, client)
 }
 
-fn create_and_publish_event(env: &Env, client: &LumentixContractClient, organizer: &Address) -> u64 {
+fn create_and_publish_event(
+    env: &Env,
+    client: &LumentixContractClient,
+    organizer: &Address,
+) -> u64 {
     let event_id = client.create_event(
         organizer,
         &String::from_str(env, "Test Event"),
@@ -170,7 +175,12 @@ fn test_assign_vip_benefits_tier_full() {
     );
 
     let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
-    client.assign_vip_benefits(&organizer, &event_id, &ticket_id, &String::from_str(&env, "Bronze"));
+    client.assign_vip_benefits(
+        &organizer,
+        &event_id,
+        &ticket_id,
+        &String::from_str(&env, "Bronze"),
+    );
 
     let ticket_id2 = client.purchase_ticket(&buyer, &event_id, &100i128);
     let result = client.try_assign_vip_benefits(
@@ -211,9 +221,8 @@ fn test_setup_accessibility_inventory_success() {
     let organizer = Address::generate(&env);
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
-    let result = client.try_setup_accessibility_inventory(
-        &organizer, &event_id, &5u32, &3u32, &2u32,
-    );
+    let result =
+        client.try_setup_accessibility_inventory(&organizer, &event_id, &5u32, &3u32, &2u32);
     assert!(result.is_ok());
 }
 
@@ -227,9 +236,8 @@ fn test_setup_accessibility_inventory_unauthorized() {
     let stranger = Address::generate(&env);
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
-    let result = client.try_setup_accessibility_inventory(
-        &stranger, &event_id, &5u32, &3u32, &2u32,
-    );
+    let result =
+        client.try_setup_accessibility_inventory(&stranger, &event_id, &5u32, &3u32, &2u32);
     assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
 }
 
@@ -290,9 +298,8 @@ fn test_manage_accessibility_inventory_success() {
 
     client.setup_accessibility_inventory(&organizer, &event_id, &5u32, &3u32, &2u32);
 
-    let result = client.try_manage_accessibility_inventory(
-        &organizer, &event_id, &3u32, &2u32, &1u32,
-    );
+    let result =
+        client.try_manage_accessibility_inventory(&organizer, &event_id, &3u32, &2u32, &1u32);
     assert!(result.is_ok());
 }
 
@@ -307,10 +314,8 @@ fn test_validate_accessibility_needs_true() {
 
     client.setup_accessibility_inventory(&organizer, &event_id, &5u32, &0u32, &0u32);
 
-    let available = client.validate_accessibility_needs(
-        &event_id,
-        &String::from_str(&env, "wheelchair"),
-    );
+    let available =
+        client.validate_accessibility_needs(&event_id, &String::from_str(&env, "wheelchair"));
     assert!(available);
 }
 
@@ -325,12 +330,8 @@ fn test_set_currency_oracle_success() {
 
     let (admin, client) = create_test_contract(&env);
 
-    let result = client.try_set_currency_oracle(
-        &admin,
-        &String::from_str(&env, "EUR"),
-        &2u32,
-        &90i128,
-    );
+    let result =
+        client.try_set_currency_oracle(&admin, &String::from_str(&env, "EUR"), &2u32, &90i128);
     assert!(result.is_ok());
 }
 
@@ -342,12 +343,8 @@ fn test_set_currency_oracle_unauthorized() {
     let (admin, client) = create_test_contract(&env);
     let stranger = Address::generate(&env);
 
-    let result = client.try_set_currency_oracle(
-        &stranger,
-        &String::from_str(&env, "EUR"),
-        &2u32,
-        &90i128,
-    );
+    let result =
+        client.try_set_currency_oracle(&stranger, &String::from_str(&env, "EUR"), &2u32, &90i128);
     assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
 }
 
@@ -362,11 +359,8 @@ fn test_set_event_currency_success() {
 
     client.set_currency_oracle(&admin, &String::from_str(&env, "EUR"), &2u32, &90i128);
 
-    let result = client.try_set_event_currency(
-        &organizer,
-        &event_id,
-        &String::from_str(&env, "EUR"),
-    );
+    let result =
+        client.try_set_event_currency(&organizer, &event_id, &String::from_str(&env, "EUR"));
     assert!(result.is_ok());
 }
 
@@ -379,11 +373,8 @@ fn test_set_event_currency_unsupported() {
     let organizer = Address::generate(&env);
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
-    let result = client.try_set_event_currency(
-        &organizer,
-        &event_id,
-        &String::from_str(&env, "XYZ"),
-    );
+    let result =
+        client.try_set_event_currency(&organizer, &event_id, &String::from_str(&env, "XYZ"));
     assert_eq!(result, Err(Ok(LumentixError::UnsupportedCurrency)));
 }
 
@@ -516,12 +507,8 @@ fn test_select_seat_success() {
     );
     assert_eq!(seat_id, String::from_str(&env, "A-1-1"));
 
-    let available = client.validate_seat_availability(
-        &event_id,
-        &String::from_str(&env, "A"),
-        &1u32,
-        &1u32,
-    );
+    let available =
+        client.validate_seat_availability(&event_id, &String::from_str(&env, "A"), &1u32, &1u32);
     assert!(!available);
 }
 
@@ -547,7 +534,14 @@ fn test_select_seat_already_held() {
     });
     client.create_venue_layout(&organizer, &event_id, &sections);
 
-    client.select_seat(&buyer1, &event_id, &String::from_str(&env, "A"), &1u32, &1u32, &3600u64);
+    client.select_seat(
+        &buyer1,
+        &event_id,
+        &String::from_str(&env, "A"),
+        &1u32,
+        &1u32,
+        &3600u64,
+    );
 
     // Set time to before hold expires
     env.ledger().set_timestamp(2000);
@@ -584,7 +578,14 @@ fn test_release_seat_hold_by_holder() {
     });
     client.create_venue_layout(&organizer, &event_id, &sections);
 
-    client.select_seat(&buyer, &event_id, &String::from_str(&env, "A"), &1u32, &1u32, &3600u64);
+    client.select_seat(
+        &buyer,
+        &event_id,
+        &String::from_str(&env, "A"),
+        &1u32,
+        &1u32,
+        &3600u64,
+    );
 
     let result = client.try_release_seat_hold(
         &buyer,
@@ -616,7 +617,14 @@ fn test_release_seat_hold_by_organizer() {
     });
     client.create_venue_layout(&organizer, &event_id, &sections);
 
-    client.select_seat(&buyer, &event_id, &String::from_str(&env, "A"), &1u32, &1u32, &3600u64);
+    client.select_seat(
+        &buyer,
+        &event_id,
+        &String::from_str(&env, "A"),
+        &1u32,
+        &1u32,
+        &3600u64,
+    );
 
     let result = client.try_release_seat_hold(
         &organizer,
@@ -647,12 +655,8 @@ fn test_validate_seat_availability_free() {
     });
     client.create_venue_layout(&organizer, &event_id, &sections);
 
-    let available = client.validate_seat_availability(
-        &event_id,
-        &String::from_str(&env, "A"),
-        &1u32,
-        &2u32,
-    );
+    let available =
+        client.validate_seat_availability(&event_id, &String::from_str(&env, "A"), &1u32, &2u32);
     assert!(available);
 }
 
@@ -677,7 +681,10 @@ fn test_get_venue_layout() {
 
     let layout = client.get_venue_layout(&event_id);
     assert_eq!(layout.sections.len(), 1);
-    assert_eq!(layout.sections.get(0).unwrap().name, String::from_str(&env, "A"));
+    assert_eq!(
+        layout.sections.get(0).unwrap().name,
+        String::from_str(&env, "A")
+    );
 }
 
 #[test]
@@ -846,5 +853,8 @@ fn test_vip_tier_emits_events() {
             }
         }
     }
-    assert!(found, "Expected VipTierCreated event with symbol 'vipcreate'");
+    assert!(
+        found,
+        "Expected VipTierCreated event with symbol 'vipcreate'"
+    );
 }

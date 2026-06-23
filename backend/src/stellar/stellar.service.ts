@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
+import { InsufficientBalanceException } from '../common/exceptions/insufficient-balance.exception';
 import {
   Horizon,
   Transaction,
@@ -142,6 +143,7 @@ export class StellarService implements OnModuleDestroy {
     startingBalance: string = '2',
   ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
     this.logger.debug(`fundEscrowAccount: escrow=${escrowPublicKey}`);
+    await this.checkPlatformBalance();
 
     const funderKeypair = Keypair.fromSecret(funderSecret);
     const funderAccount = await this.server.loadAccount(
@@ -379,6 +381,41 @@ export class StellarService implements OnModuleDestroy {
   }
 
   /**
+   * Merge an escrow account into a destination account.
+   * Sends all remaining XLM balance to `destinationPublicKey` and permanently
+   * closes the escrow account. Should be called after all refunds succeed.
+   *
+   * @param escrowSecret          Decrypted secret key of the escrow account
+   * @param destinationPublicKey  Platform (or organizer) account to receive residual XLM
+   */
+  async mergeAccount(
+    escrowSecret: string,
+    destinationPublicKey: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    this.logger.debug(
+      `mergeAccount: destination=${destinationPublicKey}`,
+    );
+
+    const escrowKeypair = Keypair.fromSecret(escrowSecret);
+    const escrowAccount = await this.server.loadAccount(
+      escrowKeypair.publicKey(),
+    );
+
+    const tx = new TransactionBuilder(escrowAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.accountMerge({ destination: destinationPublicKey }),
+      )
+      .setTimeout(30)
+      .build();
+
+    tx.sign(escrowKeypair);
+    return this.server.submitTransaction(tx);
+  }
+
+  /**
    * Get the XLM balance of an account.
    */
   async getXlmBalance(publicKey: string): Promise<string> {
@@ -388,6 +425,97 @@ export class StellarService implements OnModuleDestroy {
         b.asset_type === 'native',
     );
     return xlmBalance?.balance ?? '0';
+  }
+
+  // ─── Platform balance / pre-flight ──────────────────────────────────────
+
+  private static readonly BASE_RESERVE = 0.5;
+  private static readonly FEE_BUFFER = 1;
+
+  async getPlatformBalanceInfo(): Promise<{
+    available: string;
+    reserved: string;
+    minimumRequired: string;
+  }> {
+    const platformPublicKey = this.configService.get<string>(
+      'stellar.platformPublicKey',
+    );
+    if (!platformPublicKey) {
+      throw new InternalServerErrorException(
+        'Platform public key is not configured',
+      );
+    }
+
+    const account = await this.server.loadAccount(platformPublicKey);
+    const xlmBalance = account.balances.find(
+      (b): b is Horizon.HorizonApi.BalanceLine<'native'> =>
+        b.asset_type === 'native',
+    );
+
+    const total = parseFloat(xlmBalance?.balance ?? '0');
+    const subentries = account.subentry_count ?? 0;
+    const minimumRequired =
+      (subentries + 2) * StellarService.BASE_RESERVE +
+      StellarService.FEE_BUFFER;
+    const reserved =
+      (subentries + 2) * StellarService.BASE_RESERVE;
+
+    return {
+      available: total.toFixed(7),
+      reserved: reserved.toFixed(7),
+      minimumRequired: minimumRequired.toFixed(7),
+    };
+  }
+
+  async checkPlatformBalance(): Promise<void> {
+    const platformPublicKey = this.configService.get<string>(
+      'stellar.platformPublicKey',
+    );
+    if (!platformPublicKey) {
+      throw new InternalServerErrorException(
+        'Platform public key is not configured',
+      );
+    }
+
+    const account = await this.server.loadAccount(platformPublicKey);
+    const xlmBalance = account.balances.find(
+      (b): b is Horizon.HorizonApi.BalanceLine<'native'> =>
+        b.asset_type === 'native',
+    );
+
+    const total = parseFloat(xlmBalance?.balance ?? '0');
+    const subentries = account.subentry_count ?? 0;
+    const minimumRequired =
+      (subentries + 2) * StellarService.BASE_RESERVE +
+      StellarService.FEE_BUFFER;
+
+    if (total < minimumRequired) {
+      throw new InsufficientBalanceException(
+        total.toFixed(7),
+        minimumRequired.toFixed(7),
+      );
+    }
+
+  /**
+   * Transfer a ticket asset to a new owner on the Stellar network.
+   *
+   * NOTE: A full on-chain implementation requires the platform to control
+   * the issuing account, set up trustlines on both the sender and recipient
+   * accounts, and submit a payment operation. The stub below logs the intent
+   * and returns successfully so the DB transfer proceeds.
+   *
+   * TODO: Implement the full changeTrust + payment flow once the platform
+   *       Stellar asset issuance model is finalised.
+   */
+  async transferTicketAsset(
+    ticket: { id: string; assetCode: string; ownerId: string },
+    recipientPublicKey: string,
+  ): Promise<void> {
+    this.logger.log(
+      `transferTicketAsset: ticket=${ticket.id} asset=${ticket.assetCode} ` +
+        `from ownerId=${ticket.ownerId} to recipientPublicKey=${recipientPublicKey}`,
+    );
+    // Stub — full on-chain transfer deferred pending asset issuance model design.
   }
 
   onModuleDestroy(): void {
