@@ -228,7 +228,6 @@ pub struct StreamPerformanceMetrics {
     pub quality_score: u32,
     pub last_measured_at: u64,
 }
-
 // ── Insurance System ───────────────────────────────────────────────────────
 
 /// Cancellation reason enum for insurance claims

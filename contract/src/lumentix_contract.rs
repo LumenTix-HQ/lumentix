@@ -1085,7 +1085,6 @@ impl LumentixContract {
         };
 
         let mut price = (event.ticket_price * multiplier_bps as i128) / 10000;
-
         if recent_purchases > 0 {
             let window = if window_seconds == 0 {
                 1
@@ -1147,7 +1146,6 @@ impl LumentixContract {
         }
         Self::resolve_price_tier(&env, event_id, &event)
     }
-
     /// Join an event waitlist once capacity is exhausted.
     pub fn join_waitlist(env: Env, event_id: u64, buyer: Address) -> Result<u32, LumentixError> {
         buyer.require_auth();
@@ -2202,7 +2200,6 @@ impl LumentixContract {
         storage::set_stream_performance_metrics(&env, event_id, &metrics);
         Ok(metrics)
     }
-
     // ═══════════════════════════════════════════════════════════════════════
     // VIP TIER SYSTEM
     // ═══════════════════════════════════════════════════════════════════════
@@ -2840,7 +2837,6 @@ impl LumentixContract {
     fn estimate_mint_resource_units(quantity: u32) -> u64 {
         MINT_BASE_RESOURCE_UNITS + (quantity as u64 * MINT_PER_TICKET_RESOURCE_UNITS)
     }
-
     fn add_offer_recipient_if_missing(env: &Env, event_id: u64, buyer: &Address) {
         let mut recipients = storage::get_waitlist_offer_recipients(env, event_id);
         for existing in recipients.iter() {

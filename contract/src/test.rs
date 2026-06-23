@@ -5490,7 +5490,6 @@ fn test_calculate_dynamic_price_time_tiers() {
     assert!(client
         .try_set_pricing_schedule(&organizer, &event_id, &schedule)
         .is_ok());
-
     let early = client.calculate_dynamic_price(&event_id, &0u32, &3600u64);
     assert_eq!(early, 80i128);
 
@@ -5642,7 +5641,6 @@ fn test_hybrid_streaming_delivery_and_performance() {
     assert_eq!(metrics.concurrent_viewers, 42);
     assert!(metrics.quality_score >= 60);
 }
-
 // ============================================================================
 // ADMINISTRATIVE OVERSIGHT OPERATIONS TESTS
 // ============================================================================
@@ -6257,7 +6255,6 @@ fn metadata_timestamp_from_event(data: xdr::ScVal) -> u64 {
         panic!("EventMetadataUpdated data must be a Vec");
     }
 }
-
 /// EventMetadataUpdated emits the correct event_id as the first data field.
 #[test]
 fn test_event_metadata_updated_emits_correct_event_id() {
