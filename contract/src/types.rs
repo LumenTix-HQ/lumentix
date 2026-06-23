@@ -477,3 +477,69 @@ pub struct CollectibleInventory {
     pub epic_minted: u32,
     pub legendary_minted: u32,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dynamic Venue Space Allocation
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VenueSpaceAllocation {
+    pub event_id: u64,
+    pub venue_id: String,
+    pub space_id: String,
+    pub allocated_capacity: u32,
+    pub real_time_demand: u32,
+    pub is_optimized: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Subscription-Based Access Passes
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubscriptionPlan {
+    pub plan_id: u64,
+    pub event_series_id: u64,
+    pub name: String,
+    pub price: i128,
+    pub billing_interval: u64,
+    pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubscriptionStatus {
+    pub subscriber: Address,
+    pub plan_id: u64,
+    pub expiration_time: u64,
+    pub active: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Comprehensive Security Monitoring
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SecurityIncident {
+    pub incident_id: u64,
+    pub affected_address: Address,
+    pub threat_level: String,
+    pub description: String,
+    pub timestamp: u64,
+    pub resolved: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Personalization Engine
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserPreferences {
+    pub user: Address,
+    pub preferred_categories: Vec<String>,
+    pub max_price: i128,
+}

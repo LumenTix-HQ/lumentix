@@ -6,6 +6,7 @@ use crate::types::{
     IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation, Seat,
     Ticket, TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
+    VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -39,6 +40,13 @@ const REVIEW_PREFIX: &str = "REVIEW_";
 const REVIEW_ID_COUNTER: &str = "REVIEW_CTR";
 const REVIEWER_EVENT_PREFIX: &str = "REVEVT_";
 const ORGANIZER_REPUTATION_PREFIX: &str = "ORGREP_";
+const VENUE_ALLOC_PREFIX: &str = "VENAL_";
+const SUB_PLAN_PREFIX: &str = "SUBPL_";
+const SUB_STATUS_PREFIX: &str = "SUBST_";
+const PLAN_ID_COUNTER: &str = "PLAN_CTR";
+const INCIDENT_PREFIX: &str = "INC_";
+const INCIDENT_COUNTER: &str = "INC_CTR";
+const USER_PREFS_PREFIX: &str = "UPREF_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -1368,4 +1376,114 @@ pub fn get_collectible_inventory(
 pub fn has_collectible_inventory(env: &Env, event_id: u64) -> bool {
     let key = (COLLECTIBLE_INVENTORY_PREFIX, event_id);
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dynamic Venue Space Allocation Storage Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_venue_space_allocation(env: &Env, event_id: u64, venue_id: &String, space_id: &String, alloc: &VenueSpaceAllocation) {
+    let key = (VENUE_ALLOC_PREFIX, event_id, venue_id.clone(), space_id.clone());
+    env.storage().persistent().set(&key, alloc);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_venue_space_allocation(env: &Env, event_id: u64, venue_id: &String, space_id: &String) -> Result<VenueSpaceAllocation, LumentixError> {
+    let key = (VENUE_ALLOC_PREFIX, event_id, venue_id.clone(), space_id.clone());
+    let alloc = env.storage().persistent().get(&key).ok_or(LumentixError::VenueSpaceAllocationNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(alloc)
+}
+
+pub fn has_venue_space_allocation(env: &Env, event_id: u64, venue_id: &String, space_id: &String) -> bool {
+    let key = (VENUE_ALLOC_PREFIX, event_id, venue_id.clone(), space_id.clone());
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Subscription-Based Access Passes Storage Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn get_next_plan_id(env: &Env) -> u64 {
+    let id = env.storage().instance().get(&PLAN_ID_COUNTER).unwrap_or(1);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_plan_id(env: &Env) {
+    let next_id = get_next_plan_id(env) + 1;
+    env.storage().instance().set(&PLAN_ID_COUNTER, &next_id);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_subscription_plan(env: &Env, plan_id: u64, plan: &SubscriptionPlan) {
+    let key = (SUB_PLAN_PREFIX, plan_id);
+    env.storage().persistent().set(&key, plan);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_subscription_plan(env: &Env, plan_id: u64) -> Result<SubscriptionPlan, LumentixError> {
+    let key = (SUB_PLAN_PREFIX, plan_id);
+    let plan = env.storage().persistent().get(&key).ok_or(LumentixError::SubscriptionPlanNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(plan)
+}
+
+pub fn set_subscription_status(env: &Env, subscriber: &Address, plan_id: u64, status: &SubscriptionStatus) {
+    let key = (SUB_STATUS_PREFIX, subscriber.clone(), plan_id);
+    env.storage().persistent().set(&key, status);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_subscription_status(env: &Env, subscriber: &Address, plan_id: u64) -> Result<SubscriptionStatus, LumentixError> {
+    let key = (SUB_STATUS_PREFIX, subscriber.clone(), plan_id);
+    let status = env.storage().persistent().get(&key).ok_or(LumentixError::SubscriptionInactive)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(status)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Comprehensive Security Monitoring Storage Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn get_next_incident_id(env: &Env) -> u64 {
+    let id = env.storage().instance().get(&INCIDENT_COUNTER).unwrap_or(1);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_incident_id(env: &Env) {
+    let next_id = get_next_incident_id(env) + 1;
+    env.storage().instance().set(&INCIDENT_COUNTER, &next_id);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_security_incident(env: &Env, incident_id: u64, incident: &SecurityIncident) {
+    let key = (INCIDENT_PREFIX, incident_id);
+    env.storage().persistent().set(&key, incident);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_security_incident(env: &Env, incident_id: u64) -> Result<SecurityIncident, LumentixError> {
+    let key = (INCIDENT_PREFIX, incident_id);
+    let incident = env.storage().persistent().get(&key).ok_or(LumentixError::SecurityIncidentNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(incident)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Personalization Engine Storage Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_user_preferences(env: &Env, user: &Address, prefs: &UserPreferences) {
+    let key = (USER_PREFS_PREFIX, user.clone());
+    env.storage().persistent().set(&key, prefs);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_user_preferences(env: &Env, user: &Address) -> Result<UserPreferences, LumentixError> {
+    let key = (USER_PREFS_PREFIX, user.clone());
+    let prefs = env.storage().persistent().get(&key).ok_or(LumentixError::Unauthorized)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(prefs)
 }

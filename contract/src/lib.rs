@@ -261,6 +261,10 @@ pub use events::{
     InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased, MerchandiseCreated,
     MerchandisePurchased, NftMinted, NftTraded, ReputationUpdated, ReviewSubmitted, TransferEvent,
     UpgradeExecuted, UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast,
+    VenueSpaceAllocated, SpaceUtilizationOptimized, VenueConflictManaged,
+    SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
+    SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
+    UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -270,5 +274,5 @@ pub use types::{
     Event, EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,
     IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation,
     RarityTier, Ticket as LumentixTicket, UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
-    UpgradeVote,
+    UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 };

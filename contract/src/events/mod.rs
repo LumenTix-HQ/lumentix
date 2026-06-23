@@ -1024,7 +1024,7 @@ impl MerchandiseCreated {
         total_supply: u32,
     ) {
         env.events().publish(
-            (symbol_short!("merccreate"),),
+            (soroban_sdk::Symbol::new(env, "merccreate"),),
             (
                 merchandise_id,
                 event_id,
@@ -1106,6 +1106,130 @@ impl CollectibleInventoryUpdated {
         env.events().publish(
             (symbol_short!("colinvup"),),
             (event_id, max_supply, total_minted),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW FEATURES EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct VenueSpaceAllocated;
+impl VenueSpaceAllocated {
+    pub fn emit(env: &Env, event_id: u64, venue_id: String, space_id: String, capacity: u32) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "venue_space_allocated"),),
+            (event_id, venue_id, space_id, capacity),
+        );
+    }
+}
+
+pub struct SpaceUtilizationOptimized;
+impl SpaceUtilizationOptimized {
+    pub fn emit(env: &Env, venue_id: String, space_id: String, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "space_utilization_optimized"),),
+            (venue_id, space_id, timestamp),
+        );
+    }
+}
+
+pub struct VenueConflictManaged;
+impl VenueConflictManaged {
+    pub fn emit(env: &Env, venue_id: String, space_id: String, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "venue_conflict_managed"),),
+            (venue_id, space_id, timestamp),
+        );
+    }
+}
+
+pub struct SubscriptionPlanCreated;
+impl SubscriptionPlanCreated {
+    pub fn emit(env: &Env, plan_id: u64, series_id: u64, price: i128, billing_interval: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "subscription_plan_created"),),
+            (plan_id, series_id, price, billing_interval),
+        );
+    }
+}
+
+pub struct RecurringBillingProcessed;
+impl RecurringBillingProcessed {
+    pub fn emit(env: &Env, subscriber: Address, plan_id: u64, amount: i128, expiration_time: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "recurring_billing_processed"),),
+            (subscriber, plan_id, amount, expiration_time),
+        );
+    }
+}
+
+pub struct SubscriptionStatusValidated;
+impl SubscriptionStatusValidated {
+    pub fn emit(env: &Env, subscriber: Address, plan_id: u64, active: bool, expiration_time: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "subscription_status_validated"),),
+            (subscriber, plan_id, active, expiration_time),
+        );
+    }
+}
+
+pub struct SecurityThreatMonitored;
+impl SecurityThreatMonitored {
+    pub fn emit(env: &Env, target_address: Address, threat_score: u32, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "security_threat_monitored"),),
+            (target_address, threat_score, timestamp),
+        );
+    }
+}
+
+pub struct SuspiciousActivityDetected;
+impl SuspiciousActivityDetected {
+    pub fn emit(env: &Env, target_address: Address, activity_type: String, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "suspicious_activity_detected"),),
+            (target_address, activity_type, timestamp),
+        );
+    }
+}
+
+pub struct IncidentResponded;
+impl IncidentResponded {
+    pub fn emit(env: &Env, incident_id: u64, action: String, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "incident_responded"),),
+            (incident_id, action, timestamp),
+        );
+    }
+}
+
+pub struct UserExperiencePersonalized;
+impl UserExperiencePersonalized {
+    pub fn emit(env: &Env, user: Address, categories: Vec<String>, max_price: i128, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "user_experience_personalized"),),
+            (user, categories, max_price, timestamp),
+        );
+    }
+}
+
+pub struct EventRecommendationsCustomized;
+impl EventRecommendationsCustomized {
+    pub fn emit(env: &Env, user: Address, recommended_count: u32, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "event_recommendations_customized"),),
+            (user, recommended_count, timestamp),
+        );
+    }
+}
+
+pub struct UserJourneyOptimized;
+impl UserJourneyOptimized {
+    pub fn emit(env: &Env, user: Address, step_count: u32, timestamp: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "user_journey_optimized"),),
+            (user, step_count, timestamp),
         );
     }
 }
