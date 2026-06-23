@@ -1024,6 +1024,7 @@ impl MerchandiseCreated {
         total_supply: u32,
     ) {
         env.events().publish(
+            (symbol_short!("merch_crt"),),
             (soroban_sdk::Symbol::new(env, "merccreate"),),
             (
                 merchandise_id,

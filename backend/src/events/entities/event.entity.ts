@@ -147,6 +147,8 @@ export class Event {
    */
   @Column({ type: 'timestamp', nullable: true, default: null })
   mergedAt: Date | null;
+
+  /**
    * Optional webhook URL for outbound payment status notifications.
    * When set, a signed POST request is sent on each payment status transition.
    */

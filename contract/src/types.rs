@@ -170,6 +170,64 @@ pub struct WaitlistOffer {
     pub expires_at: u64,
 }
 
+// ── Dynamic pricing ────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PriceTier {
+    EarlyBird,
+    Standard,
+    Late,
+    LastMinute,
+}
+
+/// Organizer-configurable multipliers (basis points) for time-based pricing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PricingSchedule {
+    pub early_bird_multiplier_bps: u32,
+    pub standard_multiplier_bps: u32,
+    pub late_multiplier_bps: u32,
+    pub last_minute_multiplier_bps: u32,
+    pub early_bird_days: u32,
+    pub standard_days: u32,
+    pub last_minute_hours: u32,
+}
+
+/// Rolling batch-mint resource usage snapshot for fee optimization.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MintGasUsage {
+    pub total_mints: u32,
+    pub total_tickets_minted: u32,
+    pub total_resource_units: u64,
+    pub last_batch_quantity: u32,
+    pub last_batch_resource_units: u64,
+    pub last_updated: u64,
+}
+
+/// CDN / adaptive streaming delivery configuration for hybrid events.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamDeliveryConfig {
+    pub cdn_endpoint: String,
+    pub stream_url: String,
+    pub quality_profile: String,
+    pub adaptive_bitrate: bool,
+    pub target_bitrate_kbps: u32,
+}
+
+/// Observed streaming performance metrics for virtual attendees.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamPerformanceMetrics {
+    pub event_id: u64,
+    pub avg_bitrate_kbps: u32,
+    pub rebuffer_ratio_bps: u32,
+    pub concurrent_viewers: u32,
+    pub quality_score: u32,
+    pub last_measured_at: u64,
+}
 // ── Insurance System ───────────────────────────────────────────────────────
 
 /// Cancellation reason enum for insurance claims

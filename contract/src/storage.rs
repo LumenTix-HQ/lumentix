@@ -5,6 +5,8 @@ use crate::types::{
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
     IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation, Seat,
     Ticket, TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
+    VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
+    StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 };
@@ -33,6 +35,10 @@ const WAITLIST_QUEUE_PREFIX: &str = "WQUEUE_";
 const WAITLIST_OFFER_PREFIX: &str = "WOFFER_";
 const WAITLIST_OFFER_RECIPIENTS_PREFIX: &str = "WOFRECS_";
 const WAITLIST_RESERVED_PREFIX: &str = "WRESV_";
+const PRICING_SCHEDULE_PREFIX: &str = "PRSCHED_";
+const MINT_GAS_PREFIX: &str = "MINTGAS_";
+const STREAM_DELIVERY_PREFIX: &str = "STRMDEL_";
+const STREAM_PERF_PREFIX: &str = "STRMPERF_";
 const INSURANCE_POLICY_PREFIX: &str = "INSPOL_";
 const INSURANCE_POLICY_ID_COUNTER: &str = "INSPOL_CTR";
 const INSURANCE_POOL: &str = "INSPOOL";
@@ -593,6 +599,113 @@ pub fn set_waitlist_reserved(env: &Env, event_id: u64, reserved: u32) {
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRICING SCHEDULE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_pricing_schedule(env: &Env, event_id: u64, schedule: &PricingSchedule) {
+    let key = (PRICING_SCHEDULE_PREFIX, event_id);
+    env.storage().persistent().set(&key, schedule);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_pricing_schedule(env: &Env, event_id: u64) -> Option<PricingSchedule> {
+    let key = (PRICING_SCHEDULE_PREFIX, event_id);
+    let schedule: Option<PricingSchedule> = env.storage().persistent().get(&key);
+    if schedule.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    schedule
+}
+
+pub fn has_pricing_schedule(env: &Env, event_id: u64) -> bool {
+    let key = (PRICING_SCHEDULE_PREFIX, event_id);
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MINT GAS TRACKING STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn get_mint_gas_usage(env: &Env, event_id: u64) -> MintGasUsage {
+    let key = (MINT_GAS_PREFIX, event_id);
+    let usage: MintGasUsage = env.storage().persistent().get(&key).unwrap_or(MintGasUsage {
+        total_mints: 0,
+        total_tickets_minted: 0,
+        total_resource_units: 0,
+        last_batch_quantity: 0,
+        last_batch_resource_units: 0,
+        last_updated: 0,
+    });
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    usage
+}
+
+pub fn record_mint_gas_usage(env: &Env, event_id: u64, quantity: u32, resource_units: u64) {
+    let key = (MINT_GAS_PREFIX, event_id);
+    let mut usage = get_mint_gas_usage(env, event_id);
+    usage.total_mints = usage.total_mints.saturating_add(1);
+    usage.total_tickets_minted = usage.total_tickets_minted.saturating_add(quantity);
+    usage.total_resource_units = usage.total_resource_units.saturating_add(resource_units);
+    usage.last_batch_quantity = quantity;
+    usage.last_batch_resource_units = resource_units;
+    usage.last_updated = env.ledger().timestamp();
+    env.storage().persistent().set(&key, &usage);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STREAMING DELIVERY STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_stream_delivery_config(env: &Env, event_id: u64, config: &StreamDeliveryConfig) {
+    let key = (STREAM_DELIVERY_PREFIX, event_id);
+    env.storage().persistent().set(&key, config);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_stream_delivery_config(env: &Env, event_id: u64) -> Option<StreamDeliveryConfig> {
+    let key = (STREAM_DELIVERY_PREFIX, event_id);
+    let config: Option<StreamDeliveryConfig> = env.storage().persistent().get(&key);
+    if config.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    config
+}
+
+pub fn set_stream_performance_metrics(env: &Env, event_id: u64, metrics: &StreamPerformanceMetrics) {
+    let key = (STREAM_PERF_PREFIX, event_id);
+    env.storage().persistent().set(&key, metrics);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_stream_performance_metrics(env: &Env, event_id: u64) -> Option<StreamPerformanceMetrics> {
+    let key = (STREAM_PERF_PREFIX, event_id);
+    let metrics: Option<StreamPerformanceMetrics> = env.storage().persistent().get(&key);
+    if metrics.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    metrics
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

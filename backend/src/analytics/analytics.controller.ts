@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Param,
+  Query,
   UseGuards,
   Req,
   ParseUUIDPipe,
@@ -17,6 +18,7 @@ import { SalesReportDto } from './dto/sales-report.dto';
 import { DemographicsReportDto } from './dto/demographic-report.dto';
 import { AttendancePatternDto } from './dto/attendance-pattern.dto';
 import { AnalyticsDashboardDto } from './dto/analytics-dashboard.dto';
+import { BiDashboardDto, BusinessOutcomePredictionDto, MarketTrendsDto } from './dto/bi-dashboard.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -123,5 +125,50 @@ export class AnalyticsController {
       eventId,
       req.user.id,
     );
+  }
+
+  @Get('organizers/me/bi-dashboard')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Generate organizer business intelligence dashboard',
+    description:
+      'Combines portfolio KPIs, market trends, and predictive outcomes for strategic planning.',
+  })
+  @ApiResponse({ status: 200, type: BiDashboardDto })
+  async generateBiDashboard(
+    @Req() req: AuthenticatedRequest,
+    @Query('featuredEventId') featuredEventId?: string,
+  ): Promise<BiDashboardDto> {
+    return this.analyticsService.generateBiDashboard(
+      req.user.id,
+      featuredEventId,
+    );
+  }
+
+  @Get('market-trends')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Analyze market trends by category and location' })
+  @ApiResponse({ status: 200, type: MarketTrendsDto })
+  async analyzeMarketTrends(
+    @Req() req: AuthenticatedRequest,
+    @Query('category') category = 'all',
+    @Query('location') location = 'global',
+  ): Promise<MarketTrendsDto> {
+    return this.analyticsService.analyzeMarketTrends(
+      category,
+      location,
+      req.user.id,
+    );
+  }
+
+  @Get('events/:eventId/predict-outcomes')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Predict revenue, attendance, and refund outcomes' })
+  @ApiResponse({ status: 200, type: BusinessOutcomePredictionDto })
+  async predictBusinessOutcomes(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<BusinessOutcomePredictionDto> {
+    return this.analyticsService.predictBusinessOutcomes(eventId, req.user.id);
   }
 }

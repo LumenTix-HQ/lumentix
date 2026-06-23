@@ -38,6 +38,7 @@ import { GamificationModule } from './gamification/gamification.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
 import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { StreamingModule } from './streaming/streaming.module';
 
 
 @Module({
@@ -118,6 +119,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     SchedulingModule,
     CategoriesModule,
     WebhooksModule,
+    StreamingModule,
   ],
   controllers: [AppController],
   providers: [

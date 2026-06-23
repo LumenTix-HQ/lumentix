@@ -35,6 +35,12 @@ import {
   QuickStats,
   RefundMetrics,
 } from './dto/analytics-dashboard.dto';
+import {
+  BiDashboardDto,
+  BusinessOutcomePredictionDto,
+  MarketTrendsDto,
+} from './dto/bi-dashboard.dto';
+import { EventStatus } from '../events/entities/event.entity';
 
 @Injectable()
 export class AnalyticsService {
@@ -692,5 +698,258 @@ export class AnalyticsService {
       attendance,
       refunds,
     };
+  }
+
+  async generateBiDashboard(
+    organizerId: string,
+    featuredEventId?: string,
+  ): Promise<BiDashboardDto> {
+    const events = await this.eventRepository.find({
+      where: { organizerId },
+      order: { startDate: 'DESC' },
+    });
+
+    const payments = await this.paymentRepository.find({
+      where: {
+        status: PaymentStatus.CONFIRMED,
+      },
+    });
+
+    const organizerPayments = payments.filter((payment) =>
+      events.some((event) => event.id === payment.eventId),
+    );
+
+    const totalRevenue = organizerPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0,
+    );
+    const totalTicketsSold = organizerPayments.length;
+    const activeEvents = events.filter(
+      (event) => event.status === EventStatus.PUBLISHED,
+    ).length;
+
+    const capacityTotals = events.reduce(
+      (acc, event) => {
+        const sold = organizerPayments.filter((p) => p.eventId === event.id).length;
+        const capacity = event.maxAttendees ?? sold;
+        return {
+          sold: acc.sold + sold,
+          capacity: acc.capacity + capacity,
+        };
+      },
+      { sold: 0, capacity: 0 },
+    );
+
+    const avgSellThroughPercent =
+      capacityTotals.capacity > 0
+        ? (capacityTotals.sold / capacityTotals.capacity) * 100
+        : 0;
+
+    const referenceEvent =
+      featuredEventId != null
+        ? events.find((event) => event.id === featuredEventId)
+        : events.find((event) => event.status === EventStatus.PUBLISHED) ??
+          events[0];
+
+    const marketTrends = await this.analyzeMarketTrends(
+      referenceEvent?.category ?? 'other',
+      referenceEvent?.location ?? 'global',
+      organizerId,
+    );
+
+    const featuredEvent = referenceEvent
+      ? await this.generateAnalyticsDashboard(referenceEvent.id, organizerId)
+      : null;
+
+    const predictions = referenceEvent
+      ? await this.predictBusinessOutcomes(referenceEvent.id, organizerId)
+      : null;
+
+    return {
+      organizerId,
+      generatedAt: new Date(),
+      portfolioSummary: {
+        totalEvents: events.length,
+        activeEvents,
+        totalRevenue,
+        totalTicketsSold,
+        avgSellThroughPercent,
+      },
+      featuredEvent,
+      marketTrends,
+      predictions,
+    };
+  }
+
+  async analyzeMarketTrends(
+    category: string,
+    location: string,
+    organizerId?: string,
+  ): Promise<MarketTrendsDto> {
+    const events = await this.eventRepository.find({
+      where: organizerId ? { organizerId } : {},
+      order: { createdAt: 'ASC' },
+    });
+
+    const filtered = events.filter((event) => {
+      const categoryMatch =
+        category === 'global' ||
+        !category ||
+        String(event.category).toLowerCase() === category.toLowerCase();
+      const locationMatch =
+        location === 'global' ||
+        !location ||
+        (event.location ?? '').toLowerCase().includes(location.toLowerCase());
+      return categoryMatch && locationMatch;
+    });
+
+    const payments = await this.paymentRepository.find({
+      where: { status: PaymentStatus.CONFIRMED },
+    });
+
+    const monthlyTrends = this.buildMonthlyTrends(filtered, payments);
+    const recent = monthlyTrends.slice(-3);
+    const demandTrend = this.deriveDemandTrend(recent);
+    const competitionLevel = this.deriveCompetitionLevel(filtered.length);
+    const seasonalFactor = this.deriveSeasonalFactor(new Date());
+
+    const insights = [
+      `Observed ${filtered.length} comparable events in ${location || 'all locations'}.`,
+      `Demand is ${demandTrend} based on the last three reporting periods.`,
+      `Competition level is ${competitionLevel} for category ${category || 'all'}.`,
+    ];
+
+    return {
+      category: category || 'all',
+      location: location || 'global',
+      demandTrend,
+      competitionLevel,
+      seasonalFactor,
+      monthlyTrends,
+      insights,
+    };
+  }
+
+  async predictBusinessOutcomes(
+    eventId: string,
+    organizerId: string,
+  ): Promise<BusinessOutcomePredictionDto> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) {
+      throw new NotFoundException(`Event with id "${eventId}" not found`);
+    }
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+
+    const salesReport = await this.generateSalesReport(eventId, organizerId);
+    const daysToEvent = Math.max(
+      1,
+      Math.ceil(
+        (event.startDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000),
+      ),
+    );
+
+    const velocity = salesReport.metrics.avgTicketsPerDay || 0;
+    const projectedTickets = Math.min(
+      event.maxAttendees ?? salesReport.totalTicketsSold + velocity * daysToEvent,
+      salesReport.totalTicketsSold + velocity * daysToEvent,
+    );
+    const projectedRevenue = projectedTickets * (salesReport.avgTicketPrice || Number(event.ticketPrice));
+    const capacity = (event.maxAttendees ?? projectedTickets) || 1;
+    const projectedSellThroughPercent = (projectedTickets / capacity) * 100;
+
+    const refunds = await this.paymentRepository.find({
+      where: { eventId, status: PaymentStatus.REFUNDED },
+    });
+    const confirmed = await this.paymentRepository.find({
+      where: { eventId, status: PaymentStatus.CONFIRMED },
+    });
+    const projectedRefundRatePercent =
+      confirmed.length + refunds.length > 0
+        ? (refunds.length / (confirmed.length + refunds.length)) * 100
+        : 0;
+
+    const confidence =
+      salesReport.totalTicketsSold >= 20
+        ? 'high'
+        : salesReport.totalTicketsSold >= 5
+          ? 'medium'
+          : 'low';
+
+    const recommendations: string[] = [];
+    if (projectedSellThroughPercent < 60) {
+      recommendations.push('Consider promotional pricing or partner outreach to lift sell-through.');
+    }
+    if (projectedRefundRatePercent > 5) {
+      recommendations.push('Refund rate is elevated; review cancellation policy messaging.');
+    }
+    if (daysToEvent <= 7 && velocity < 1) {
+      recommendations.push('Last-week velocity is low; activate waitlist and retargeting campaigns.');
+    }
+    if (recommendations.length === 0) {
+      recommendations.push('Current trajectory is healthy; maintain existing pricing and marketing cadence.');
+    }
+
+    return {
+      eventId,
+      projectedRevenue,
+      projectedAttendance: Math.round(projectedTickets),
+      projectedSellThroughPercent,
+      projectedRefundRatePercent,
+      confidence,
+      recommendations,
+    };
+  }
+
+  private buildMonthlyTrends(
+    events: Event[],
+    payments: Payment[],
+  ) {
+    const buckets = new Map<string, { eventsCount: number; ticketsSold: number; revenue: number }>();
+
+    for (const event of events) {
+      const key = `${event.createdAt.getUTCFullYear()}-${String(event.createdAt.getUTCMonth() + 1).padStart(2, '0')}`;
+      const bucket = buckets.get(key) ?? { eventsCount: 0, ticketsSold: 0, revenue: 0 };
+      bucket.eventsCount += 1;
+      const eventPayments = payments.filter((payment) => payment.eventId === event.id);
+      bucket.ticketsSold += eventPayments.length;
+      bucket.revenue += eventPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+      buckets.set(key, bucket);
+    }
+
+    return Array.from(buckets.entries()).map(([period, bucket]) => ({
+      period,
+      eventsCount: bucket.eventsCount,
+      ticketsSold: bucket.ticketsSold,
+      revenue: bucket.revenue,
+      avgTicketPrice:
+        bucket.ticketsSold > 0 ? bucket.revenue / bucket.ticketsSold : 0,
+    }));
+  }
+
+  private deriveDemandTrend(
+    recent: Array<{ ticketsSold: number }>,
+  ): 'rising' | 'stable' | 'declining' {
+    if (recent.length < 2) return 'stable';
+    const first = recent[0].ticketsSold;
+    const last = recent[recent.length - 1].ticketsSold;
+    if (last > first * 1.15) return 'rising';
+    if (last < first * 0.85) return 'declining';
+    return 'stable';
+  }
+
+  private deriveCompetitionLevel(
+    comparableEvents: number,
+  ): 'low' | 'medium' | 'high' {
+    if (comparableEvents < 3) return 'low';
+    if (comparableEvents < 8) return 'medium';
+    return 'high';
+  }
+
+  private deriveSeasonalFactor(date: Date): number {
+    const month = date.getUTCMonth();
+    const peakMonths = new Set([3, 4, 5, 9, 10]);
+    return peakMonths.has(month) ? 1.15 : 0.95;
   }
 }

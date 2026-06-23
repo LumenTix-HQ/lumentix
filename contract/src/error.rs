@@ -242,6 +242,13 @@ pub enum LumentixError {
     /// Caller is not the NFT owner
     NftNotOwned = 98,
 
+    // Pricing & mint optimization (100–102)
+    /// Pricing schedule multipliers or thresholds are invalid
+    InvalidPricingSchedule = 100,
+    /// No custom pricing schedule configured for this event
+    PricingScheduleNotFound = 101,
+    /// Batch mint quantity exceeds optimized limits
+    BatchMintLimitExceeded = 102,
     // Dynamic Venue Space Allocation errors (100–103)
     /// Venue space allocation not found
     VenueSpaceAllocationNotFound = 100,
