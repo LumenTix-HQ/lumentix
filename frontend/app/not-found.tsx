@@ -17,6 +17,12 @@ export default function NotFound() {
                 >
                     Return to Base
                 </Link>
+                <Link
+                    href="/events"
+                    className="px-8 py-4 bg-white/[0.06] border border-white/[0.1] text-white rounded-full font-bold hover:bg-white/[0.1] transition-colors shadow-xl inline-block mt-4"
+                >
+                    Browse Events
+                </Link>
             </div>
             <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
                 <div className="absolute top-1/4 left-1/4 w-64 h-64 bg-red-500 rounded-full blur-[128px]"></div>

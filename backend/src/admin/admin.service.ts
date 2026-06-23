@@ -4,15 +4,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, ILike, IsNull } from 'typeorm';
 import { paginate } from '../common/pagination/pagination.helper';
 import { PaginatedResult } from '../common/pagination/interfaces/paginated-result.interface';
 import { User } from '../users/entities/user.entity';
 import { Event, EventStatus } from '../events/entities/event.entity';
 import { RoleRequest, RoleRequestStatus } from '../users/entities/role-request.entity';
 import { UserStatus } from '../users/enums/user-status.enum';
+import { UserRole } from '../users/enums/user-role.enum';
 import { ListAdminUsersDto } from './dto/list-admin-users.dto';
 import { ListAdminEventsDto } from './dto/list-admin-events.dto';
+import { UpdateAdminUserDto } from './dto/update-admin-user.dto';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 
 @Injectable()
@@ -94,6 +96,7 @@ export class AdminService {
         'user.notificationPreferences',
         'user.createdAt',
         'user.updatedAt',
+        'user.deletedAt',
       ]);
 
     if (dto.role) {
@@ -104,7 +107,46 @@ export class AdminService {
       qb.andWhere('user.status = :status', { status: dto.status });
     }
 
+    // Search by email (partial match)
+    if (dto.search) {
+      qb.andWhere('LOWER(user.email) LIKE LOWER(:search)', {
+        search: `%${dto.search}%`,
+      });
+    }
+
+    // Exclude soft-deleted unless includeDeleted is explicitly true
+    if (!dto.includeDeleted) {
+      qb.andWhere('user.deletedAt IS NULL');
+    }
+
     return paginate(qb, dto, 'user');
+  }
+
+  async updateUser(
+    userId: string,
+    dto: UpdateAdminUserDto,
+  ): Promise<User> {
+    const user = await this.findUserOrFail(userId);
+
+    if (dto.role !== undefined) {
+      if (!Object.values(UserRole).includes(dto.role)) {
+        throw new BadRequestException(`Invalid role value: ${dto.role}`);
+      }
+      user.role = dto.role;
+    }
+
+    return this.userRepository.save(user);
+  }
+
+  async softDeleteUser(userId: string): Promise<void> {
+    const user = await this.findUserOrFail(userId);
+
+    if (user.deletedAt) {
+      throw new BadRequestException('User is already deleted.');
+    }
+
+    user.deletedAt = new Date();
+    await this.userRepository.save(user);
   }
 
   async getUserById(userId: string): Promise<User> {
@@ -121,6 +163,7 @@ export class AdminService {
         'user.notificationPreferences',
         'user.createdAt',
         'user.updatedAt',
+        'user.deletedAt',
       ])
       .where('user.id = :id', { id: userId })
       .getOne();

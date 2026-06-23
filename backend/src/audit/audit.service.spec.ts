@@ -27,3 +27,39 @@ describe('AuditService', () => {
     expect(service).toBeDefined();
   });
 });
+
+it(
+  'filters by action',
+  async () => {
+    await service.findLogs({
+      action: 'LOGIN',
+      page: 1,
+      limit: 20,
+    });
+
+    expect(
+      queryBuilder.andWhere,
+    ).toHaveBeenCalledWith(
+      'audit.action = :action',
+      { action: 'LOGIN' },
+    );
+  },
+);
+
+it(
+  'prunes old audit logs',
+  async () => {
+    jest
+      .spyOn(
+        auditService,
+        'pruneLogs',
+      )
+      .mockResolvedValue(15);
+
+    await task.pruneOldLogs();
+
+    expect(
+      auditService.pruneLogs,
+    ).toHaveBeenCalled();
+  },
+);

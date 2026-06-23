@@ -76,7 +76,7 @@ export class ResaleService {
       action: AuditAction.RESALE_LISTED,
       userId: ownerId,
       resourceId: ticketId,
-      metadata: { price: dto.price, currency: dto.currency, originalPrice },
+      meta: { price: dto.price, currency: dto.currency, originalPrice },
     });
 
     return {
@@ -169,7 +169,7 @@ export class ResaleService {
       action: AuditAction.RESALE_BOUGHT,
       userId: buyerId,
       resourceId: ticket.id,
-      metadata: {
+      meta: {
         salePrice,
         organizerFee,
         sellerPayout,

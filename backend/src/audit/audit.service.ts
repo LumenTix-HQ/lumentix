@@ -43,4 +43,103 @@ export class AuditService {
 
     return saved;
   }
+  async findLogs(
+  query: AuditLogQueryDto,
+) {
+  const qb =
+    this.auditLogRepository.createQueryBuilder(
+      'audit',
+    );
+
+  if (query.action) {
+    qb.andWhere(
+      'audit.action = :action',
+      {
+        action: query.action,
+      },
+    );
+  }
+
+  if (query.userId) {
+    qb.andWhere(
+      'audit.userId = :userId',
+      {
+        userId: query.userId,
+      },
+    );
+  }
+
+  if (query.resourceId) {
+    qb.andWhere(
+      'audit.resourceId = :resourceId',
+      {
+        resourceId: query.resourceId,
+      },
+    );
+  }
+
+  if (query.fromDate) {
+    qb.andWhere(
+      'audit.createdAt >= :fromDate',
+      {
+        fromDate: query.fromDate,
+      },
+    );
+  }
+
+  if (query.toDate) {
+    qb.andWhere(
+      'audit.createdAt <= :toDate',
+      {
+        toDate: query.toDate,
+      },
+    );
+  }
+
+  qb.orderBy(
+    'audit.createdAt',
+    'DESC',
+  );
+
+  const skip =
+    (query.page - 1) * query.limit;
+
+  qb.skip(skip);
+  qb.take(query.limit);
+
+  const [items, total] =
+    await qb.getManyAndCount();
+
+  return {
+    data: items,
+    total,
+    page: query.page,
+    limit: query.limit,
+    totalPages: Math.ceil(
+      total / query.limit,
+    ),
+  };
+}
+async pruneLogs(
+  retentionDays: number,
+): Promise<number> {
+  const cutoff =
+    new Date();
+
+  cutoff.setDate(
+    cutoff.getDate() - retentionDays,
+  );
+
+  const result =
+    await this.auditLogRepository
+      .createQueryBuilder()
+      .delete()
+      .where(
+        'createdAt < :cutoff',
+        { cutoff },
+      )
+      .execute();
+
+  return result.affected ?? 0;
+}
 }

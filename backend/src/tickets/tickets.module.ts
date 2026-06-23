@@ -6,6 +6,7 @@ import { TicketEntity } from './entities/ticket.entity';
 import { TicketSigningService } from './ticket-signing.service';
 import { TicketPdfService } from './ticket-pdf.service';
 import { Event } from '../events/entities/event.entity';
+import { EventSeries } from '../events/entities/event-series.entity';
 import { User } from '../users/entities/user.entity';
 import { TicketsService } from './tickets.service';
 import { TicketsController, TicketsPublicController } from './tickets.controller';
@@ -24,7 +25,7 @@ import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([TicketEntity, Event, User, ResaleTransaction]),
+    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction]),
     forwardRef(() => PaymentsModule),
     StellarModule,
     NotificationModule,

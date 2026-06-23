@@ -6,6 +6,7 @@ import {
   Query,
   Req,
   UseGuards,
+  Body,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,6 +21,12 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { PaginationDto } from '../../common/pagination/dto/pagination.dto';
 import { RefundResultDto } from './dto/refund-result.dto';
+import {
+  ProcessAutomaticRefundDto,
+  CalculateRefundAmountDto,
+  CreateRefundDisputeDto,
+  RefundDisputeDto,
+} from './dto';
 import { RefundService } from './refund.service';
 
 @ApiTags('Refunds')
@@ -44,6 +51,19 @@ export class RefundController {
   @ApiResponse({ status: 404, description: 'Event not found' })
   refundEvent(@Param('eventId') eventId: string): Promise<RefundResultDto[]> {
     return this.refundService.refundEvent(eventId);
+  }
+
+  @Post('automatic')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Process automatic refunds for cancelled event' })
+  processAutomaticRefund(@Body() dto: ProcessAutomaticRefundDto) {
+    return this.refundService.processAutomaticRefund(dto);
+  }
+
+  @Post('calculate')
+  @ApiOperation({ summary: 'Calculate refund amount for a payment' })
+  calculateRefundAmount(@Body() dto: CalculateRefundAmountDto) {
+    return this.refundService.calculateRefundAmount(dto);
   }
 
   @Get('event/:eventId')
@@ -92,5 +112,37 @@ export class RefundController {
     @Query() paginationDto: PaginationDto,
   ) {
     return this.refundService.getMyRefunds(req.user.id, paginationDto);
+  }
+
+  @Post('disputes')
+  @ApiOperation({ summary: 'File a refund dispute' })
+  fileDispute(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: CreateRefundDisputeDto,
+  ): Promise<RefundDisputeDto> {
+    return this.refundService.handleRefundDispute(dto, req.user.id);
+  }
+
+  @Get('disputes/:disputeId')
+  @ApiOperation({ summary: 'Get dispute status' })
+  getDispute(@Param('disputeId') disputeId: string) {
+    return this.refundService.getDisputeStatus(disputeId);
+  }
+
+  @Post('disputes/:disputeId/resolve')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Resolve a refund dispute (admin)' })
+  resolveDispute(
+    @Param('disputeId') disputeId: string,
+    @Body() body: { approved: boolean; approvedAmount?: number; resolutionNotes?: string },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.refundService.resolveRefundDispute(
+      disputeId,
+      body.approved,
+      body.approvedAmount,
+      body.resolutionNotes,
+      req.user.id,
+    );
   }
 }

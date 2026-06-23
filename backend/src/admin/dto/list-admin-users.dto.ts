@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { PaginationDto } from '../../common/pagination/dto/pagination.dto';
 import { UserRole } from '../../users/enums/user-role.enum';
 import { UserStatus } from '../../users/enums/user-status.enum';
@@ -10,11 +11,19 @@ export class ListAdminUsersDto extends PaginationDto {
   @IsEnum(UserRole)
   role?: UserRole;
 
-  @ApiPropertyOptional({
-    enum: UserStatus,
-    description: 'Filter by user status',
-  })
+  @ApiPropertyOptional({ enum: UserStatus, description: 'Filter by user status' })
   @IsOptional()
   @IsEnum(UserStatus)
-  status?: UserStatus = undefined;
+  status?: UserStatus;
+
+  @ApiPropertyOptional({ description: 'Search by email (partial match)' })
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @ApiPropertyOptional({ description: 'Include soft-deleted users', default: false })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true' || value === true)
+  includeDeleted?: boolean;
 }

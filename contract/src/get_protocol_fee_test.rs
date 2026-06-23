@@ -648,7 +648,7 @@ fn test_deposit_funds_near_maximum_i128() {
     let near_max: i128 = i128::MAX - 1000;
     let balance = client.deposit_funds(&organizer, &event_id, &near_max);
     assert_eq!(balance, near_max);
-    
+
     // Add another deposit to test overflow protection
     let additional = 500i128;
     let new_balance = client.deposit_funds(&organizer, &event_id, &additional);
@@ -746,7 +746,7 @@ fn test_deposit_funds_extreme_small_amounts() {
     // Test with smallest positive amounts
     let amounts = [1i128, 2i128, 3i128, 5i128, 10i128];
     let mut expected_balance = 0i128;
-    
+
     for amount in amounts.iter() {
         expected_balance += amount;
         let balance = client.deposit_funds(&organizer, &event_id, amount);
@@ -782,7 +782,7 @@ fn test_deposit_funds_rapid_succession() {
         let balance = client.deposit_funds(&organizer, &event_id, &amount);
         assert_eq!(balance, expected_total);
     }
-    
+
     // Verify final balance
     assert_eq!(client.get_escrow_balance(&event_id), expected_total);
 }
@@ -809,12 +809,16 @@ fn test_deposit_funds_alternating_large_small() {
 
     // Alternate between large and small amounts
     let deposits = [
-        1_000_000i128, 1i128, 
-        500_000i128, 2i128,
-        100_000i128, 3i128,
-        50_000i128, 4i128,
+        1_000_000i128,
+        1i128,
+        500_000i128,
+        2i128,
+        100_000i128,
+        3i128,
+        50_000i128,
+        4i128,
     ];
-    
+
     let mut expected_balance = 0i128;
     for amount in deposits.iter() {
         expected_balance += amount;
@@ -847,7 +851,7 @@ fn test_deposit_funds_state_persistence() {
     client.deposit_funds(&organizer, &event_id, &1000i128);
     client.deposit_funds(&organizer, &event_id, &2000i128);
     client.deposit_funds(&organizer, &event_id, &3000i128);
-    
+
     let balance_before = client.get_escrow_balance(&event_id);
     assert_eq!(balance_before, 6000i128);
 
@@ -857,12 +861,12 @@ fn test_deposit_funds_state_persistence() {
     // Perform some other operations (ticket purchases, etc.)
     let buyer = Address::generate(&env);
     client.purchase_ticket(&buyer, &event_id, &100i128);
-    
+
     // Check that escrow balance is updated correctly
     let balance_after_purchase = client.get_escrow_balance(&event_id);
     // Should be previous balance + ticket price - platform fee (0% fee = 100)
     assert_eq!(balance_after_purchase, 6100i128);
-    
+
     // Continue depositing
     client.deposit_funds(&organizer, &event_id, &4000i128);
     let final_balance = client.get_escrow_balance(&event_id);

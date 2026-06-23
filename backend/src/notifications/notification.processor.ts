@@ -53,20 +53,19 @@ export class NotificationProcessor {
     if (await this.shouldSkip(job, 'ticketIssued')) return;
 
     this.logger.log(`Sending ticket email for job ${job.id}...`);
-    const { email, ticketId, eventName, pdfUrl } = job.data;
+    const { email, ticketId, eventName, pdfUrl, eventDate, eventLocation } = job.data;
     const subject = `Your ticket for ${eventName}`;
-    const pdfLink = pdfUrl
-      ? `<p><a href="${pdfUrl}" style="color: #007bff;">Download your PDF ticket</a></p>`
-      : '';
-    const html = `
-      <div style="font-family: Arial, sans-serif;">
-        <h2>Your Ticket for ${eventName}</h2>
-        <p>Ticket ID: <strong>${ticketId}</strong></p>
-        <p>Redeem your ticket <a href="https://lumentix.com/redeem/${ticketId}" style="color: #007bff;">here</a>.</p>
-        ${pdfLink}
-      </div>
-    `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send(email, subject, {
+      template: 'ticket-ready',
+      context: {
+        name: email,
+        ticketId,
+        eventTitle: eventName,
+        eventDate: eventDate ?? '',
+        eventLocation: eventLocation ?? '',
+        qrCodeUrl: pdfUrl ?? null,
+      },
+    });
     return { sent: true };
   }
 
@@ -90,16 +89,19 @@ export class NotificationProcessor {
   async handleRefundEmail(job: Job) {
     // Refund is critical, no skip check
     this.logger.log(`Sending refund email for job ${job.id}...`);
-    const { email, amount, refundId } = job.data;
+    const { email, amount, refundId, currency, eventTitle, transactionHash } = job.data;
     const subject = 'Your refund has been processed';
-    const html = `
-      <div style="font-family: Arial, sans-serif;">
-        <h2>Your Refund Has Been Processed</h2>
-        <p>Amount: <strong>${amount} XLM</strong></p>
-        <p>Refund ID: <strong>${refundId}</strong></p>
-      </div>
-    `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send(email, subject, {
+      template: 'refund-issued',
+      context: {
+        name: email,
+        amount,
+        currency: currency ?? 'XLM',
+        refundId,
+        eventTitle: eventTitle ?? '',
+        transactionHash: transactionHash ?? null,
+      },
+    });
   }
 
   @Process('sendSponsorEmail')
@@ -195,14 +197,16 @@ export class NotificationProcessor {
     }
 
     const subject = `Event Cancelled: ${eventTitle}`;
-    const html = `
-      <div style="font-family: Arial, sans-serif;">
-        <h2>Event Cancelled: ${eventTitle}</h2>
-        <p>We regret to inform you that the event <strong>${eventTitle}</strong> has been cancelled.</p>
-        <p>A refund will be processed for eligible tickets.</p>
-      </div>
-    `;
-    await this.mailerService.send(user.email, subject, html);
+    await this.mailerService.send(user.email, subject, {
+      template: 'event-cancelled',
+      context: {
+        name: user.email,
+        eventTitle,
+        eventDate: job.data.eventDate ?? '',
+        organizerName: job.data.organizerName ?? '',
+        refundEligible: true,
+      },
+    });
     return { sent: true };
   }
 

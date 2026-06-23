@@ -24,6 +24,8 @@ import { UserRole } from '../users/enums/user-role.enum';
 import { AuditService } from './audit.service';
 import { ListAuditLogsDto } from './dto/list-audit-logs.dto';
 import { AuditLog } from './entities/audit-log.entity';
+import { AuditLogQueryDto } from './dto/audit-log-query.dto';
+
 
 @ApiTags('Audit')
 @ApiBearerAuth()
@@ -32,6 +34,15 @@ import { AuditLog } from './entities/audit-log.entity';
 @Roles(UserRole.ADMIN)
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
+
+
+  @Get()
+  @UseGuards(AdminGuard)
+  getAuditLogs(
+    @Query() query: AuditLogQueryDto,
+  ) {
+    return this.auditService.findLogs(query);
+  }
 
   @Get()
   @ApiOperation({

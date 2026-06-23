@@ -1,7 +1,3 @@
-export interface WalletState {
-  isConnected: boolean;
-  publicKey: string | null;
-  balance: string | null;
 export enum WalletType {
   FREIGHTER = 'freighter',
   LOBSTR = 'lobstr',
@@ -18,15 +14,17 @@ export interface WalletState {
   publicKey: string | null;
   walletType: WalletType | null;
   network: NetworkType;
+  balance: string | null;
   isLoading: boolean;
   error: string | null;
 }
 
 export interface WalletContextType extends WalletState {
-  connectWallet: () => Promise<void>;
-  disconnectWallet: () => void;
-  getBalance: () => Promise<void>;
   connect: (walletType: WalletType) => Promise<void>;
   disconnect: () => void;
   switchNetwork: (network: NetworkType) => Promise<void>;
+  getBalance: () => Promise<void>;
+  // legacy aliases kept for backward compat
+  connectWallet: () => Promise<void>;
+  disconnectWallet: () => void;
 }
