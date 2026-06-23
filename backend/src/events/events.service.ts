@@ -20,6 +20,7 @@ import { UpdateEventSeriesDto } from './dto/update-event-series.dto';
 import { BulkUpdateSeriesDto } from './dto/bulk-update-series.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
 import { EventStateService } from './state/event-state.service';
+import { EventCacheService } from './cache/event-cache.service';
 import { NotificationService } from '../notifications/notification.service';
 import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
@@ -69,6 +70,7 @@ export class EventsService {
     @InjectRepository(EventImage)
     private readonly eventImageRepo: Repository<EventImage>,
     private readonly eventStateService: EventStateService,
+    private readonly eventCacheService: EventCacheService,
     private readonly notificationService: NotificationService,
     private readonly auditService: AuditService,
     private readonly escrowService: EscrowService,
@@ -128,6 +130,8 @@ export class EventsService {
       return published;
     }
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
+
     if (dto.status !== undefined && dto.status !== previousStatus) {
       this.queueLifecycleEmail(saved).catch(() => undefined);
     }
@@ -164,6 +168,8 @@ export class EventsService {
     this.eventStateService.validateTransition(event.status, EventStatus.COMPLETED);
     event.status = EventStatus.COMPLETED;
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
+
     await this.auditService.log({
       action: AuditAction.EVENT_COMPLETED,
       userId: callerId,
@@ -181,6 +187,8 @@ export class EventsService {
     this.eventStateService.validateTransition(event.status, EventStatus.CANCELLED);
     event.status = EventStatus.CANCELLED;
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
+
     await this.auditService.log({
       action: AuditAction.EVENT_CANCELLED,
       userId: callerId,
@@ -199,9 +207,15 @@ export class EventsService {
       throw new ForbiddenException('You are not the organiser of this event.');
     }
     await this.eventRepository.remove(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
   }
 
   async getEventById(id: string): Promise<EventWithCapacity> {
+    const cached = await this.eventCacheService.fetchCachedMetadata(id);
+    if (cached) {
+      return cached;
+    }
+
     const event = await this.eventRepository.findOne({ where: { id } });
     if (!event) {
       throw new NotFoundException(`Event with id "${id}" not found`);
@@ -210,6 +224,7 @@ export class EventsService {
       where: { eventId: id, status: 'valid' },
     });
 
+    const result = {
     const remainingCapacity =
       event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
 
@@ -219,6 +234,9 @@ export class EventsService {
       remainingCapacity,
       availableSpots: remainingCapacity,
     };
+
+    await this.eventCacheService.cacheEventMetadata(id, result);
+    return result;
   }
 
   async listEvents(filterDto: ListEventsDto): Promise<PaginatedResult<EventWithCapacity>> {

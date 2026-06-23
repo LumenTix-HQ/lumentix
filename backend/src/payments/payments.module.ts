@@ -14,6 +14,8 @@ import { EventsModule } from '../events/events.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { AuditModule } from '../audit/audit.module';
 import { NotificationModule } from '../notifications/notification.module';
+import { MultisigModule } from './multisig/multisig.module';
+
 import { EscrowModule } from './escrow.module';
 import { RefundModule } from './refunds/refund.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
@@ -27,6 +29,10 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
     ScheduleModule,
     CurrenciesModule,
     EventsModule,
+    StellarModule,            // Issue #129 – path payments
+    AuditModule,              // Issue #127 – audit logging on expiry
+    NotificationModule,       // Issue #127 – email on expiry
+    MultisigModule,           // Multi-signature payout support
     StellarModule,
     AuditModule,
     NotificationModule,

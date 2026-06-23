@@ -19,6 +19,8 @@ import { AuditModule } from '../audit/audit.module';
 import { ResaleService } from './resale/resale.service';
 import { ResaleController } from './resale/resale.controller';
 import { ResaleTransaction } from './resale/resale-transaction.entity';
+import { DynamicQrService } from './dynamic-qr/dynamic-qr.service';
+import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
 
 @Module({
   imports: [
@@ -29,8 +31,8 @@ import { ResaleTransaction } from './resale/resale-transaction.entity';
     NotificationModule,
     AuditModule,
   ],
-  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob, ResaleService],
-  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController],
+  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob, ResaleService, DynamicQrService],
+  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController, DynamicQrController],
   exports: [TicketsService, ResaleService],
 })
 export class TicketsModule {}

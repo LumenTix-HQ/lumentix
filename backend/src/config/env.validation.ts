@@ -48,4 +48,7 @@ export const envValidationSchema = Joi.object({
 
   // Audit retention
   AUDIT_RETENTION_DAYS: Joi.number().default(90),
+
+  // Multi-signature payout
+  MULTISIG_REQUIRED_SIGNATURES: Joi.number().default(2).min(1).max(10),
 });
