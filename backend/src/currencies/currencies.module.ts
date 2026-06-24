@@ -12,7 +12,7 @@ import { FxProviderService } from './services/fx-provider.service';
   controllers: [CurrenciesController],
 providers: [
   CurrenciesService,
-  CurrencyRateService
+  CurrencyRateService,
   FxProviderService,
 ],  exports: [CurrenciesService],
 })

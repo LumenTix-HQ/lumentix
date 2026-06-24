@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
 import { AuditLog } from './entities/audit-log.entity';
+import { AuditLogQueryDto } from './dto/audit-log-query.dto';
 
 export interface AuditLogEntry {
   action: string;
