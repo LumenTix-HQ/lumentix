@@ -1234,3 +1234,95 @@ impl UserJourneyOptimized {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REFUND AUTOMATION PIPELINE EVENTS (Issue #674)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an event is safely cancelled with a reason recorded
+pub struct EventCancelledSafely;
+
+impl EventCancelledSafely {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, tickets_sold: u32, batch_id: u64) {
+        env.events().publish(
+            (symbol_short!("evcncsf"),),
+            (event_id, organizer, tickets_sold, batch_id),
+        );
+    }
+}
+
+/// Emitted when a bulk refund pipeline is initiated for a cancelled event
+pub struct BulkRefundsInitiated;
+
+impl BulkRefundsInitiated {
+    pub fn emit(env: &Env, batch_id: u64, event_id: u64, total_tickets: u32, initiator: Address) {
+        env.events().publish(
+            (symbol_short!("blkrfnd"),),
+            (batch_id, event_id, total_tickets, initiator),
+        );
+    }
+}
+
+/// Emitted when a bulk refund batch makes progress (individual refund within batch)
+pub struct BulkRefundProgress;
+
+impl BulkRefundProgress {
+    pub fn emit(env: &Env, batch_id: u64, event_id: u64, ticket_id: u64, refunded_count: u32, total_tickets: u32) {
+        env.events().publish(
+            (symbol_short!("rfndprog"),),
+            (batch_id, event_id, ticket_id, refunded_count, total_tickets),
+        );
+    }
+}
+
+/// Emitted when a bulk refund batch is fully completed
+pub struct BulkRefundsCompleted;
+
+impl BulkRefundsCompleted {
+    pub fn emit(env: &Env, batch_id: u64, event_id: u64, refunded_count: u32, failed_count: u32) {
+        env.events().publish(
+            (symbol_short!("rfndcmpl"),),
+            (batch_id, event_id, refunded_count, failed_count),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CROSS-CHAIN TICKET BRIDGE LOCK EVENTS (Issue #675)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a ticket is locked on Stellar for bridging to another chain
+pub struct TicketBridgedToChain;
+
+impl TicketBridgedToChain {
+    pub fn emit(env: &Env, lock_id: u64, ticket_id: u64, event_id: u64, owner: Address, target_chain: String, expires_at: u64) {
+        env.events().publish(
+            (symbol_short!("tktbrdg"),),
+            (lock_id, ticket_id, event_id, owner, target_chain, expires_at),
+        );
+    }
+}
+
+/// Emitted when a cross-chain lock is verified by a validator
+pub struct CrossChainLockVerified;
+
+impl CrossChainLockVerified {
+    pub fn emit(env: &Env, lock_id: u64, ticket_id: u64, bridge_proof: String, validator: Address) {
+        env.events().publish(
+            (symbol_short!("cclkver"),),
+            (lock_id, ticket_id, bridge_proof, validator),
+        );
+    }
+}
+
+/// Emitted when a ticket is unlocked on the destination chain (lock released on Stellar)
+pub struct TicketUnlockedOnDestination;
+
+impl TicketUnlockedOnDestination {
+    pub fn emit(env: &Env, lock_id: u64, ticket_id: u64, new_owner: Address, target_chain: String) {
+        env.events().publish(
+            (symbol_short!("tktunlk"),),
+            (lock_id, ticket_id, new_owner, target_chain),
+        );
+    }
+}

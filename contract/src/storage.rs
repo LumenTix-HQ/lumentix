@@ -1,14 +1,14 @@
 use crate::error::LumentixError;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
-    CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer, CurrencyConfig,
+    CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
-    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation, Seat,
-    Ticket, TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
-    VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
-    StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
-    VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
-    VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
+    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation,
+    RefundBatch, RefundBatchStatus, Seat, Ticket, TicketTransferRecord, UpgradeGovernanceConfig,
+    UpgradeProposal, UpgradeVote, VenueLayout, VipTier, WaitlistOffer, PricingSchedule,
+    MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics, INSTANCE_LIFETIME,
+    PERSISTENT_LIFETIME, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus,
+    SecurityIncident, UserPreferences,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -1599,4 +1599,111 @@ pub fn get_user_preferences(env: &Env, user: &Address) -> Result<UserPreferences
     let prefs = env.storage().persistent().get(&key).ok_or(LumentixError::Unauthorized)?;
     env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(prefs)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REFUND BATCH STORAGE (Issue #674)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const REFUND_BATCH_PREFIX: &str = "RFBATCH_";
+const REFUND_BATCH_COUNTER: &str = "RFBATCH_CTR";
+const EVENT_REFUND_BATCH_PREFIX: &str = "EVTBATCH_";
+
+pub fn get_next_refund_batch_id(env: &Env) -> u64 {
+    let id = env.storage().instance().get(&REFUND_BATCH_COUNTER).unwrap_or(1u64);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_refund_batch_id(env: &Env) {
+    let next = get_next_refund_batch_id(env) + 1;
+    env.storage().instance().set(&REFUND_BATCH_COUNTER, &next);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_refund_batch(env: &Env, batch_id: u64, batch: &RefundBatch) {
+    let key = (REFUND_BATCH_PREFIX, batch_id);
+    env.storage().persistent().set(&key, batch);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_refund_batch(env: &Env, batch_id: u64) -> Option<RefundBatch> {
+    let key = (REFUND_BATCH_PREFIX, batch_id);
+    let batch: Option<RefundBatch> = env.storage().persistent().get(&key);
+    if batch.is_some() {
+        env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    batch
+}
+
+/// Associate a refund batch with an event for lookup
+pub fn set_event_refund_batch(env: &Env, event_id: u64, batch_id: u64) {
+    let key = (EVENT_REFUND_BATCH_PREFIX, event_id);
+    env.storage().persistent().set(&key, &batch_id);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_event_refund_batch_id(env: &Env, event_id: u64) -> Option<u64> {
+    let key = (EVENT_REFUND_BATCH_PREFIX, event_id);
+    let id: Option<u64> = env.storage().persistent().get(&key);
+    if id.is_some() {
+        env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    id
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CROSS-CHAIN LOCK STORAGE (Issue #675)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CROSS_CHAIN_LOCK_PREFIX: &str = "CCLOCK_";
+const CROSS_CHAIN_LOCK_COUNTER: &str = "CCLOCK_CTR";
+const TICKET_LOCK_PREFIX: &str = "TKTLOCK_";
+
+pub fn get_next_cross_chain_lock_id(env: &Env) -> u64 {
+    let id = env.storage().instance().get(&CROSS_CHAIN_LOCK_COUNTER).unwrap_or(1u64);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_cross_chain_lock_id(env: &Env) {
+    let next = get_next_cross_chain_lock_id(env) + 1;
+    env.storage().instance().set(&CROSS_CHAIN_LOCK_COUNTER, &next);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_cross_chain_lock(env: &Env, lock_id: u64, lock: &CrossChainLock) {
+    let key = (CROSS_CHAIN_LOCK_PREFIX, lock_id);
+    env.storage().persistent().set(&key, lock);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_cross_chain_lock(env: &Env, lock_id: u64) -> Option<CrossChainLock> {
+    let key = (CROSS_CHAIN_LOCK_PREFIX, lock_id);
+    let lock: Option<CrossChainLock> = env.storage().persistent().get(&key);
+    if lock.is_some() {
+        env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    lock
+}
+
+/// Track which lock_id is associated with a given ticket (at most one active lock per ticket)
+pub fn set_ticket_lock(env: &Env, ticket_id: u64, lock_id: u64) {
+    let key = (TICKET_LOCK_PREFIX, ticket_id);
+    env.storage().persistent().set(&key, &lock_id);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_ticket_lock_id(env: &Env, ticket_id: u64) -> Option<u64> {
+    let key = (TICKET_LOCK_PREFIX, ticket_id);
+    let id: Option<u64> = env.storage().persistent().get(&key);
+    if id.is_some() {
+        env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    id
+}
+
+pub fn clear_ticket_lock(env: &Env, ticket_id: u64) {
+    let key = (TICKET_LOCK_PREFIX, ticket_id);
+    env.storage().persistent().remove(&key);
 }

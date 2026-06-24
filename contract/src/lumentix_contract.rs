@@ -4,17 +4,19 @@ use crate::error::LumentixError;
 use crate::events::{
     AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AttendanceVerificationFailed,
     AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
-    BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
-    CarbonOffsetPurchased, CollectibleInventoryUpdated, CrossChainTransferCompleted,
+    BlockchainIdentityVerified, BridgeTransactionValidated, BulkRefundProgress,
+    BulkRefundsCompleted, BulkRefundsInitiated, CarbonFootprintCalculated, CarbonOffsetPurchased,
+    CollectibleInventoryUpdated, CrossChainLockVerified, CrossChainTransferCompleted,
     CrossChainTransferInitiated, EnvironmentalImpactUpdated, EscrowReleased, EventCancelled,
-    EventCapacityChanged, EventCompleted, EventCreated, EventCurrencySet, EventMetadataUpdated,
-    EventSalesPaused, EventSalesResumed, EventStatusChanged, EventTimeExtended, EventUpdated,
-    FundsDeposited, FundsWithdrawn, GenericEventStateTransition, IdentityCredentialIssued,
-    IdentityCredentialRevoked, InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased,
-    MerchandiseCreated, MerchandisePurchased, NftMinted, NftTraded, OraclePriceUpdated,
-    PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
-    ReputationUpdated, ReviewSubmitted, SeatHoldReleased, SeatSelected, TicketPurchased,
-    TicketRefunded, TicketRevoked, TicketTransferred, TicketUsed, UpgradeExecuted,
+    EventCancelledSafely, EventCapacityChanged, EventCompleted, EventCreated, EventCurrencySet,
+    EventMetadataUpdated, EventSalesPaused, EventSalesResumed, EventStatusChanged,
+    EventTimeExtended, EventUpdated, FundsDeposited, FundsWithdrawn, GenericEventStateTransition,
+    IdentityCredentialIssued, IdentityCredentialRevoked, InsuranceClaimProcessed,
+    InsurancePoolUpdated, InsurancePurchased, MerchandiseCreated, MerchandisePurchased, NftMinted,
+    NftTraded, OraclePriceUpdated, PlatformFeeRecipientUpdated, PlatformFeeUpdated,
+    PlatformFeesWithdrawn, ProtocolFeeQueried, ReputationUpdated, ReviewSubmitted,
+    SeatHoldReleased, SeatSelected, TicketBridgedToChain, TicketPurchased, TicketRefunded,
+    TicketRevoked, TicketTransferred, TicketUnlockedOnDestination, TicketUsed, UpgradeExecuted,
     UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast, VenueLayoutCreated,
     VipTicketAssigned, VipTierCreated, WaitlistAvailabilityNotified, WaitlistJoined,
     VenueSpaceAllocated, SpaceUtilizationOptimized, VenueConflictManaged,
@@ -25,15 +27,15 @@ use crate::events::{
 use crate::storage;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CancellationReason,
-    CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
-    CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
-    EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
-    NftCollectible, OrganizerReputation, RarityTier, Seat, Ticket, TicketTransferRecord,
-    UpgradeGovernanceConfig, UpgradeProposal, UpgradeState, UpgradeVote, VenueLayout, VenueSection,
-    VipTier, WaitlistOffer, PriceTier, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
-    StreamPerformanceMetrics, PERSISTENT_LIFETIME,
-    VipTier, WaitlistOffer, PERSISTENT_LIFETIME, VenueSpaceAllocation, SubscriptionPlan,
-    SubscriptionStatus, SecurityIncident, UserPreferences,
+    CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainLock,
+    CrossChainTransfer, CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event,
+    EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,
+    IdentityProvider, InsurancePolicy, NftCollectible, OrganizerReputation, RarityTier,
+    RefundBatch, RefundBatchStatus, Seat, Ticket, TicketTransferRecord, UpgradeGovernanceConfig,
+    UpgradeProposal, UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer,
+    PriceTier, PricingSchedule, MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics,
+    PERSISTENT_LIFETIME, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus,
+    SecurityIncident, UserPreferences,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
@@ -5031,5 +5033,387 @@ impl LumentixContract {
         UserJourneyOptimized::emit(&env, user, journey_steps.len(), env.ledger().timestamp());
 
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // REFUND AUTOMATION PIPELINE (Issue #674)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Cancel a published event safely, simultaneously creating a RefundBatch
+    /// that tracks the automated refund pipeline for all ticket holders.
+    /// Only the event organizer can call this. The event must be Published.
+    /// Emits EventCancelledSafely and BulkRefundsInitiated.
+    pub fn cancel_event_safely(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        let old_status = event.status.clone();
+        event.status = EventStatus::Cancelled;
+        storage::set_event(&env, event_id, &event);
+
+        EventCancelled::emit(&env, event_id, organizer.clone(), event.tickets_sold);
+        GenericEventStateTransition::emit(&env, event_id, organizer.clone(), old_status, EventStatus::Cancelled);
+
+        // Create a RefundBatch to track automated refund distribution
+        let batch_id = storage::get_next_refund_batch_id(&env);
+        storage::increment_refund_batch_id(&env);
+
+        let now = env.ledger().timestamp();
+        let batch = RefundBatch {
+            batch_id,
+            event_id,
+            total_tickets: event.tickets_sold,
+            refunded_count: 0,
+            failed_count: 0,
+            status: RefundBatchStatus::Pending,
+            initiated_at: now,
+            completed_at: None,
+            initiated_by: organizer.clone(),
+        };
+
+        storage::set_refund_batch(&env, batch_id, &batch);
+        storage::set_event_refund_batch(&env, event_id, batch_id);
+
+        EventCancelledSafely::emit(&env, event_id, organizer.clone(), event.tickets_sold, batch_id);
+        BulkRefundsInitiated::emit(&env, batch_id, event_id, event.tickets_sold, organizer);
+
+        Ok(batch_id)
+    }
+
+    /// Execute bulk refunds for all eligible ticket holders of a cancelled event.
+    /// Iterates all unrefunded tickets for the event and processes refunds in order.
+    /// Requires the event to be Cancelled and a RefundBatch to exist.
+    /// Admin or organizer can call this. Emits BulkRefundProgress per ticket and
+    /// BulkRefundsCompleted when done.
+    pub fn initiate_bulk_refunds(
+        env: Env,
+        caller: Address,
+        event_id: u64,
+    ) -> Result<u64, LumentixError> {
+        caller.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        // Caller must be the organizer or admin
+        let admin = storage::get_admin(&env);
+        if caller != event.organizer && caller != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Event must be cancelled
+        if event.status != EventStatus::Cancelled {
+            return Err(LumentixError::EventNotCancelled);
+        }
+
+        // Retrieve or create the batch
+        let batch_id = match storage::get_event_refund_batch_id(&env, event_id) {
+            Some(id) => id,
+            None => {
+                // Create batch on-the-fly if cancel_event (non-safe) was used
+                let id = storage::get_next_refund_batch_id(&env);
+                storage::increment_refund_batch_id(&env);
+                let now = env.ledger().timestamp();
+                let b = RefundBatch {
+                    batch_id: id,
+                    event_id,
+                    total_tickets: event.tickets_sold,
+                    refunded_count: 0,
+                    failed_count: 0,
+                    status: RefundBatchStatus::Pending,
+                    initiated_at: now,
+                    completed_at: None,
+                    initiated_by: caller.clone(),
+                };
+                storage::set_refund_batch(&env, id, &b);
+                storage::set_event_refund_batch(&env, event_id, id);
+                id
+            }
+        };
+
+        let mut batch = storage::get_refund_batch(&env, batch_id)
+            .ok_or(LumentixError::EventNotFound)?;
+
+        batch.status = RefundBatchStatus::InProgress;
+        storage::set_refund_batch(&env, batch_id, &batch);
+
+        // Iterate all tickets and refund eligible ones
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+        let fee_bps = storage::get_platform_fee_bps(&env);
+
+        while ticket_id < next_ticket_id {
+            if let Ok(mut ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id && !ticket.refunded && !ticket.used && !ticket.revoked {
+                    let platform_fee = (event.ticket_price * fee_bps as i128) / 10000;
+                    let escrow_amount = event.ticket_price - platform_fee;
+
+                    if storage::deduct_escrow(&env, event_id, escrow_amount).is_ok() {
+                        // Transfer tokens back to ticket owner
+                        if let Ok(token_address) = storage::get_token_result(&env) {
+                            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+                            token_client.transfer(
+                                &env.current_contract_address(),
+                                &ticket.owner,
+                                &event.ticket_price,
+                            );
+                        }
+
+                        ticket.refunded = true;
+                        storage::set_ticket(&env, ticket_id, &ticket);
+                        batch.refunded_count += 1;
+
+                        TicketRefunded::emit(&env, ticket_id, event_id, ticket.owner, event.ticket_price);
+                        BulkRefundProgress::emit(
+                            &env,
+                            batch_id,
+                            event_id,
+                            ticket_id,
+                            batch.refunded_count,
+                            batch.total_tickets,
+                        );
+                    } else {
+                        batch.failed_count += 1;
+                    }
+
+                    storage::set_refund_batch(&env, batch_id, &batch);
+                }
+            }
+            ticket_id += 1;
+        }
+
+        let now = env.ledger().timestamp();
+        batch.status = RefundBatchStatus::Completed;
+        batch.completed_at = Some(now);
+        storage::set_refund_batch(&env, batch_id, &batch);
+
+        BulkRefundsCompleted::emit(&env, batch_id, event_id, batch.refunded_count, batch.failed_count);
+
+        Ok(batch.refunded_count as u64)
+    }
+
+    /// Get the current progress of the refund pipeline for a cancelled event.
+    /// Returns the RefundBatch struct with counts and status.
+    pub fn track_refund_progress(env: Env, event_id: u64) -> Result<RefundBatch, LumentixError> {
+        // Ensure the event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        let batch_id = storage::get_event_refund_batch_id(&env, event_id)
+            .ok_or(LumentixError::EventNotCancelled)?;
+
+        storage::get_refund_batch(&env, batch_id)
+            .ok_or(LumentixError::EventNotFound)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CROSS-CHAIN TICKET BRIDGE (Issue #675)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Lock a ticket on Stellar and initiate a bridge transfer to another chain.
+    /// The ticket is locked (not transferred away yet) and a CrossChainLock record is created.
+    /// The lock expires after 7 days if not verified.
+    /// Caller must be the ticket owner. Target chain must be supported.
+    /// Emits TicketBridgedToChain.
+    pub fn bridge_ticket_to_chain(
+        env: Env,
+        owner: Address,
+        ticket_id: u64,
+        target_chain: String,
+        destination_address: String,
+    ) -> Result<u64, LumentixError> {
+        owner.require_auth();
+
+        // Validate inputs
+        validation::validate_string_not_empty(&target_chain)?;
+        validation::validate_string_not_empty(&destination_address)?;
+
+        // Bridge must not be paused
+        if storage::is_bridge_paused(&env) {
+            return Err(LumentixError::BridgePaused);
+        }
+
+        // Target chain must be supported
+        if !storage::is_chain_supported(&env, &target_chain) {
+            return Err(LumentixError::UnsupportedTargetChain);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+
+        // Caller must own the ticket
+        if ticket.owner != owner {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Ticket must be valid
+        if ticket.used {
+            return Err(LumentixError::TicketAlreadyUsed);
+        }
+        if ticket.revoked {
+            return Err(LumentixError::RevokedTicket);
+        }
+        if ticket.refunded {
+            return Err(LumentixError::RefundNotAllowed);
+        }
+
+        // Ensure no existing active lock on this ticket
+        if let Some(existing_lock_id) = storage::get_ticket_lock_id(&env, ticket_id) {
+            if let Some(lock) = storage::get_cross_chain_lock(&env, existing_lock_id) {
+                if !lock.unlocked {
+                    return Err(LumentixError::CrossChainTransferInProgress);
+                }
+            }
+        }
+
+        let event = storage::get_event(&env, ticket.event_id)?;
+        let now = env.ledger().timestamp();
+        let expires_at = now + SEVEN_DAYS_SECONDS;
+
+        let lock_id = storage::get_next_cross_chain_lock_id(&env);
+        storage::increment_cross_chain_lock_id(&env);
+
+        let lock = CrossChainLock {
+            lock_id,
+            ticket_id,
+            event_id: ticket.event_id,
+            owner: owner.clone(),
+            target_chain: target_chain.clone(),
+            destination_address,
+            locked_at: now,
+            expires_at,
+            verified: false,
+            unlocked: false,
+            bridge_proof: None,
+        };
+
+        storage::set_cross_chain_lock(&env, lock_id, &lock);
+        storage::set_ticket_lock(&env, ticket_id, lock_id);
+
+        TicketBridgedToChain::emit(&env, lock_id, ticket_id, event.id, owner, target_chain, expires_at);
+
+        Ok(lock_id)
+    }
+
+    /// Verify that the cross-chain lock is valid by recording a bridge proof.
+    /// Only the admin or a governance member (oracle/validator) can call this.
+    /// The lock must exist and not yet be verified or unlocked.
+    /// Emits CrossChainLockVerified.
+    pub fn verify_cross_chain_lock(
+        env: Env,
+        validator: Address,
+        lock_id: u64,
+        bridge_proof: String,
+    ) -> Result<(), LumentixError> {
+        validator.require_auth();
+
+        validation::validate_string_not_empty(&bridge_proof)?;
+
+        // Only admin or governance members can verify
+        let admin = storage::get_admin(&env);
+        if validator != admin {
+            let config = storage::get_upgrade_governance_config(&env);
+            let mut is_validator = false;
+            for i in 0..config.governance_members.len() {
+                if config.governance_members.get(i).unwrap() == validator {
+                    is_validator = true;
+                    break;
+                }
+            }
+            if !is_validator {
+                return Err(LumentixError::Unauthorized);
+            }
+        }
+
+        let mut lock = storage::get_cross_chain_lock(&env, lock_id)
+            .ok_or(LumentixError::CrossChainTransferNotFound)?;
+
+        if lock.unlocked {
+            return Err(LumentixError::CrossChainTransferAlreadyCompleted);
+        }
+
+        let now = env.ledger().timestamp();
+        if now > lock.expires_at {
+            return Err(LumentixError::CrossChainTransferExpired);
+        }
+
+        lock.verified = true;
+        lock.bridge_proof = Some(bridge_proof.clone());
+        storage::set_cross_chain_lock(&env, lock_id, &lock);
+
+        CrossChainLockVerified::emit(&env, lock_id, lock.ticket_id, bridge_proof, validator);
+
+        Ok(())
+    }
+
+    /// Unlock the ticket on the destination chain by finalizing the bridge transfer.
+    /// The lock must be verified before calling this.
+    /// On Stellar side, the ticket ownership is transferred to the destination address
+    /// (represented as the caller/new owner). The lock is marked as unlocked.
+    /// Only the original owner or admin can finalize.
+    /// Emits TicketUnlockedOnDestination.
+    pub fn unlock_ticket_on_destination(
+        env: Env,
+        caller: Address,
+        lock_id: u64,
+        new_owner: Address,
+    ) -> Result<(), LumentixError> {
+        caller.require_auth();
+
+        let admin = storage::get_admin(&env);
+        let mut lock = storage::get_cross_chain_lock(&env, lock_id)
+            .ok_or(LumentixError::CrossChainTransferNotFound)?;
+
+        // Only original owner or admin can finalize the unlock
+        if caller != lock.owner && caller != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if !lock.verified {
+            return Err(LumentixError::BridgeTransactionInvalid);
+        }
+
+        if lock.unlocked {
+            return Err(LumentixError::CrossChainTransferAlreadyCompleted);
+        }
+
+        let now = env.ledger().timestamp();
+        if now > lock.expires_at {
+            return Err(LumentixError::CrossChainTransferExpired);
+        }
+
+        // Transfer ticket ownership to new_owner (destination representation on Stellar)
+        let mut ticket = storage::get_ticket(&env, lock.ticket_id)?;
+        ticket.owner = new_owner.clone();
+        storage::set_ticket(&env, lock.ticket_id, &ticket);
+
+        // Mark the lock as unlocked and clear it
+        lock.unlocked = true;
+        storage::set_cross_chain_lock(&env, lock_id, &lock);
+        storage::clear_ticket_lock(&env, lock.ticket_id);
+
+        TicketUnlockedOnDestination::emit(&env, lock_id, lock.ticket_id, new_owner, lock.target_chain);
+
+        Ok(())
+    }
+
+    /// Get a cross-chain lock by ID
+    pub fn get_cross_chain_lock(env: Env, lock_id: u64) -> Option<CrossChainLock> {
+        storage::get_cross_chain_lock(&env, lock_id)
+    }
+
+    /// Get the active lock ID for a ticket, if any
+    pub fn get_ticket_lock(env: Env, ticket_id: u64) -> Option<u64> {
+        storage::get_ticket_lock_id(&env, ticket_id)
     }
 }
