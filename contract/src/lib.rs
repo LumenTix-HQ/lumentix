@@ -255,13 +255,14 @@ pub use error::LumentixError;
 pub use events::{
     AttendanceVerificationFailed, AttendanceVerified, BlockchainIdentityVerified,
     BridgeTransactionValidated, CarbonFootprintCalculated, CarbonOffsetPurchased,
-    CheckInEvent, CollectibleInventoryUpdated, CrossChainTransferCompleted,
-    CrossChainTransferInitiated, EnvironmentalImpactUpdated, EventCancelled, EventMetadataUpdated,
-    EventSalesPaused, EventSalesResumed, IdentityCredentialIssued, IdentityCredentialRevoked,
-    InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased, MerchandiseCreated,
-    MerchandisePurchased, NftMinted, NftTraded, ReputationUpdated, ReviewSubmitted, TransferEvent,
-    UpgradeExecuted, UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast,
-    VenueSpaceAllocated, SpaceUtilizationOptimized, VenueConflictManaged,
+    CheckInEvent, CollectibleInventoryUpdated, ConnectionRequested, ConnectionResponded,
+    CrossChainTransferCompleted, CrossChainTransferInitiated, EnvironmentalImpactUpdated,
+    EventCancelled, EventMetadataUpdated, EventSalesPaused, EventSalesResumed,
+    IdentityCredentialIssued, IdentityCredentialRevoked, InsuranceClaimProcessed,
+    InsurancePoolUpdated, InsurancePurchased, MerchandiseCreated, MerchandisePurchased,
+    NftMinted, NftTraded, ProfileCreated, ProfilesMatched, ReputationUpdated, ReviewSubmitted,
+    TransferEvent, UpgradeExecuted, UpgradeGovernanceConfigUpdated, UpgradeProposed,
+    UpgradeVoteCast, VenueSpaceAllocated, SpaceUtilizationOptimized, VenueConflictManaged,
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
@@ -269,10 +270,11 @@ pub use events::{
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
 pub use types::{
-    BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
-    CollectibleInventory, CrossChainTransfer, CrossChainTransferStatus, EnvironmentalImpact,
-    Event, EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,
-    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation,
+    AttendeeProfile, BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
+    CollectibleInventory, Connection, ConnectionStatus, CrossChainTransfer,
+    CrossChainTransferStatus, EnvironmentalImpact, Event, EventMerchandise, EventReview,
+    EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
+    InsurancePool, MatchResult, NftCollectible, OrganizerReputation, PrivacyLevel,
     RarityTier, Ticket as LumentixTicket, UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 };

@@ -264,4 +264,20 @@ pub enum LumentixError {
     // Security Monitoring errors (108–110)
     /// Security incident not found
     SecurityIncidentNotFound = 108,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // AI-Powered Networking & Matchmaking errors (111–120)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Attendee profile not found
+    ProfileNotFound = 111,
+    /// Attendee profile already exists
+    ProfileAlreadyExists = 112,
+    /// Connection request not found
+    ConnectionRequestNotFound = 113,
+    /// Connection request already exists between these attendees for this event
+    ConnectionAlreadyExists = 114,
+    /// Cannot send a connection request to yourself
+    CannotSelfConnect = 115,
+    /// Attendee's privacy settings restrict this operation
+    PrivacyLevelRestricted = 116,
 }

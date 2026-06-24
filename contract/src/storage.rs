@@ -1,14 +1,15 @@
 use crate::error::LumentixError;
+use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
-    CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer, CurrencyConfig,
-    EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
-    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation, Seat,
+    AccessibilityBooking, AccessibilityInventory, AttendeeProfile, BridgeTransaction,
+    CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, Connection,
+    CrossChainTransfer, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise, EventReview,
+    IdentityCredential, IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible,
+    OrganizerReputation, PricingSchedule, Seat, StreamDeliveryConfig, StreamPerformanceMetrics,
     Ticket, TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
-    VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
-    StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
-    VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
-    VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
+    VenueLayout, VenueSpaceAllocation, VipTier, WaitlistOffer, MintGasUsage,
+    SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
+    INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -53,6 +54,9 @@ const PLAN_ID_COUNTER: &str = "PLAN_CTR";
 const INCIDENT_PREFIX: &str = "INC_";
 const INCIDENT_COUNTER: &str = "INC_CTR";
 const USER_PREFS_PREFIX: &str = "UPREF_";
+const PROFILE_PREFIX: &str = "PROF_";
+const CONNECTION_PREFIX: &str = "CONN_";
+const CONNECTION_COUNTER: &str = "CONN_CTR";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -1599,4 +1603,51 @@ pub fn get_user_preferences(env: &Env, user: &Address) -> Result<UserPreferences
     let prefs = env.storage().persistent().get(&key).ok_or(LumentixError::Unauthorized)?;
     env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(prefs)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI-Powered Networking & Matchmaking Storage Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn set_attendee_profile(env: &Env, attendee: &Address, profile: &AttendeeProfile) {
+    let key = (PROFILE_PREFIX, attendee.clone());
+    env.storage().persistent().set(&key, profile);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_attendee_profile(env: &Env, attendee: &Address) -> Result<AttendeeProfile, LumentixError> {
+    let key = (PROFILE_PREFIX, attendee.clone());
+    let profile = env.storage().persistent().get(&key).ok_or(LumentixError::ProfileNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(profile)
+}
+
+pub fn has_attendee_profile(env: &Env, attendee: &Address) -> bool {
+    let key = (PROFILE_PREFIX, attendee.clone());
+    env.storage().persistent().has(&key)
+}
+
+pub fn get_next_connection_id(env: &Env) -> u64 {
+    let id = env.storage().instance().get(&CONNECTION_COUNTER).unwrap_or(1);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_connection_id(env: &Env) {
+    let next_id = get_next_connection_id(env) + 1;
+    env.storage().instance().set(&CONNECTION_COUNTER, &next_id);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_connection(env: &Env, connection_id: u64, connection: &Connection) {
+    let key = (CONNECTION_PREFIX, connection_id);
+    env.storage().persistent().set(&key, connection);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_connection(env: &Env, connection_id: u64) -> Result<Connection, LumentixError> {
+    let key = (CONNECTION_PREFIX, connection_id);
+    let connection = env.storage().persistent().get(&key).ok_or(LumentixError::ConnectionRequestNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(connection)
 }

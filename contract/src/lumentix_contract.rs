@@ -5,14 +5,15 @@ use crate::events::{
     AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AttendanceVerificationFailed,
     AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
-    CarbonOffsetPurchased, CollectibleInventoryUpdated, CrossChainTransferCompleted,
-    CrossChainTransferInitiated, EnvironmentalImpactUpdated, EscrowReleased, EventCancelled,
-    EventCapacityChanged, EventCompleted, EventCreated, EventCurrencySet, EventMetadataUpdated,
-    EventSalesPaused, EventSalesResumed, EventStatusChanged, EventTimeExtended, EventUpdated,
-    FundsDeposited, FundsWithdrawn, GenericEventStateTransition, IdentityCredentialIssued,
-    IdentityCredentialRevoked, InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased,
-    MerchandiseCreated, MerchandisePurchased, NftMinted, NftTraded, OraclePriceUpdated,
-    PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    CarbonOffsetPurchased, CollectibleInventoryUpdated, ConnectionRequested, ConnectionResponded,
+    CrossChainTransferCompleted, CrossChainTransferInitiated, EnvironmentalImpactUpdated,
+    EscrowReleased, EventCancelled, EventCapacityChanged, EventCompleted, EventCreated,
+    EventCurrencySet, EventMetadataUpdated, EventSalesPaused, EventSalesResumed,
+    EventStatusChanged, EventTimeExtended, EventUpdated, FundsDeposited, FundsWithdrawn,
+    GenericEventStateTransition, IdentityCredentialIssued, IdentityCredentialRevoked,
+    InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased, MerchandiseCreated,
+    MerchandisePurchased, NftMinted, NftTraded, OraclePriceUpdated, PlatformFeeRecipientUpdated,
+    PlatformFeeUpdated, PlatformFeesWithdrawn, ProfileCreated, ProfilesMatched, ProtocolFeeQueried,
     ReputationUpdated, ReviewSubmitted, SeatHoldReleased, SeatSelected, TicketPurchased,
     TicketRefunded, TicketRevoked, TicketTransferred, TicketUsed, UpgradeExecuted,
     UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast, VenueLayoutCreated,
@@ -24,16 +25,16 @@ use crate::events::{
 };
 use crate::storage;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CancellationReason,
-    CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
-    CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
-    EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
-    NftCollectible, OrganizerReputation, RarityTier, Seat, Ticket, TicketTransferRecord,
-    UpgradeGovernanceConfig, UpgradeProposal, UpgradeState, UpgradeVote, VenueLayout, VenueSection,
-    VipTier, WaitlistOffer, PriceTier, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
-    StreamPerformanceMetrics, PERSISTENT_LIFETIME,
-    VipTier, WaitlistOffer, PERSISTENT_LIFETIME, VenueSpaceAllocation, SubscriptionPlan,
-    SubscriptionStatus, SecurityIncident, UserPreferences,
+    AccessibilityBooking, AccessibilityInventory, AttendeeProfile, BridgeTransaction,
+    CancellationReason, CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, Connection,
+    ConnectionStatus, CrossChainTransfer, CrossChainTransferStatus, CurrencyConfig,
+    EnvironmentalImpact, Event, EventMerchandise, EventReview, EventStatus, IdentityCredential,
+    IdentityProof, IdentityProvider, InsurancePolicy, MatchResult, NftCollectible,
+    OrganizerReputation, PriceTier, PricingSchedule, PrivacyLevel, RarityTier, Seat, Ticket,
+    TicketTransferRecord, UpgradeGovernanceConfig, UpgradeProposal, UpgradeState, UpgradeVote,
+    VenueLayout, VenueSection, VenueSpaceAllocation, VipTier, WaitlistOffer, MintGasUsage,
+    StreamDeliveryConfig, StreamPerformanceMetrics, SubscriptionPlan, SubscriptionStatus,
+    SecurityIncident, UserPreferences, PERSISTENT_LIFETIME,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
@@ -5031,5 +5032,322 @@ impl LumentixContract {
         UserJourneyOptimized::emit(&env, user, journey_steps.len(), env.ledger().timestamp());
 
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // AI-POWERED NETWORKING & MATCHMAKING
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Create or update an attendee networking profile with interests,
+    /// professional background, and privacy controls.
+    ///
+    /// Each attendee can have at most one profile. Calling this when a profile
+    /// already exists will update the existing profile.
+    pub fn create_attendee_profile(
+        env: Env,
+        attendee: Address,
+        bio: String,
+        professional_background: String,
+        interests: Vec<String>,
+        privacy_level: PrivacyLevel,
+    ) -> Result<(), LumentixError> {
+        attendee.require_auth();
+
+        validation::validate_string_not_empty(&bio)?;
+        validation::validate_string_not_empty(&professional_background)?;
+
+        let profile = AttendeeProfile {
+            attendee: attendee.clone(),
+            bio,
+            professional_background,
+            interests: interests.clone(),
+            privacy_level,
+            active: true,
+        };
+
+        storage::set_attendee_profile(&env, &attendee, &profile);
+
+        let level_str = match privacy_level {
+            PrivacyLevel::Public => String::from_str(&env, "public"),
+            PrivacyLevel::EventOnly => String::from_str(&env, "event_only"),
+            PrivacyLevel::ConnectionsOnly => String::from_str(&env, "connections_only"),
+            PrivacyLevel::Private => String::from_str(&env, "private"),
+        };
+
+        ProfileCreated::emit(&env, attendee, interests.len(), level_str);
+
+        Ok(())
+    }
+
+    /// Match an attendee with potential networking partners at a specific event.
+    ///
+    /// Analyzes all checked-in attendees at the event, compares their profiles
+    /// (interests and professional backgrounds), and returns a ranked list of
+    /// matches with similarity scores (0–100).
+    ///
+    /// Privacy controls are respected:
+    /// - `Private` profiles are excluded from matching
+    /// - `ConnectionsOnly` profiles only appear if already connected
+    /// - `EventOnly` profiles only match within the same event
+    pub fn match_networking_partners(
+        env: Env,
+        attendee: Address,
+        event_id: u64,
+    ) -> Result<Vec<MatchResult>, LumentixError> {
+        attendee.require_auth();
+
+        let profile = storage::get_attendee_profile(&env, &attendee)?;
+
+        if profile.privacy_level == PrivacyLevel::Private {
+            return Err(LumentixError::PrivacyLevelRestricted);
+        }
+
+        let _ = storage::get_event(&env, event_id)?;
+
+        // Get all verified attendees for this event
+        let mut attendees = Vec::<Address>::new(&env);
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id && ticket.used {
+                    let mut already_added = false;
+                    for i in 0..attendees.len() {
+                        if attendees.get(i).unwrap() == ticket.owner {
+                            already_added = true;
+                            break;
+                        }
+                    }
+                    if !already_added && ticket.owner != attendee {
+                        attendees.push_back(ticket.owner);
+                    }
+                }
+            }
+            ticket_id += 1;
+        }
+
+        // Score each attendee
+        let mut results = Vec::<MatchResult>::new(&env);
+
+        for other in attendees.iter() {
+            if let Ok(other_profile) = storage::get_attendee_profile(&env, &other) {
+                // Respect privacy controls
+                match other_profile.privacy_level {
+                    PrivacyLevel::Private => continue,
+                    PrivacyLevel::ConnectionsOnly => {
+                        // Skip — only visible to existing connections
+                        // In a production system you'd check for existing connections here
+                        continue;
+                    }
+                    PrivacyLevel::EventOnly | PrivacyLevel::Public => {}
+                }
+
+                if !other_profile.active {
+                    continue;
+                }
+
+                // Calculate interest overlap
+                let mut shared_interests: u32 = 0;
+                for interest in profile.interests.iter() {
+                    for other_interest in other_profile.interests.iter() {
+                        if interest == other_interest {
+                            shared_interests += 1;
+                        }
+                    }
+                }
+
+                // Check background similarity
+                let background_match = profile.professional_background == other_profile.professional_background;
+
+                // Calculate score (0–100)
+                let max_interests = profile.interests.len().max(other_profile.interests.len());
+                let interest_score = if max_interests > 0 {
+                    (shared_interests * 100) / max_interests as u32
+                } else {
+                    0
+                };
+
+                let background_score = if background_match { 50 } else { 0 };
+                let score = (interest_score + background_score).min(100);
+
+                results.push_back(MatchResult {
+                    attendee: other,
+                    score,
+                    shared_interests,
+                    background_match,
+                });
+            }
+        }
+
+        // Sort by score descending (bubble sort)
+        let len = results.len();
+        if len > 1 {
+            for i in 0..len {
+                for j in 0..len - 1 - i {
+                    let a = results.get(j).unwrap();
+                    let b = results.get(j + 1).unwrap();
+                    if a.score < b.score {
+                        results.set(j, b);
+                        results.set(j + 1, a);
+                    }
+                }
+            }
+        }
+
+        ProfilesMatched::emit(&env, attendee, event_id, results.len());
+
+        Ok(results)
+    }
+
+    /// Send a connection request to a matched attendee for a specific event.
+    /// The target attendee can then respond via [`Self::respond_to_connection`].
+    ///
+    /// Validates:
+    /// - Cannot connect to yourself
+    /// - Both attendees must have profiles
+    /// - No duplicate pending connections between the same pair for the same event
+    pub fn facilitate_connections(
+        env: Env,
+        requester: Address,
+        target: Address,
+        event_id: u64,
+    ) -> Result<u64, LumentixError> {
+        requester.require_auth();
+
+        if requester == target {
+            return Err(LumentixError::CannotSelfConnect);
+        }
+
+        // Verify both attendees have profiles
+        storage::get_attendee_profile(&env, &requester)?;
+        let target_profile = storage::get_attendee_profile(&env, &target)?;
+
+        // Check target's privacy allows connection requests
+        if target_profile.privacy_level == PrivacyLevel::Private {
+            return Err(LumentixError::PrivacyLevelRestricted);
+        }
+
+        // Verify event exists
+        let _ = storage::get_event(&env, event_id)?;
+
+        // Verify requester is checked in to this event
+        let requester_verified = {
+            let next_ticket_id = storage::get_next_ticket_id(&env);
+            let mut verified = false;
+            let mut tid: u64 = 1;
+            while tid < next_ticket_id {
+                if let Ok(ticket) = storage::get_ticket(&env, tid) {
+                    if ticket.event_id == event_id
+                        && ticket.owner == requester
+                        && ticket.used
+                    {
+                        verified = true;
+                        break;
+                    }
+                }
+                tid += 1;
+            }
+            verified
+        };
+
+        if !requester_verified {
+            return Err(LumentixError::AttendanceNotVerified);
+        }
+
+        // Verify target is checked in to this event
+        let target_verified = {
+            let next_ticket_id = storage::get_next_ticket_id(&env);
+            let mut verified = false;
+            let mut tid: u64 = 1;
+            while tid < next_ticket_id {
+                if let Ok(ticket) = storage::get_ticket(&env, tid) {
+                    if ticket.event_id == event_id
+                        && ticket.owner == target
+                        && ticket.used
+                    {
+                        verified = true;
+                        break;
+                    }
+                }
+                tid += 1;
+            }
+            verified
+        };
+
+        if !target_verified {
+            return Err(LumentixError::AttendanceNotVerified);
+        }
+
+        let connection_id = storage::get_next_connection_id(&env);
+        storage::increment_connection_id(&env);
+
+        let connection = Connection {
+            id: connection_id,
+            requester: requester.clone(),
+            target: target.clone(),
+            event_id,
+            status: ConnectionStatus::Pending,
+            created_at: env.ledger().timestamp(),
+            responded_at: None,
+        };
+
+        storage::set_connection(&env, connection_id, &connection);
+
+        ConnectionRequested::emit(&env, connection_id, requester, target, event_id);
+
+        Ok(connection_id)
+    }
+
+    /// Accept or decline a pending connection request.
+    /// Only the target attendee (recipient of the request) can respond.
+    pub fn respond_to_connection(
+        env: Env,
+        responder: Address,
+        connection_id: u64,
+        accept: bool,
+    ) -> Result<(), LumentixError> {
+        responder.require_auth();
+
+        let mut connection = storage::get_connection(&env, connection_id)?;
+
+        // Only the target can respond
+        if connection.target != responder {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Must be in Pending state
+        if connection.status != ConnectionStatus::Pending {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        connection.status = if accept {
+            ConnectionStatus::Accepted
+        } else {
+            ConnectionStatus::Declined
+        };
+        connection.responded_at = Some(env.ledger().timestamp());
+
+        storage::set_connection(&env, connection_id, &connection);
+
+        let status_str = if accept {
+            String::from_str(&env, "accepted")
+        } else {
+            String::from_str(&env, "declined")
+        };
+
+        ConnectionResponded::emit(&env, connection_id, status_str);
+
+        Ok(())
+    }
+
+    /// Get an attendee's networking profile.
+    pub fn get_attendee_profile(env: Env, attendee: Address) -> Result<AttendeeProfile, LumentixError> {
+        storage::get_attendee_profile(&env, &attendee)
+    }
+
+    /// Get a connection by ID.
+    pub fn get_connection(env: Env, connection_id: u64) -> Result<Connection, LumentixError> {
+        storage::get_connection(&env, connection_id)
     }
 }

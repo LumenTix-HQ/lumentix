@@ -1234,3 +1234,51 @@ impl UserJourneyOptimized {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI-Powered Networking & Matchmaking Events
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an attendee creates or updates their networking profile
+pub struct ProfileCreated;
+impl ProfileCreated {
+    pub fn emit(env: &Env, attendee: Address, interests_count: u32, privacy_level: String) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "profile_created"),),
+            (attendee, interests_count, privacy_level),
+        );
+    }
+}
+
+/// Emitted when matchmaking results are generated for an attendee at an event
+pub struct ProfilesMatched;
+impl ProfilesMatched {
+    pub fn emit(env: &Env, attendee: Address, event_id: u64, match_count: u32) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "profiles_matched"),),
+            (attendee, event_id, match_count),
+        );
+    }
+}
+
+/// Emitted when a connection request is sent between two attendees
+pub struct ConnectionRequested;
+impl ConnectionRequested {
+    pub fn emit(env: &Env, connection_id: u64, requester: Address, target: Address, event_id: u64) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "connection_requested"),),
+            (connection_id, requester, target, event_id),
+        );
+    }
+}
+
+/// Emitted when a connection request is accepted or declined
+pub struct ConnectionResponded;
+impl ConnectionResponded {
+    pub fn emit(env: &Env, connection_id: u64, status: String) {
+        env.events().publish(
+            (soroban_sdk::Symbol::new(env, "connection_responded"),),
+            (connection_id, status),
+        );
+    }
+}

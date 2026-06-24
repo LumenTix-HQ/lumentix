@@ -1,5 +1,83 @@
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
+/// Privacy level for attendee profile visibility in networking features
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PrivacyLevel {
+    /// Profile is visible to anyone on the platform
+    Public,
+    /// Profile is visible only to attendees of the same events
+    EventOnly,
+    /// Profile is visible only to established connections
+    ConnectionsOnly,
+    /// Profile is hidden from all matching and discovery
+    Private,
+}
+
+/// Status of a connection request between two attendees
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConnectionStatus {
+    /// Request sent, awaiting response
+    Pending,
+    /// Request accepted — attendees are connected
+    Accepted,
+    /// Request declined
+    Declined,
+}
+
+/// On-chain attendee profile for networking and matchmaking
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttendeeProfile {
+    /// The wallet address of the attendee
+    pub attendee: Address,
+    /// Short biography or introduction text
+    pub bio: String,
+    /// Professional background (e.g., "Software Engineer", "Designer", "Investor")
+    pub professional_background: String,
+    /// List of interest categories (e.g., "AI", "Blockchain", "Music", "Sports")
+    pub interests: Vec<String>,
+    /// Privacy level controlling profile visibility
+    pub privacy_level: PrivacyLevel,
+    /// Whether the profile is active and available for matching
+    pub active: bool,
+}
+
+/// Represents a match result with a similarity score
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MatchResult {
+    /// The matched attendee's address
+    pub attendee: Address,
+    /// Match score from 0–100 (higher = stronger match)
+    pub score: u32,
+    /// Number of overlapping interests
+    pub shared_interests: u32,
+    /// Whether professional backgrounds match
+    pub background_match: bool,
+}
+
+/// A connection request between two event attendees
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Connection {
+    /// Unique connection ID
+    pub id: u64,
+    /// The attendee who initiated the connection
+    pub requester: Address,
+    /// The attendee who received the request
+    pub target: Address,
+    /// The event where they were matched
+    pub event_id: u64,
+    /// Current status of the connection
+    pub status: ConnectionStatus,
+    /// Timestamp when the request was made
+    pub created_at: u64,
+    /// Timestamp when the request was responded to (accepted/declined)
+    pub responded_at: Option<u64>,
+}
+
 pub const INSTANCE_LIFETIME: u32 = 535_680; // ~30 days
 pub const PERSISTENT_LIFETIME: u32 = 535_680; // ~30 days
 pub const TEMPORARY_LIFETIME: u32 = 17_280; // ~1 day
