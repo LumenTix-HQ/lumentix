@@ -45,6 +45,17 @@ export class RegistrationsService {
     private readonly usersService: UsersService,
   ) {}
 
+  async exportRegistrationsCsv(eventId: string, callerId: string): Promise<string> {
+    const event = await this.eventsService.getEventById(eventId);
+    if (event.organizerId !== callerId) throw new ForbiddenException();
+    const rows = await this.repo.find({ where: { eventId }, order: { createdAt: 'DESC' } });
+    const header = 'registrationId,userId,registeredAt,status';
+    const lines = rows.map(
+      (r) => `${r.id},${r.userId},${r.createdAt.toISOString()},${r.status}`,
+    );
+    return [header, ...lines].join('\n');
+  }
+
   // ── POST /events/:id/register ──────────────────────────────────────────────
 
   async register(eventId: string, userId: string): Promise<RegisterResult> {

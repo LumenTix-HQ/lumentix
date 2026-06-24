@@ -133,6 +133,23 @@ export class RegistrationsController {
     return this.service.listForEvent(eventId, req.user.id, dto);
   }
 
+  @Get('events/:id/registrations/export')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Export event registrations as CSV' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'CSV file' })
+  async exportRegistrations(
+    @Param('id', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
+  ) {
+    const csv = await this.service.exportRegistrationsCsv(eventId, req.user.id);
+    res
+      .setHeader('Content-Type', 'text/csv')
+      .setHeader('Content-Disposition', `attachment; filename="attendees-${eventId}.csv"`)
+      .send(csv);
+  }
+
   @Get('users/me/registrations')
   @ApiOperation({
     summary: "Get current user's registrations",

@@ -259,6 +259,33 @@ export class UsersService {
     };
   }
 
+  async getWalletTransactions(
+    userId: string,
+    opts: { cursor?: string; limit?: number; order?: 'asc' | 'desc' },
+  ) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User ${userId} not found`);
+    if (!user.stellarPublicKey) return { data: [], message: 'No wallet linked' };
+    const horizonUrl = process.env.HORIZON_URL ?? 'https://horizon-testnet.stellar.org';
+    const limit = opts.limit ?? 10;
+    const order = opts.order ?? 'desc';
+    const url = new URL(`${horizonUrl}/accounts/${user.stellarPublicKey}/transactions`);
+    url.searchParams.set('limit', String(limit));
+    url.searchParams.set('order', order);
+    if (opts.cursor) url.searchParams.set('cursor', opts.cursor);
+    try {
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        if (res.status === 404) return { data: [], message: 'No wallet history' };
+        throw new Error(`Horizon responded ${res.status}`);
+      }
+      const json = (await res.json()) as { _embedded: { records: any[] }; _links: any };
+      return { data: json._embedded.records, _links: json._links };
+    } catch {
+      return { data: [], message: 'No wallet linked' };
+    }
+  }
+
   async updateNotificationPreferences(
     userId: string,
     prefs: UpdateNotificationPreferencesDto,

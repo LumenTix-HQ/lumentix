@@ -141,6 +141,26 @@ export class UsersController {
     return this.usersService.getPortfolioValue(req.user.id, baseCurrency);
   }
 
+  @Get('wallet/transactions')
+  @ApiOperation({ summary: 'Get paginated on-chain transaction history for the authenticated user' })
+  @ApiQuery({ name: 'cursor', required: false })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
+  @ApiQuery({ name: 'order', required: false, enum: ['asc', 'desc'] })
+  @ApiResponse({ status: 200, description: 'Transaction history retrieved.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  async getWalletTransactions(
+    @Req() req: AuthenticatedRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('order') order: 'asc' | 'desc' = 'desc',
+  ) {
+    return this.usersService.getWalletTransactions(req.user.id, {
+      cursor,
+      limit: limit ? parseInt(limit, 10) : 10,
+      order,
+    });
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Find a user by ID',
