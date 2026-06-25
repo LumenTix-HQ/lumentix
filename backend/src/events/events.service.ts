@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -612,5 +613,28 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.organizerId !== organizerId) throw new ForbiddenException();
     await this.eventImageRepo.delete({ id: imageId, eventId });
+  }
+
+  async updateCapacity(
+    id: string,
+    callerId: string,
+    maxAttendees: number | null,
+  ): Promise<EventWithCapacity> {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) throw new ForbiddenException();
+
+    if (maxAttendees !== null) {
+      if (maxAttendees < 0) {
+        throw new BadRequestException('maxAttendees must be a non-negative integer.');
+      }
+      if (maxAttendees < event.soldTickets) {
+        throw new ConflictException(
+          `Cannot reduce capacity to ${maxAttendees}: ${event.soldTickets} ticket(s) have already been sold.`,
+        );
+      }
+    }
+
+    await this.eventRepository.update(id, { maxAttendees });
+    return this.getEventById(id);
   }
 }
