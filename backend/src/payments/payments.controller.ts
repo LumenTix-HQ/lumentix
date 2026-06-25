@@ -104,7 +104,7 @@ export class PaymentsController {
   }
 
   @Post('intent')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } }) // 5 per minute
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Create payment intent' })
   @ApiResponse({ status: 201, description: 'Payment intent created' })
   createIntent(
@@ -117,6 +117,7 @@ export class PaymentsController {
       dto.currency,
       dto.usePathPayment,
       dto.sourceAsset,
+      dto.includeCarbonOffset, // Add this
     );
   }
 

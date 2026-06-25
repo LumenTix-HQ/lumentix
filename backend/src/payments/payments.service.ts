@@ -48,6 +48,9 @@ export class PaymentsService {
     
   ) {}
 
+
+  
+
   async getPaymentById(id: string): Promise<Payment> {
     const payment = await this.paymentsRepository.findOne({ where: { id } });
     if (!payment) throw new NotFoundException(`Payment ${id} not found`);
@@ -153,6 +156,13 @@ export class PaymentsService {
 
         if (ownedTicketsCount > 0) {
           finalPrice = finalPrice * (1 - Number(series.discountPercentage) / 100);
+
+                    // Add this block
+          if (includeCarbonOffset) {
+            const offsetAmount = await this.calculate_travel_offset(eventId);
+            finalPrice += offsetAmount;
+            payment.carbonOffsetAmount = offsetAmount;
+          }
         }
       }
     }
@@ -368,6 +378,12 @@ export class PaymentsService {
     payment.transactionHash = transactionHash;
     const confirmed = await this.paymentsRepository.save(payment);
 
+      
+    if (Number(confirmed.carbonOffsetAmount) > 0) {
+      await this.process_carbon_donation(confirmed.id, Number(confirmed.carbonOffsetAmount));
+      await this.allocate_offset_funds(confirmed.id);
+    }
+
     await this.auditService.log({
       action: AuditAction.PAYMENT_CONFIRMED,
       userId: payment.userId,
@@ -482,6 +498,22 @@ export class PaymentsService {
         error,
       );
     }
+  }
+
+  async calculate_travel_offset(eventId: string): Promise<number> {
+    // Logic: Replace with your actual carbon calculation provider or formula
+    // e.g., const carbonTons = await this.carbonProvider.calculate(eventId);
+    return 2.50; // Example fixed cost
+  }
+
+  async process_carbon_donation(paymentId: string, amount: number): Promise<void> {
+    // Logic: Trigger external payment for the donation
+    console.log(`Processing carbon donation of ${amount} for payment ${paymentId}`);
+  }
+
+  async allocate_offset_funds(paymentId: string): Promise<void> {
+    // Logic: Finalize allocation to the carbon project
+    console.log(`Allocating funds for payment ${paymentId}`);
   }
 }
 
