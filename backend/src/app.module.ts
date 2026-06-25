@@ -39,6 +39,7 @@ import { SchedulingModule } from './scheduling/scheduling.module';
 import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
+import { ZkpModule } from './zkp/zkp.module';
 
 
 @Module({
@@ -120,6 +121,7 @@ import { StreamingModule } from './streaming/streaming.module';
     CategoriesModule,
     WebhooksModule,
     StreamingModule,
+    ZkpModule,
   ],
   controllers: [AppController],
   providers: [
