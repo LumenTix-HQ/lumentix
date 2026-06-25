@@ -33,11 +33,27 @@ import { TicketsService } from './tickets.service';
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
+  @Get('me')
+  @ApiOperation({
+    summary: 'Get my tickets (paginated)',
+    description: 'Authenticated. Returns paginated tickets owned by the current user with optional status filter and isExpired flag.',
+  })
+  @ApiQuery({ name: 'status', required: false, enum: ['valid', 'used', 'refunded', 'expired'] })
+  @ApiResponse({ status: 200, description: 'List of tickets with isExpired flag' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getMyTicketsMe(
+    @Req() req: AuthenticatedRequest,
+    @Query() paginationDto: any,
+  ) {
+    return this.ticketsService.findByOwner(req.user.id, paginationDto);
+  }
+
   @Get('my')
   @ApiOperation({
     summary: 'Get my tickets',
     description: 'Authenticated. Returns tickets owned by the current user.',
   })
+  @ApiQuery({ name: 'status', required: false, enum: ['valid', 'used', 'refunded', 'expired'] })
   @ApiResponse({ status: 200, description: 'List of tickets' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   getMyTickets(

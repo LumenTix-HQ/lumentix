@@ -114,7 +114,22 @@ export class TicketsService {
       .where('ticket.ownerId = :ownerId', { ownerId })
       .orderBy('ticket.createdAt', 'DESC');
 
-    return paginate(queryBuilder, paginationDto, 'ticket');
+    if (paginationDto?.status) {
+      queryBuilder.andWhere('ticket.status = :status', { status: paginationDto.status });
+    }
+
+    const result = await paginate(queryBuilder, paginationDto, 'ticket');
+
+    const now = new Date();
+    const enriched = result.data.map((ticket: any) => ({
+      ...ticket,
+      isExpired:
+        ticket.status === 'valid' &&
+        ticket.event?.endDate instanceof Date &&
+        ticket.event.endDate < now,
+    }));
+
+    return { ...result, data: enriched };
   }
 
   async issueTicket(paymentId: string): Promise<IssueTicketResponseDto> {

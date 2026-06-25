@@ -79,7 +79,7 @@ import { StreamingModule } from './streaming/streaming.module';
         password: config.get<string>('DB_PASSWORD'),
         database: config.get<string>('DB_NAME'),
         autoLoadEntities: true,
-        synchronize: config.get<string>('NODE_ENV') !== 'production',
+        synchronize: false,
         logging: config.get<string>('NODE_ENV') === 'development',
       }),
     }),
