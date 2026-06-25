@@ -15,6 +15,7 @@ import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { WalletChallenge } from './entities/wallet-challenge.entity';
 import { MailerModule } from '../mailer/mailer.module';
+import { AuditModule } from '../audit/audit.module';
 import type { StringValue } from 'ms';
 
 @Module({
@@ -22,6 +23,7 @@ import type { StringValue } from 'ms';
     UsersModule,
     TypeOrmModule.forFeature([PasswordResetToken, RefreshToken, WalletChallenge]),
     MailerModule,
+    AuditModule,
     PassportModule,
     ConfigModule,
     JwtModule.registerAsync({
