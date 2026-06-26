@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import { WalletProvider } from "@/contexts/WalletContext";
+import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 
 export const metadata: Metadata = {
   title: 'Lumentix – Stellar Event Platform',
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="antialiased">
         <WalletProvider>
+          <NetworkMismatchBanner />
           <Navbar />
           {children}
         </WalletProvider>
