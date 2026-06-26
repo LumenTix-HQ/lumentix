@@ -39,6 +39,7 @@ import { SchedulingModule } from './scheduling/scheduling.module';
 import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
+import { DecentralizedStorageModule } from './decentralized-storage/decentralized-storage.module';
 
 
 @Module({
@@ -120,6 +121,7 @@ import { StreamingModule } from './streaming/streaming.module';
     CategoriesModule,
     WebhooksModule,
     StreamingModule,
+    DecentralizedStorageModule,
   ],
   controllers: [AppController],
   providers: [
