@@ -1,5 +1,4 @@
 use crate::error::LumentixError;
-use crate::error::LumentixError;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, AttendeeProfile, BridgeTransaction,
     CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, Connection,
