@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Event, VipTier, SeatCategoryName } from "@/types/event";
 import { formatPrice } from "@/types/event";
 import SeatMap from "@/components/venues/SeatMap";
+import VenueMap from "@/components/VenueMap";
 import { useState } from "react";
 import {
     formatDateTimeInTimezone,
@@ -81,6 +82,12 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
             <h2 className="text-lg font-semibold text-white mb-3">About</h2>
             <p className="text-gray-400 leading-relaxed">{event.description}</p>
           </div>
+
+          {event.location && (
+            <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl overflow-hidden">
+              <VenueMap location={event.location} venueName={event.title} />
+            </div>
+          )}
 
           {/* Seat Selection */}
           {sections.length > 0 && (
