@@ -1,28 +1,56 @@
-import { Controller, Get, Param, ParseUUIDPipe, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
-import { AuthenticatedRequest } from '../../auth/interfaces/authenticated-request.interface';
+
+import {
+  Controller,
+  Get,
+  Param,
+  UseGuards,
+  ForbiddenException,
+  Inject,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { AuthGuard } from '@nestjs/passport';
+import { AuthenticatedUser } from '../../common/decorators/authenticated-user.decorator';
+import { User } from '../../users/entities/user.entity';
 import { PaymentAnalyticsService } from '../services/payment-analytics.service';
+import { EventsService } from '../../events/events.service';
+import { OrganizerGuard } from '../guards/organizer.guard';
 
-@ApiTags('Payments')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
-@Controller('events/:id/analytics/payments')
+@ApiTags('Payments Analytics')
+@Controller('payments/analytics')
+@UseGuards(AuthGuard('jwt'), OrganizerGuard)
 export class PaymentAnalyticsController {
-  constructor(private readonly analyticsService: PaymentAnalyticsService) {}
+  constructor(
+    private readonly analyticsService: PaymentAnalyticsService,
+    @Inject(EventsService) private readonly eventsService: EventsService,
+  ) {}
 
-  @Get()
-  @ApiOperation({
-    summary: 'Payment analytics for an event',
-    description:
-      'Organizer-only. Returns total revenue, status counts, daily revenue for the last 30 days, and top currencies.',
+  @Get(':eventId')
+  @ApiOperation({ summary: "Get revenue analytics for an event" })
+  @ApiResponse({
+    status: 200,
+    description: 'Analytics data',
+    schema: {
+      example: {
+        totalRevenue: 1000,
+        confirmedCount: 50,
+        refundedCount: 5,
+        pendingCount: 10,
+        failedCount: 2,
+        revenueByDay: [{ date: '2025-12-01', amount: 100 }],
+        topCurrencies: [{ currency: 'XLM', count: 50, total: 1000 }],
+      },
+    },
   })
-  @ApiResponse({ status: 200, description: 'Payment analytics data' })
-  @ApiResponse({ status: 403, description: 'Forbidden — not the event organizer' })
-  getAnalytics(
-    @Param('id', ParseUUIDPipe) eventId: string,
-    @Req() req: AuthenticatedRequest,
+  async getEventAnalytics(
+    @Param('eventId') eventId: string,
+    @AuthenticatedUser() user: User,
   ) {
-    return this.analyticsService.getEventPaymentAnalytics(eventId, req.user.id);
+    const event = await this.eventsService.getEventById(eventId);
+    if (event.organizerId !== user.id) {
+      throw new ForbiddenException(
+        'You are not authorized to view analytics for this event.',
+      );
+    }
+    return this.analyticsService.getEventAnalytics(eventId);
   }
 }
