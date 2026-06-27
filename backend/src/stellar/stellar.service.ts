@@ -19,6 +19,7 @@ import {
   Asset,
   Memo,
 } from '@stellar/stellar-sdk';
+import * as crypto from 'crypto';
 
 export type PaymentCallback = (
   payment: Horizon.ServerApi.PaymentOperationRecord,
@@ -284,6 +285,9 @@ export class StellarService implements OnModuleDestroy {
     }
   }
 
+  generateNonce(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
   /**
    * Create and fund a new Stellar keypair via Friendbot (testnet only).
    */

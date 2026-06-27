@@ -18,7 +18,6 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from '../mailer/mailer.service';
-import { verifySignature, generateNonce } from '../stellar/verify-signature.util';
 import { StellarService } from '../stellar/stellar.service';
 
 const SALT = 10;
@@ -147,7 +146,7 @@ export class AuthService {
   // ─── Wallet Challenge ──────────────────────────────────────────────────────
 
   async generateWalletChallenge(userId: string): Promise<{ nonce: string; message: string }> {
-    const nonce = generateNonce();
+    const nonce = this.stellarService.generateNonce();
     const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
     await this.cacheManager.set(`wallet-challenge:${userId}`, nonce, 300);
     return { nonce, message };
