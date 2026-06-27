@@ -112,4 +112,10 @@ export class User {
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
   deletedAt: Date | null;
+
+  @Column({ nullable: true })
+  displayName: string;
+
+  @Column({ nullable: true })
+  logoUrl: string;
 }

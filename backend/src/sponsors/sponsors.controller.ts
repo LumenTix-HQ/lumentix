@@ -190,7 +190,21 @@ export class EventSponsorsController {
 
   @Get()
   @ApiOperation({ summary: 'Event sponsor leaderboard', description: 'Public. Returns sponsors sorted by total contribution.' })
-  @ApiResponse({ status: 200, description: 'Sponsor leaderboard' })
+  @ApiResponse({
+    status: 200,
+    description: 'Sponsor leaderboard',
+    schema: {
+      example: [
+        {
+          rank: 1,
+          displayName: 'Sponsor A',
+          logoUrl: 'https://example.com/logo.png',
+          totalXlm: 500,
+          tierName: 'Gold',
+        },
+      ],
+    },
+  })
   getLeaderboard(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.sponsorsService.getEventLeaderboard(eventId);
   }
