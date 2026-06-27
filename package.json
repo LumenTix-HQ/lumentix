@@ -2,7 +2,8 @@
   "dependencies": {
     "@nestjs/schedule": "^6.1.1",
     "nodemailer": "^8.0.1",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "typescript": "^6.0.3"
   },
   "devDependencies": {
     "@types/cron": "^2.0.1",
