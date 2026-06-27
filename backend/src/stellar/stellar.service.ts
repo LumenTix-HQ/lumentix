@@ -85,6 +85,13 @@ export class StellarService implements OnModuleDestroy {
     return this.server.transactions().transaction(hash).call();
   }
 
+  async getTransactionOperations(
+    hash: string,
+  ): Promise<Horizon.ServerApi.OperationRecord[]> {
+    const ops = await this.server.operations().forTransaction(hash).call();
+    return ops.records;
+  }
+
   extractAndValidateMemo(
     txRecord: Horizon.ServerApi.TransactionRecord,
   ): string {
@@ -378,6 +385,31 @@ export class StellarService implements OnModuleDestroy {
         }),
       )
       .addMemo(Memo.text(params.memo))
+      .setTimeout(30)
+      .build();
+
+    return tx.toXDR();
+  }
+
+  async buildTicketTransferXdr(params: {
+    sourcePublicKey: string;
+    destPublicKey: string;
+    assetCode: string;
+    assetIssuer: string;
+  }): Promise<string> {
+    const sourceAccount = await this.server.loadAccount(params.sourcePublicKey);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: params.destPublicKey,
+          asset: new Asset(params.assetCode, params.assetIssuer),
+          amount: '0.0000001', // NFTs are non-divisible
+        }),
+      )
       .setTimeout(30)
       .build();
 
