@@ -48,11 +48,12 @@ export class AuthService {
     return { access_token, refresh_token };
   }
 
-  async login(dto: LoginDto): Promise<{ access_token: string; refresh_token: string }> {
-    const user = await this.usersService.findByEmail(dto.email);
-    if (!user) throw new UnauthorizedException('Invalid credentials');
-    const ok = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!ok) throw new UnauthorizedException('Invalid credentials');
+  async login(
+    user: any,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    if (user.googleId) {
+      return this.findOrCreateGoogleUser(user);
+    }
     const { access_token } = this.signToken(user.id, user.role);
     const refresh_token = await this.issueRefreshToken(user.id);
     return { access_token, refresh_token };
