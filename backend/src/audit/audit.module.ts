@@ -4,7 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { AuditLog } from './entities/audit-log.entity';
 import { AuditService } from './audit.service';
-import { AuditRetentionJob } from './jobs/audit-retention.job';
+import { AuditPruningJob } from './jobs/audit-pruning.job';
 
 @Module({
   imports: [
@@ -12,7 +12,7 @@ import { AuditRetentionJob } from './jobs/audit-retention.job';
     ScheduleModule.forRoot(),
     ConfigModule,
   ],
-  providers: [AuditService, AuditRetentionJob],
+  providers: [AuditService, AuditPruningJob],
   exports: [AuditService],
 })
-export class AuditModule { }
+export class AuditModule {}
