@@ -24,6 +24,7 @@ export class Payment {
   id: string;
 
   @Index() // NEW
+  @Index()
   @Column({ nullable: true })
   eventId: string | null;
 
@@ -33,7 +34,7 @@ export class Payment {
   @Column({ default: false })
   isSeasonPass: boolean;
 
-  @Index() // NEW
+  @Index()
   @Column()
   userId: string;
 
@@ -46,6 +47,7 @@ export class Payment {
   @Column({ nullable: true, type: 'varchar' })
   transactionHash: string | null;
 
+  @Index()
   @Column({
     type: 'enum',
     enum: PaymentStatus,
@@ -53,7 +55,6 @@ export class Payment {
   })
   status: PaymentStatus;
 
-  @Index()
   @Column({ type: 'timestamptz', nullable: true })
   expiresAt: Date | null;
 
