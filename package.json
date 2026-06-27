@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@nestjs/schedule": "^6.1.1",
+    "handlebars": "^4.7.9",
     "nodemailer": "^8.0.1",
     "qrcode": "^1.5.4"
   },

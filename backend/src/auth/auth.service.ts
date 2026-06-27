@@ -94,11 +94,12 @@ export class AuthService {
     const rawToken = `${saved.id}:${rawSecret}`;
     const base = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
     const resetUrl = `${base}/reset-password?token=${encodeURIComponent(rawToken)}`;
-    await this.mailerService.send(
-      user.email,
-      'Lumentix Password Reset',
-      `<p>Click to reset: <a href="${resetUrl}">Reset your password</a></p>`,
-    );
+    await this.mailerService.send({
+      to: user.email,
+      subject: 'Lumentix Password Reset',
+      template: 'password-reset',
+      context: { resetUrl },
+    });
     return { message: 'If the email exists, password reset instructions have been sent.' };
   }
 
@@ -203,13 +204,12 @@ export class AuthService {
     const baseUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
     const verifyUrl = `${baseUrl}/verify-email?token=${encodeURIComponent(rawToken)}&userId=${encodeURIComponent(userId)}`;
 
-    await this.mailerService.send(
-      user.email,
-      'Verify your Lumentix email address',
-      `<p>Click the link below to verify your email address:</p>
-       <p><a href="${verifyUrl}">Verify Email</a></p>
-       <p>This link expires in 24 hours.</p>`,
-    );
+    await this.mailerService.send({
+      to: user.email,
+      subject: 'Verify your Lumentix email address',
+      template: 'email-verification',
+      context: { verifyUrl },
+    });
   }
 
   async verifyEmail(userId: string, rawToken: string): Promise<{ verified: boolean }> {
