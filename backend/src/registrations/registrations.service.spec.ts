@@ -79,9 +79,12 @@ describe('RegistrationsService', () => {
       );
     });
 
-    it('throws ConflictException when user already has an active registration', async () => {
+    it('throws ConflictException on unique constraint violation', async () => {
       eventsService.getEventById.mockResolvedValue(PUBLISHED_EVENT);
-      registrationRepo.findOne.mockResolvedValue(ACTIVE_REGISTRATION);
+      registrationRepo.count.mockResolvedValue(5); // under capacity
+      const error = new Error('unique constraint violation') as any;
+      error.code = '23505'; // PostgreSQL unique_violation error code
+      registrationRepo.save.mockRejectedValue(error);
 
       await expect(service.register('event-1', 'user-1')).rejects.toThrow(
         ConflictException,
