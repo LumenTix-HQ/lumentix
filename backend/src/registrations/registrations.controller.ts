@@ -2,10 +2,8 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
-  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -13,6 +11,7 @@ import {
   Req,
   Res,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { Response } from 'express';
 import {
@@ -29,22 +28,17 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ListRegistrationsDto } from './dto/list-registrations.dto';
 import { RegistrationsService } from './registrations.service';
-import { REDIS_CLIENT } from '../common/redis/redis.module';
-import Redis from 'ioredis';
-
-const IDEMPOTENCY_TTL_SECONDS = 86_400; // 24 hours
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
 @ApiTags('Registrations')
 @ApiBearerAuth()
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RegistrationsController {
-  constructor(
-    private readonly service: RegistrationsService,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-  ) {}
+  constructor(private readonly service: RegistrationsService) {}
 
   @Post('events/:id/register')
+  @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
     summary: 'Register for an event',
     description:
@@ -67,51 +61,17 @@ export class RegistrationsController {
     @Param('id', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
     @Res() res: Response,
-    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    // Idempotency cache lookup
-    if (idempotencyKey) {
-      const cacheKey = `idempotency:${req.user.id}:${idempotencyKey}`;
-      const cached = await this.redis.get(cacheKey);
-      if (cached) {
-        const payload = JSON.parse(cached) as { status: number; body: unknown };
-        return res
-          .status(payload.status)
-          .setHeader('X-Idempotent-Replay', 'true')
-          .json(payload.body);
-      }
-
-      const result = await this.service.register(eventId, req.user.id);
-      const body =
-        result.waitlistPosition !== undefined
-          ? {
-              status: 'waitlisted',
-              position: result.waitlistPosition,
-              registration: result.registration,
-            }
-          : result.registration;
-
-      // Cache the response for 24 hours
-      await this.redis.set(
-        cacheKey,
-        JSON.stringify({ status: result.httpStatus, body }),
-        'EX',
-        IDEMPOTENCY_TTL_SECONDS,
-      );
-
-      return res.status(result.httpStatus).json(body);
-    }
-
     const result = await this.service.register(eventId, req.user.id);
-    return res.status(result.httpStatus).json(
+    const body =
       result.waitlistPosition !== undefined
         ? {
             status: 'waitlisted',
             position: result.waitlistPosition,
             registration: result.registration,
           }
-        : result.registration,
-    );
+        : result.registration;
+    return res.status(result.httpStatus).json(body);
   }
 
   @Get('events/:id/registrations')

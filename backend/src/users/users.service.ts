@@ -299,6 +299,30 @@ export class UsersService {
     return this.roleRequestRepository.save(request);
   }
 
+  async findOrCreateByGoogle(
+    googleId: string,
+    email: string,
+    displayName: string,
+  ): Promise<Omit<User, 'passwordHash'>> {
+    const existingByGoogleId = await this.findByGoogleId(googleId);
+    if (existingByGoogleId) {
+      return this.sanitize(existingByGoogleId);
+    }
+
+    const existingByEmail = await this.findByEmail(email);
+    if (existingByEmail) {
+      await this.updateGoogleId(existingByEmail.id, googleId);
+      return this.sanitize(existingByEmail);
+    }
+
+    const newUser = await this.createGoogleUser({
+      email,
+      googleId,
+      displayName,
+    });
+    return this.sanitize(newUser);
+  }
+
   async findByGoogleId(googleId: string) {
     return this.usersRepository.findOne({ where: { googleId } });
   }

@@ -161,23 +161,101 @@ describe('StellarWebhookService', () => {
 
   // ── Reconnection ────────────────────────────────────────────────────────
 
-  describe('reconnection', () => {
-    it('schedules a reconnect when stream open throws', () => {
+    it('uses exponential backoff for reconnection attempts', () => {
       jest.useFakeTimers();
 
+      // First 10 attempts should fail
+      for (let i = 0; i < 10; i++) {
+        mockStellarService.streamPayments.mockImplementationOnce(() => {
+          throw new Error('connection refused');
+        });
+      }
+      mockStellarService.streamPayments.mockReturnValue(mockStreamCloser);
+
+      service.onModuleInit();
+      expect(mockStellarService.streamPayments).toHaveBeenCalledTimes(1);
+
+      // 1s, 2s, 4s, 8s, 16s, 32s, 60s, 60s, 60s
+      const expectedDelays = [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000, 60_000];
+
+      for (let i = 0; i < expectedDelays.length; i++) {
+        jest.advanceTimersByTime(expectedDelays[i] + 100);
+        expect(mockStellarService.streamPayments).toHaveBeenCalledTimes(i + 2);
+      }
+
+      jest.useRealTimers();
+    });
+
+    it('emits STELLAR_STREAM_DEAD after 10 failures and stops retrying', () => {
+      jest.useFakeTimers();
+      const notificationService = (service as any).notificationService;
+
+      // All attempts fail
+      mockStellarService.streamPayments.mockImplementation(() => {
+        throw new Error('connection refused');
+      });
+
+      service.onModuleInit();
+
+      // Run through 10 failures
+      for (let i = 0; i < 10; i++) {
+        jest.runOnlyPendingTimers();
+      }
+
+      expect(mockStellarService.streamPayments).toHaveBeenCalledTimes(10);
+      expect(notificationService.emit).toHaveBeenCalledWith(
+        'STELLAR_STREAM_DEAD',
+        { attempts: 10 },
+      );
+
+      // After 10, should not try again
+      jest.runOnlyPendingTimers();
+      expect(mockStellarService.streamPayments).toHaveBeenCalledTimes(10);
+
+      jest.useRealTimers();
+    });
+
+    it('resets reconnect counter on successful connection', () => {
+      jest.useFakeTimers();
+
+      // Fail first 2 times
       mockStellarService.streamPayments
+        .mockImplementationOnce(() => {
+          throw new Error('connection refused');
+        })
         .mockImplementationOnce(() => {
           throw new Error('connection refused');
         })
         .mockReturnValue(mockStreamCloser);
 
       service.onModuleInit();
+      expect(service.reconnectAttempts).toBe(1);
 
-      // Should have tried once and failed
-      expect(mockStellarService.streamPayments).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(1_100);
+      expect(service.reconnectAttempts).toBe(2);
 
-      // After delay, should reconnect
-      jest.advanceTimersByTime(6_000);
+      jest.advanceTimersByTime(2_100);
+      // 3rd attempt is successful
+      expect(service.reconnectAttempts).toBe(0);
+
+      jest.useRealTimers();
+    });
+
+    it('reconnect() resets counters and triggers immediate reconnect', () => {
+      jest.useFakeTimers();
+
+      // Initial connection fails
+      mockStellarService.streamPayments.mockImplementationOnce(() => {
+        throw new Error('connection refused');
+      });
+
+      service.onModuleInit();
+      expect(service.reconnectAttempts).toBe(1);
+
+      // Manual reconnect
+      service.reconnect();
+
+      expect(service.reconnectAttempts).toBe(0);
       expect(mockStellarService.streamPayments).toHaveBeenCalledTimes(2);
 
       jest.useRealTimers();
