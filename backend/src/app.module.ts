@@ -39,6 +39,7 @@ import { SchedulingModule } from './scheduling/scheduling.module';
 import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 
 
 @Module({
@@ -120,6 +121,7 @@ import { StreamingModule } from './streaming/streaming.module';
     CategoriesModule,
     WebhooksModule,
     StreamingModule,
+    LoyaltyModule,
   ],
   controllers: [AppController],
   providers: [

@@ -610,6 +610,49 @@ pub struct SecurityIncident {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// DID / Decentralized Identity Ticket Linking
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TicketDidAssociation {
+    pub ticket_id: u64,
+    pub credential_id: u64,
+    pub subject: Address,
+    pub linked_at: u64,
+    pub revoked: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Resale Price Ceiling for Secondary Marketplace
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResalePriceCeiling {
+    pub event_id: u64,
+    pub ceiling_multiplier_bps: u32,
+    pub absolute_ceiling: i128,
+    pub set_by: Address,
+    pub set_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Attendance Memorabilia / NFT Claim Tracking
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemorabiliaClaim {
+    pub nft_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub attendee: Address,
+    pub claimed_at: u64,
+    pub metadata_hash: BytesN<32>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Personalization Engine
 // ═══════════════════════════════════════════════════════════════════════════
 

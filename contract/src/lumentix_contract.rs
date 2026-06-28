@@ -2,19 +2,24 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AttendanceVerificationFailed,
+    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AttendanceMemorabiliaMinted,
+    AttendanceVerificationFailed,
     AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
-    CarbonOffsetPurchased, CollectibleInventoryUpdated, CrossChainTransferCompleted,
+    CarbonOffsetPurchased, CheckinProofValidated, CollectibleInventoryUpdated,
+    CrossChainTransferCompleted,
     CrossChainTransferInitiated, EnvironmentalImpactUpdated, EscrowReleased, EventCancelled,
     EventCapacityChanged, EventCompleted, EventCreated, EventCurrencySet, EventMetadataUpdated,
     EventSalesPaused, EventSalesResumed, EventStatusChanged, EventTimeExtended, EventUpdated,
     FundsDeposited, FundsWithdrawn, GenericEventStateTransition, IdentityCredentialIssued,
     IdentityCredentialRevoked, InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased,
-    MerchandiseCreated, MerchandisePurchased, NftMinted, NftTraded, OraclePriceUpdated,
-    PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, ProtocolFeeQueried,
+    MemorabiliaClaimed, MerchandiseCreated, MerchandisePurchased, NftMinted, NftTraded,
+    OraclePriceUpdated,
+    PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, PriceCeilingSet,
+    ProtocolFeeQueried,
     ReferralLinkGenerated, ReferralPurchaseProcessed, ReferralRewardsCredited, ReputationUpdated,
-    ReviewSubmitted, SeatHoldReleased, SeatSelected, TicketPurchased, TicketRefunded,
+    ResaleComplianceEnforced, ResalePriceVerified, ReviewSubmitted, SeatHoldReleased, SeatSelected,
+    TicketDidLinked, TicketDidRevoked, TicketPurchased, TicketRefunded,
     TicketRevoked, TicketTransferred, TicketUsed, TransferBlackoutUpdated, TransferLockBypassed,
     UpgradeExecuted,
     UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast, VenueLayoutCreated,
@@ -30,12 +35,14 @@ use crate::types::{
     CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
     CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
     EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
-    NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord, Seat, Ticket,
-    TicketTransferRecord, TransferBlackout, UpgradeGovernanceConfig, UpgradeProposal,
+    MemorabiliaClaim, NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord,
+    ResalePriceCeiling, Seat, Ticket,
+    TicketDidAssociation, TicketTransferRecord, TransferBlackout, UpgradeGovernanceConfig,
+    UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
     PricingSchedule, MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics,
     PERSISTENT_LIFETIME,
-    VipTier, WaitlistOffer, PERSISTENT_LIFETIME, VenueSpaceAllocation, SubscriptionPlan,
+    VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
 };
 use crate::validation;
@@ -4193,6 +4200,136 @@ impl LumentixContract {
         storage::get_identity_credential_by_subject(&env, &subject, &provider)
     }
 
+    /// Verify a DID credential during ticket scanning.
+    /// Checks that the credential is valid (exists, not revoked, not expired),
+    /// that it is linked to the given ticket, and that the subject matches.
+    pub fn verify_did_credential(
+        env: Env,
+        ticket_id: u64,
+        credential_id: u64,
+        subject: Address,
+    ) -> Result<bool, LumentixError> {
+        subject.require_auth();
+
+        let credential = storage::get_identity_credential(&env, credential_id)?;
+
+        if credential.subject != subject {
+            return Err(LumentixError::IdentityVerificationFailed);
+        }
+
+        if credential.revoked {
+            return Err(LumentixError::IdentityCredentialRevoked);
+        }
+
+        let now = env.ledger().timestamp();
+        if now > credential.expires_at {
+            return Err(LumentixError::IdentityCredentialExpired);
+        }
+
+        let association = storage::get_ticket_did_association(&env, ticket_id)?;
+
+        if association.credential_id != credential_id {
+            return Err(LumentixError::DidCredentialVerificationFailed);
+        }
+
+        if association.revoked {
+            return Err(LumentixError::DidCredentialVerificationFailed);
+        }
+
+        if association.subject != subject {
+            return Err(LumentixError::DidCredentialVerificationFailed);
+        }
+
+        BlockchainIdentityVerified::emit(
+            &env,
+            credential_id,
+            subject,
+            credential.provider,
+            true,
+        );
+
+        Ok(true)
+    }
+
+    /// Link a ticket to a DID credential.
+    /// The subject must match the ticket owner.
+    /// Only one DID can be linked to a ticket at a time.
+    pub fn link_ticket_to_did(
+        env: Env,
+        subject: Address,
+        ticket_id: u64,
+        credential_id: u64,
+    ) -> Result<(), LumentixError> {
+        subject.require_auth();
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+
+        if ticket.owner != subject {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let credential = storage::get_identity_credential(&env, credential_id)?;
+
+        if credential.subject != subject {
+            return Err(LumentixError::IdentityVerificationFailed);
+        }
+
+        if credential.revoked {
+            return Err(LumentixError::IdentityCredentialRevoked);
+        }
+
+        let now = env.ledger().timestamp();
+        if now > credential.expires_at {
+            return Err(LumentixError::IdentityCredentialExpired);
+        }
+
+        if storage::has_ticket_did_association(&env, ticket_id) {
+            return Err(LumentixError::TicketDidAlreadyLinked);
+        }
+
+        let association = TicketDidAssociation {
+            ticket_id,
+            credential_id,
+            subject: subject.clone(),
+            linked_at: now,
+            revoked: false,
+        };
+
+        storage::set_ticket_did_association(&env, ticket_id, &association);
+
+        TicketDidLinked::emit(&env, ticket_id, credential_id, subject, now);
+
+        Ok(())
+    }
+
+    /// Revoke the DID association for a ticket.
+    /// Only the admin or ticket owner can revoke the DID link.
+    pub fn revoke_did_association(
+        env: Env,
+        caller: Address,
+        ticket_id: u64,
+    ) -> Result<(), LumentixError> {
+        caller.require_auth();
+
+        let mut association = storage::get_ticket_did_association(&env, ticket_id)?;
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        let admin = storage::get_admin(&env);
+
+        if caller != ticket.owner && caller != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        association.revoked = true;
+        storage::set_ticket_did_association(&env, ticket_id, &association);
+
+        TicketDidRevoked::emit(&env, ticket_id, association.credential_id, caller);
+
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ESCROW MANAGEMENT
     // ═══════════════════════════════════════════════════════════════════════════
     // CROSS-CHAIN TICKET PORTABILITY
     // ═══════════════════════════════════════════════════════════════════════════
@@ -4777,6 +4914,202 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // ATTENDANCE MEMORABILIA NFT COLLECTIBLES
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Mint an attendance memorabilia NFT for an attendee after check-in.
+    /// Only the event organizer can mint attendance memorabilia.
+    /// Requires that the ticket has been used (checked in) and a collectible
+    /// inventory is configured for the event.
+    pub fn mint_attendance_memorabilia(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        ticket_id: u64,
+        attendee: Address,
+        name: String,
+        description: String,
+        rarity: RarityTier,
+        transferable: bool,
+        metadata_hash: BytesN<32>,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+
+        if ticket.event_id != event_id {
+            return Err(LumentixError::TicketEventMismatch);
+        }
+
+        if !ticket.used {
+            return Err(LumentixError::AttendanceNotVerified);
+        }
+
+        if ticket.owner != attendee {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if storage::has_memorabilia_claimed(&env, ticket_id) {
+            return Err(LumentixError::MemorabiliaAlreadyClaimed);
+        }
+
+        validation::validate_string_not_empty(&name)?;
+        validation::validate_string_not_empty(&description)?;
+
+        let mut inv = storage::get_collectible_inventory(&env, event_id)?;
+
+        if inv.total_minted >= inv.max_supply {
+            return Err(LumentixError::CollectibleMaxSupplyReached);
+        }
+
+        let max_supply = inv.max_supply;
+        let legendary_cap = (max_supply / 100).max(1);
+        let epic_cap = (max_supply * 5 / 100).max(1);
+        let rare_cap = (max_supply * 15 / 100).max(1);
+        let uncommon_cap = (max_supply * 30 / 100).max(1);
+
+        match &rarity {
+            RarityTier::Legendary => {
+                if inv.legendary_minted >= legendary_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.legendary_minted += 1;
+            }
+            RarityTier::Epic => {
+                if inv.epic_minted >= epic_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.epic_minted += 1;
+            }
+            RarityTier::Rare => {
+                if inv.rare_minted >= rare_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.rare_minted += 1;
+            }
+            RarityTier::Uncommon => {
+                if inv.uncommon_minted >= uncommon_cap {
+                    return Err(LumentixError::RarityTierExhausted);
+                }
+                inv.uncommon_minted += 1;
+            }
+            RarityTier::Common => {
+                inv.common_minted += 1;
+            }
+        }
+
+        inv.total_minted += 1;
+        storage::set_collectible_inventory(&env, event_id, &inv);
+
+        let nft_id = storage::get_next_nft_id(&env);
+        storage::increment_nft_id(&env);
+
+        let minted_at = env.ledger().timestamp();
+
+        let nft = NftCollectible {
+            id: nft_id,
+            event_id,
+            name: name.clone(),
+            description: description.clone(),
+            rarity: rarity.clone(),
+            owner: attendee.clone(),
+            minted_at,
+            transferable,
+            metadata_hash: metadata_hash.clone(),
+        };
+
+        storage::set_nft(&env, nft_id, &nft);
+
+        let claim = MemorabiliaClaim {
+            nft_id,
+            ticket_id,
+            event_id,
+            attendee: attendee.clone(),
+            claimed_at: minted_at,
+            metadata_hash,
+        };
+
+        storage::set_memorabilia_claim(&env, ticket_id, &claim);
+
+        NftMinted::emit(&env, nft_id, event_id, attendee.clone(), rarity, minted_at);
+        AttendanceMemorabiliaMinted::emit(&env, nft_id, ticket_id, event_id, attendee, minted_at);
+
+        Ok(nft_id)
+    }
+
+    /// Validate that a ticket was actually used for check-in at the event.
+    /// Returns true if the ticket has been used (checked in) and belongs to the specified attendee.
+    pub fn validate_event_checkin_proof(
+        env: Env,
+        ticket_id: u64,
+        event_id: u64,
+        attendee: Address,
+    ) -> Result<bool, LumentixError> {
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+
+        if ticket.event_id != event_id {
+            return Err(LumentixError::TicketEventMismatch);
+        }
+
+        if ticket.owner != attendee {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let valid = ticket.used;
+
+        CheckinProofValidated::emit(&env, ticket_id, event_id, attendee, valid);
+
+        if !valid {
+            return Err(LumentixError::CheckinProofInvalid);
+        }
+
+        Ok(true)
+    }
+
+    /// Claim a memorabilia NFT for the attendee after their check-in has been verified.
+    /// The attendee must have a valid ticket that was used for check-in.
+    /// The NFT must have been minted via mint_attendance_memorabilia first.
+    pub fn claim_memorabilia_nft(
+        env: Env,
+        attendee: Address,
+        ticket_id: u64,
+    ) -> Result<MemorabiliaClaim, LumentixError> {
+        attendee.require_auth();
+
+        let claim = storage::get_memorabilia_claim(&env, ticket_id)?;
+
+        if claim.attendee != attendee {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+
+        if !ticket.used {
+            return Err(LumentixError::CheckinProofInvalid);
+        }
+
+        MemorabiliaClaimed::emit(
+            &env,
+            claim.nft_id,
+            ticket_id,
+            claim.event_id,
+            attendee,
+        );
+
+        Ok(claim)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // DYNAMIC VENUE SPACE ALLOCATION
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -5124,6 +5457,127 @@ impl LumentixContract {
         UserJourneyOptimized::emit(&env, user, journey_steps.len(), env.ledger().timestamp());
 
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RESALE PRICE CEILING / SECONDARY MARKETPLACE SCALPING PREVENTION
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Set a maximum resale price ceiling for an event.
+    /// Only the event organizer can call this.
+    /// `ceiling_multiplier_bps` is the max multiplier in basis points (e.g., 15000 = 150%).
+    /// `absolute_ceiling` is a hard cap in the smallest currency unit (0 = disabled).
+    pub fn set_price_ceiling(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        ceiling_multiplier_bps: u32,
+        absolute_ceiling: i128,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_positive_amount(absolute_ceiling)?;
+
+        let ceiling = ResalePriceCeiling {
+            event_id,
+            ceiling_multiplier_bps,
+            absolute_ceiling,
+            set_by: organizer.clone(),
+            set_at: env.ledger().timestamp(),
+        };
+
+        storage::set_price_ceiling(&env, event_id, &ceiling);
+
+        PriceCeilingSet::emit(
+            &env,
+            event_id,
+            ceiling_multiplier_bps,
+            absolute_ceiling,
+            organizer,
+        );
+
+        Ok(())
+    }
+
+    /// Verify whether a proposed resale price is compliant with the price ceiling.
+    /// Returns true if the price is within bounds.
+    pub fn verify_resale_price(
+        env: Env,
+        event_id: u64,
+        proposed_price: i128,
+    ) -> Result<bool, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+
+        let ceiling = storage::get_price_ceiling(&env, event_id)?;
+
+        let max_allowed_by_multiplier =
+            event.ticket_price * (ceiling.ceiling_multiplier_bps as i128) / 10000i128;
+
+        let max_allowed = if ceiling.absolute_ceiling > 0 {
+            if max_allowed_by_multiplier > ceiling.absolute_ceiling {
+                ceiling.absolute_ceiling
+            } else {
+                max_allowed_by_multiplier
+            }
+        } else {
+            max_allowed_by_multiplier
+        };
+
+        let compliant = proposed_price <= max_allowed;
+
+        ResalePriceVerified::emit(&env, event_id, proposed_price, compliant);
+
+        Ok(compliant)
+    }
+
+    /// Enforce resale price compliance by capping a proposed price to the ceiling.
+    /// Returns the adjusted (enforced) price.
+    pub fn enforce_resale_compliance(
+        env: Env,
+        enforcer: Address,
+        event_id: u64,
+        proposed_price: i128,
+    ) -> Result<i128, LumentixError> {
+        enforcer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+
+        let ceiling = storage::get_price_ceiling(&env, event_id)?;
+
+        let max_allowed_by_multiplier =
+            event.ticket_price * (ceiling.ceiling_multiplier_bps as i128) / 10000i128;
+
+        let max_allowed = if ceiling.absolute_ceiling > 0 {
+            if max_allowed_by_multiplier > ceiling.absolute_ceiling {
+                ceiling.absolute_ceiling
+            } else {
+                max_allowed_by_multiplier
+            }
+        } else {
+            max_allowed_by_multiplier
+        };
+
+        let adjusted_price = if proposed_price > max_allowed {
+            max_allowed
+        } else {
+            proposed_price
+        };
+
+        ResaleComplianceEnforced::emit(
+            &env,
+            event_id,
+            0u64,
+            adjusted_price,
+            enforcer,
+        );
+
+        Ok(adjusted_price)
     }
 
     fn is_transfer_blackout_active_for_event(env: &Env, event_id: u64) -> bool {
