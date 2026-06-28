@@ -1,4 +1,6 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,7 +18,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from '../mailer/mailer.service';
-import { verifySignature, generateNonce } from '../stellar/verify-signature.util';
+import { StellarService } from '../stellar/stellar.service';
 
 const SALT = 10;
 const REFRESH_TTL_DAYS = 30;
@@ -29,12 +31,14 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly mailerService: MailerService,
     private readonly auditService: AuditService,
+    private readonly stellarService: StellarService,
     @InjectRepository(PasswordResetToken)
     private readonly passwordResetTokenRepository: Repository<PasswordResetToken>,
     @InjectRepository(RefreshToken)
     private readonly refreshTokenRepository: Repository<RefreshToken>,
     @InjectRepository(WalletChallenge)
     private readonly walletChallengeRepository: Repository<WalletChallenge>,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ access_token: string; refresh_token: string }> {
@@ -142,19 +146,9 @@ export class AuthService {
   // ─── Wallet Challenge ──────────────────────────────────────────────────────
 
   async generateWalletChallenge(userId: string): Promise<{ nonce: string; message: string }> {
-    const nonce = generateNonce();
-    const user = await this.usersService.findById(userId);
-    if (!user) throw new BadRequestException('User not found');
-
-    const challenge = this.walletChallengeRepository.create({
-      userId,
-      nonce,
-      used: false,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-    });
-    await this.walletChallengeRepository.save(challenge);
-
+    const nonce = this.stellarService.generateNonce();
     const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
+    await this.cacheManager.set(`wallet-challenge:${userId}`, nonce, 300);
     return { nonce, message };
   }
 
@@ -164,22 +158,26 @@ export class AuthService {
     signature: string,
     publicKey: string,
   ): Promise<{ linked: boolean; stellarPublicKey: string }> {
-    const challenge = await this.walletChallengeRepository.findOne({
-      where: { nonce, userId, used: false },
-    });
-
-    if (!challenge) throw new BadRequestException('Invalid or expired nonce');
-    if (challenge.expiresAt.getTime() <= Date.now()) {
-      throw new BadRequestException('Nonce has expired. Please request a new one.');
+    const storedNonce = await this.cacheManager.get<string>(`wallet-challenge:${userId}`);
+    if (storedNonce !== nonce) {
+      throw new BadRequestException('Invalid or expired nonce. Please request a new one.');
     }
 
     const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
-    const isValid = verifySignature(publicKey, signature, message);
-    if (!isValid) throw new UnauthorizedException('Invalid signature. Please try again.');
+    const isValid = this.stellarService.verifySignature(publicKey, signature, message);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid signature. Please try again.');
+    }
 
-    challenge.used = true;
-    await this.walletChallengeRepository.save(challenge);
     await this.usersService.updateWallet(userId, publicKey);
+    await this.cacheManager.del(`wallet-challenge:${userId}`);
+
+    await this.auditService.log({
+      action: AuditAction.WALLET_LINKED,
+      userId,
+      resourceId: userId,
+      meta: { publicKey },
+    });
 
     return { linked: true, stellarPublicKey: publicKey };
   }

@@ -26,7 +26,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { WalletChallengeResponseDto } from './dto/wallet-challenge.dto';
-import { WalletVerifyDto } from './dto/wallet-challenge.dto';
+import { WalletVerifyDto } from './dto/wallet-verify.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
@@ -168,24 +168,6 @@ export class AuthController {
   }
 
   // ── Wallet challenge ────────────────────────────────────────────────────
-
-  @Post('wallet-challenge')
-  @SkipThrottle()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Request a wallet signing challenge' })
-  async requestWalletChallenge(@Body() dto: RequestWalletChallengeDto) {
-    return this.authService.requestWalletChallenge(dto.publicKey);
-  }
-
-  @Post('wallet-login')
-  @Throttle({ default: { limit: 10, ttl: 900_000 } }) // 10 per 15 min
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login or link wallet with signed challenge' })
-  async walletLogin(@Body() dto: { publicKey: string; signature: string }) {
-    return this.authService.walletLogin(dto.publicKey, dto.signature);
-  }
-
-  // ─── Wallet Challenge ────────────────────────────────────────────────────────
 
   @Post('wallet-challenge')
   @UseGuards(JwtAuthGuard)

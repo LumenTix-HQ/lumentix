@@ -14,6 +14,7 @@ import { BruteForceGuard } from '../common/guards/brute-force.guard';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { WalletChallenge } from './entities/wallet-challenge.entity';
+import { RedisModule } from '../redis/redis.module';
 import { MailerModule } from '../mailer/mailer.module';
 import { AuditModule } from '../audit/audit.module';
 import type { StringValue } from 'ms';
@@ -24,6 +25,7 @@ import type { StringValue } from 'ms';
     TypeOrmModule.forFeature([PasswordResetToken, RefreshToken, WalletChallenge]),
     MailerModule,
     AuditModule,
+    RedisModule,
     PassportModule,
     ConfigModule,
     JwtModule.registerAsync({

@@ -346,11 +346,9 @@ export class PaymentsService {
   }
 
   async confirmPayment(
-    input: ConfirmPaymentDto | string,
+    { transactionHash }: ConfirmPaymentDto,
     userId: string,
   ): Promise<Payment> {
-    const transactionHash =
-      typeof input === 'string' ? input : input.transactionHash;
 
     let txRecord: any;
     try {
@@ -543,17 +541,8 @@ export class PaymentsService {
           currency: payment.currency,
           reason,
         });
+        this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
       }
-      const event = await this.eventsService.getEventById(payment.eventId);
-      await this.notificationService.queuePaymentFailedEmail({
-        userId: payment.userId,
-        email: '',
-        eventTitle: event.title,
-        amount: Number(payment.amount),
-        currency: payment.currency,
-        reason,
-      });
-      this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
     } catch (error) {
       console.error(
         `Failed to queue payment failure email for ${payment.id}:`,
