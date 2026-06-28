@@ -34,6 +34,7 @@ export class Registration {
   @Column({ nullable: true })
   ticketId: string | null;
 
+  @Index()
   @Column({
     type: 'enum',
     enum: RegistrationStatus,
