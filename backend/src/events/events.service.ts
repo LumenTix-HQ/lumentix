@@ -292,14 +292,15 @@ export class EventsService {
     if (organizerId)
       qb.andWhere('event.organizerId = :organizerId', { organizerId });
     if (search) {
-      // Use PostgreSQL full-text search for relevance-ranked results
-      qb.andWhere(
-        `to_tsvector('english', event.title || ' ' || COALESCE(event.description, '')) @@ plainto_tsquery('english', :search)`,
-        { search },
+      qb.andWhere('event.search_vector @@ plainto_tsquery(:search)', { search });
+      qb.addSelect(
+        "ts_rank(event.search_vector, plainto_tsquery(:search))",
+        'rank',
       );
+      qb.orderBy('rank', 'DESC');
+    } else {
+      qb.orderBy('event.createdAt', 'DESC');
     }
-    if (organizerId) qb.andWhere('event.organizerId = :organizerId', { organizerId });
-    if (search) qb.andWhere('LOWER(event.title) LIKE LOWER(:search)', { search: `%${search}%` });
     if (category) qb.andWhere('event.category = :category', { category });
     if (filterDto.categoryIds) {
       const ids = filterDto.categoryIds.split(',').filter(Boolean);
