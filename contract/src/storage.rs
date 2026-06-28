@@ -3,12 +3,12 @@ use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
-    IdentityProvider, InsurancePolicy, InsurancePool, NftCollectible, OrganizerReputation, Seat,
-    Ticket, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
+    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, NftCollectible,
+    OrganizerReputation, ResalePriceCeiling, Seat,
+    Ticket, TicketDidAssociation, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
-    VenueLayout, VipTier, WaitlistOffer, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
@@ -1697,4 +1697,106 @@ pub fn get_user_preferences(env: &Env, user: &Address) -> Result<UserPreferences
     let prefs = env.storage().persistent().get(&key).ok_or(LumentixError::Unauthorized)?;
     env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(prefs)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DID / TICKET LINKING STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TICKET_DID_PREFIX: &str = "TICKDID_";
+
+pub fn set_ticket_did_association(env: &Env, ticket_id: u64, association: &TicketDidAssociation) {
+    let key = (TICKET_DID_PREFIX, ticket_id);
+    env.storage().persistent().set(&key, association);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_ticket_did_association(
+    env: &Env,
+    ticket_id: u64,
+) -> Result<TicketDidAssociation, LumentixError> {
+    let key = (TICKET_DID_PREFIX, ticket_id);
+    let association = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::TicketDidLinkNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(association)
+}
+
+pub fn has_ticket_did_association(env: &Env, ticket_id: u64) -> bool {
+    let key = (TICKET_DID_PREFIX, ticket_id);
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESALE PRICE CEILING STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PRICE_CEILING_PREFIX: &str = "PRICECEIL_";
+
+pub fn set_price_ceiling(env: &Env, event_id: u64, ceiling: &ResalePriceCeiling) {
+    let key = (PRICE_CEILING_PREFIX, event_id);
+    env.storage().persistent().set(&key, ceiling);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_price_ceiling(env: &Env, event_id: u64) -> Result<ResalePriceCeiling, LumentixError> {
+    let key = (PRICE_CEILING_PREFIX, event_id);
+    let ceiling = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::PriceCeilingNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(ceiling)
+}
+
+pub fn has_price_ceiling(env: &Env, event_id: u64) -> bool {
+    let key = (PRICE_CEILING_PREFIX, event_id);
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MEMORABILIA CLAIM STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MEMORABILIA_CLAIM_PREFIX: &str = "MEMCLAIM_";
+
+pub fn set_memorabilia_claim(env: &Env, ticket_id: u64, claim: &MemorabiliaClaim) {
+    let key = (MEMORABILIA_CLAIM_PREFIX, ticket_id);
+    env.storage().persistent().set(&key, claim);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_memorabilia_claim(
+    env: &Env,
+    ticket_id: u64,
+) -> Result<MemorabiliaClaim, LumentixError> {
+    let key = (MEMORABILIA_CLAIM_PREFIX, ticket_id);
+    let claim = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::MemorabiliaClaimNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(claim)
+}
+
+pub fn has_memorabilia_claimed(env: &Env, ticket_id: u64) -> bool {
+    let key = (MEMORABILIA_CLAIM_PREFIX, ticket_id);
+    env.storage().persistent().has(&key)
 }

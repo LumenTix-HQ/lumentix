@@ -1101,7 +1101,6 @@ impl MerchandiseCreated {
     ) {
         env.events().publish(
             (symbol_short!("merch_crt"),),
-            (soroban_sdk::Symbol::new(env, "merccreate"),),
             (
                 merchandise_id,
                 event_id,
@@ -1307,6 +1306,123 @@ impl UserJourneyOptimized {
         env.events().publish(
             (soroban_sdk::Symbol::new(env, "user_journey_optimized"),),
             (user, step_count, timestamp),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DID TICKET LINKING EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct TicketDidLinked;
+impl TicketDidLinked {
+    pub fn emit(
+        env: &Env,
+        ticket_id: u64,
+        credential_id: u64,
+        subject: Address,
+        linked_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("tckdidlk"),),
+            (ticket_id, credential_id, subject, linked_at),
+        );
+    }
+}
+
+pub struct TicketDidRevoked;
+impl TicketDidRevoked {
+    pub fn emit(env: &Env, ticket_id: u64, credential_id: u64, admin: Address) {
+        env.events().publish(
+            (symbol_short!("tckdidrv"),),
+            (ticket_id, credential_id, admin),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESALE PRICE CEILING EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct PriceCeilingSet;
+impl PriceCeilingSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        ceiling_multiplier_bps: u32,
+        absolute_ceiling: i128,
+        set_by: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("prceil"),),
+            (event_id, ceiling_multiplier_bps, absolute_ceiling, set_by),
+        );
+    }
+}
+
+pub struct ResalePriceVerified;
+impl ResalePriceVerified {
+    pub fn emit(env: &Env, event_id: u64, proposed_price: i128, compliant: bool) {
+        env.events().publish(
+            (symbol_short!("rslprvrf"),),
+            (event_id, proposed_price, compliant),
+        );
+    }
+}
+
+pub struct ResaleComplianceEnforced;
+impl ResaleComplianceEnforced {
+    pub fn emit(env: &Env, event_id: u64, ticket_id: u64, adjusted_price: i128, enforced_by: Address) {
+        env.events().publish(
+            (symbol_short!("rslcompl"),),
+            (event_id, ticket_id, adjusted_price, enforced_by),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ATTENDANCE MEMORABILIA EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct CheckinProofValidated;
+impl CheckinProofValidated {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, attendee: Address, valid: bool) {
+        env.events().publish(
+            (symbol_short!("chkprfva"),),
+            (ticket_id, event_id, attendee, valid),
+        );
+    }
+}
+
+pub struct AttendanceMemorabiliaMinted;
+impl AttendanceMemorabiliaMinted {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        attendee: Address,
+        minted_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("attmemnt"),),
+            (nft_id, ticket_id, event_id, attendee, minted_at),
+        );
+    }
+}
+
+pub struct MemorabiliaClaimed;
+impl MemorabiliaClaimed {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        attendee: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("memclm"),),
+            (nft_id, ticket_id, event_id, attendee),
         );
     }
 }
