@@ -1,7 +1,7 @@
 use crate::error::LumentixError;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
-    CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer, CurrencyConfig,
+    CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
     IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, NftCollectible,
     OrganizerReputation, ResalePriceCeiling, Seat,
