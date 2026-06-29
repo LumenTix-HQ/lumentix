@@ -1,50 +1,48 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import * as fs from 'fs';
+
+import { Injectable, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
+import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as Handlebars from 'handlebars';
+import * as handlebars from 'handlebars';
 
 @Injectable()
-export class TemplateService {
-  private readonly templateDir = path.join(
-    __dirname,
-    'templates',
-  );
+export class TemplateService implements OnModuleInit {
+  private templates: Map<string, Handlebars.TemplateDelegate> = new Map();
+  private baseTemplate: Handlebars.TemplateDelegate;
 
-  /**
-   * Compile a Handlebars template and return the rendered HTML string.
-   *
-   * The template is wrapped in `base.hbs` so every email shares the same
-   * header / footer shell. Individual templates should provide the inner
-   * `{{{body}}}` content.
-   *
-   * @param templateName  File name without the `.hbs` extension (e.g. `'password-reset'`)
-   * @param context       Key/value pairs injected into the template
-   */
-  async render(
-    templateName: string,
-    context: Record<string, unknown>,
-  ): Promise<string> {
-    const bodyHtml = this.loadAndCompile(templateName, context);
-    const fullHtml = this.loadAndCompile('base', { body: bodyHtml, ...context });
-    return fullHtml;
+  async onModuleInit() {
+    await this.loadTemplates();
   }
 
-  // ─── Private helpers ────────────────────────────────────────────────────
-
-  private loadAndCompile(
-    name: string,
-    context: Record<string, unknown>,
-  ): string {
-    const filePath = path.join(this.templateDir, `${name}.hbs`);
-
-    if (!fs.existsSync(filePath)) {
-      throw new InternalServerErrorException(
-        `Email template "${name}" not found at ${filePath}`,
-      );
+  private async loadTemplates() {
+    const templatesDir = path.join(__dirname, 'templates');
+    try {
+      const files = await fs.readdir(templatesDir);
+      for (const file of files) {
+        if (file.endsWith('.hbs')) {
+          const templatePath = path.join(templatesDir, file);
+          const content = await fs.readFile(templatePath, 'utf-8');
+          const templateName = path.basename(file, '.hbs');
+          if (templateName === 'base') {
+            this.baseTemplate = handlebars.compile(content);
+          } else {
+            this.templates.set(templateName, handlebars.compile(content));
+          }
+        }
+      }
+    } catch (error) {
+      throw new InternalServerErrorException('Failed to load email templates.');
     }
+  }
 
-    const source = fs.readFileSync(filePath, 'utf8');
-    const compiled = Handlebars.compile(source);
-    return compiled(context);
+  render(templateName: string, context: any): string {
+    const template = this.templates.get(templateName);
+    if (!template) {
+      throw new InternalServerErrorException(`Template "${templateName}" not found.`);
+    }
+    const body = template(context);
+    if (this.baseTemplate) {
+      return this.baseTemplate({ ...context, body });
+    }
+    return body;
   }
 }

@@ -80,6 +80,31 @@ export class CurrenciesController {
     return this.currenciesService.toggleActive(id);
   }
 
+  @Patch(':code/activate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Activate a currency', description: 'Admin only. Activates a currency by its code.' })
+  @ApiResponse({ status: 200, description: 'Currency activated' })
+  @ApiResponse({ status: 404, description: 'Currency not found' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  activate(@Param('code') code: string) {
+    return this.currenciesService.activate(code);
+  }
+
+  @Patch(':code/deactivate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Deactivate a currency', description: 'Admin only. Deactivates a currency. Returns 409 if pending payments exist for this currency.' })
+  @ApiResponse({ status: 200, description: 'Currency deactivated' })
+  @ApiResponse({ status: 404, description: 'Currency not found' })
+  @ApiResponse({ status: 409, description: 'Conflict — pending payments exist' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  deactivate(@Param('code') code: string) {
+    return this.currenciesService.deactivate(code);
+  }
+
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)

@@ -4249,6 +4249,100 @@ fn test_batch_transfer_tickets_require_auth_once_for_sender() {
     assert_eq!(*addr, buyer_a);
 }
 
+#[test]
+fn test_transfer_ticket_blocked_during_blackout_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.set_transfer_blackout(&organizer, &event_id, &0u64, &100u64);
+
+    let ticket_id = client.purchase_ticket(&owner, &event_id, &100i128);
+    assert!(client.is_transfer_blackout_active(&event_id));
+
+    let result = client.try_transfer_ticket(&ticket_id, &owner, &recipient);
+    assert_eq!(result, Err(Ok(LumentixError::TransferBlackoutActive)));
+}
+
+#[test]
+fn test_bypass_transfer_lock_allows_override_during_blackout() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.set_transfer_blackout(&organizer, &event_id, &0u64, &100u64);
+
+    let ticket_id = client.purchase_ticket(&owner, &event_id, &100i128);
+    client.bypass_transfer_lock(&organizer, &ticket_id, &owner, &recipient);
+
+    let ticket = client.get_ticket_info(&ticket_id);
+    assert_eq!(ticket.owner, recipient);
+}
+
+#[test]
+fn test_referral_flow_tracks_discount_and_reward_credit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let referrer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let link_code = String::from_str(&env, "summer-share");
+    let generated = client.generate_referral_link(&referrer, &event_id, &link_code);
+    assert_eq!(generated, link_code);
+
+    let (discounted_price, reward_amount) =
+        client.process_referred_purchase(&buyer, &event_id, &generated);
+    assert_eq!(discounted_price, 95i128);
+    assert_eq!(reward_amount, 5i128);
+
+    let credited = client.credit_referral_rewards(&referrer, &event_id);
+    assert_eq!(credited, 5i128);
+}
+
+#[test]
+fn test_referral_purchase_rejects_self_referral_and_duplicate_buyer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let referrer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let link_code = client.generate_referral_link(
+        &referrer,
+        &event_id,
+        &String::from_str(&env, "friend-pass"),
+    );
+
+    let self_referral = client.try_process_referred_purchase(&referrer, &event_id, &link_code);
+    assert_eq!(self_referral, Err(Ok(LumentixError::SelfReferralNotAllowed)));
+
+    let first = client.try_process_referred_purchase(&buyer, &event_id, &link_code);
+    assert!(first.is_ok());
+
+    let duplicate = client.try_process_referred_purchase(&buyer, &event_id, &link_code);
+    assert_eq!(
+        duplicate,
+        Err(Ok(LumentixError::ReferralPurchaseAlreadyProcessed))
+    );
+}
+
 // ============================================================================
 // TOKEN CONFIGURATION TESTS
 // ============================================================================
@@ -5916,156 +6010,6 @@ fn test_already_used_ids_in_batch_gracefully_reject_tx() {
 }
 
 // ============================================================================
-// EXTEND EVENT END TIME TESTS
-// ============================================================================
-
-#[test]
-fn test_extend_event_end_time_success() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Extend end time from 2000 to 3000
-    let result = client.try_extend_event_end_time(&organizer, &event_id, &3000u64);
-    assert!(result.is_ok());
-
-    let event = client.get_event(&event_id);
-    assert_eq!(event.end_time, 3000u64);
-}
-
-#[test]
-fn test_extend_event_end_time_unauthorized_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-    let attacker = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    let result = client.try_extend_event_end_time(&attacker, &event_id, &3000u64);
-    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
-
-    // End time must remain unchanged
-    let event = client.get_event(&event_id);
-    assert_eq!(event.end_time, 2000u64);
-}
-
-#[test]
-fn test_extend_event_end_time_draft_event_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-
-    // Create but do NOT publish — stays Draft
-    let event_id = client.create_event(
-        &organizer,
-        &String::from_str(&env, "Draft Event"),
-        &String::from_str(&env, "Desc"),
-        &String::from_str(&env, "Loc"),
-        &1000u64,
-        &2000u64,
-        &100i128,
-        &50u32,
-    );
-
-    let result = client.try_extend_event_end_time(&organizer, &event_id, &3000u64);
-    assert_eq!(result, Err(Ok(LumentixError::InvalidStatusTransition)));
-}
-
-#[test]
-fn test_extend_event_end_time_new_time_not_after_current_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Same end time — must fail
-    let same = client.try_extend_event_end_time(&organizer, &event_id, &2000u64);
-    assert_eq!(same, Err(Ok(LumentixError::InvalidTimeRange)));
-
-    // Earlier end time — must also fail
-    let earlier = client.try_extend_event_end_time(&organizer, &event_id, &1500u64);
-    assert_eq!(earlier, Err(Ok(LumentixError::InvalidTimeRange)));
-}
-
-#[test]
-fn test_extend_event_end_time_allows_completion_at_new_time() {
-    // After extending end_time, the event must NOT be completable before the new
-    // end_time but MUST be completable after it.
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-
-    // Extend end time to 4000
-    client.extend_event_end_time(&organizer, &event_id, &4000u64);
-
-    // Timestamp just past original end (2001) — should still fail
-    env.ledger().with_mut(|li| li.timestamp = 2001);
-    let too_early = client.try_complete_event(&organizer, &event_id);
-    assert_eq!(too_early, Err(Ok(LumentixError::InvalidStatusTransition)));
-
-    // Timestamp past new end (4001) — should succeed
-    env.ledger().with_mut(|li| li.timestamp = 4001);
-    let result = client.try_complete_event(&organizer, &event_id);
-    assert!(result.is_ok());
-
-    let event = client.get_event(&event_id);
-    assert_eq!(event.status, EventStatus::Completed);
-}
-
-#[test]
-fn test_extend_event_end_time_emits_event() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (_admin, client) = create_test_contract(&env);
-    let organizer = Address::generate(&env);
-
-    let event_id = create_and_publish_event(&env, &client, &organizer);
-    client.extend_event_end_time(&organizer, &event_id, &5000u64);
-
-    // Verify EventTimeExtended was emitted with topic "evtextnd"
-    let events = env.events().all();
-    let mut found = false;
-    for xdr_event in events.events() {
-        if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
-            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
-                if topic_sym.as_slice() == b"evtextnd" {
-                    found = true;
-                    // Verify data: (event_id, previous_end_time, new_end_time)
-                    if let xdr::ScVal::Vec(Some(data_vec)) = &body.data {
-                        assert_eq!(
-                            data_vec.len(),
-                            3,
-                            "EventTimeExtended must carry (event_id, previous_end_time, new_end_time)"
-                        );
-                    } else {
-                        panic!("Expected Vec data for EventTimeExtended");
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    assert!(found, "EventTimeExtended event not emitted");
-}
-
-// ============================================================================
 // AUTH CONSTRAINTS TESTS
 // ============================================================================
 
@@ -6224,7 +6168,6 @@ fn test_extend_event_end_time_emits_event() {
     let mut found = false;
     for xdr_event in events.events() {
         if let xdr::ContractEventBody::V0(body) = &xdr_event.body {
-            if let xdr::ScVal::Symbol(topic_sym) = &body.topics[0] {
             if let Some(xdr::ScVal::Symbol(topic_sym)) = body.topics.first() {
                 if topic_sym.as_slice() == b"timeext" {
                     found = true;

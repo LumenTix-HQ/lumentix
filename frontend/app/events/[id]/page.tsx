@@ -1,14 +1,12 @@
 import { notFound } from 'next/navigation';
-import EventDetailClient from '@/components/events/EventDetailClient';
-import PaymentFlow from '@/components/PaymentFlow';
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import { Event } from "@/types/event";
 import EventDetailClient from "@/components/events/EventDetailClient";
+import PaymentFlow from "@/components/PaymentFlow";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-async function getEvent(id: string) {
+async function getEvent(id: string): Promise<Event | null> {
   try {
     const res = await fetch(`${API_BASE}/events/${id}`, { cache: 'no-store' });
     if (!res.ok) return null;
@@ -18,27 +16,16 @@ async function getEvent(id: string) {
   }
 }
 
-export default async function EventDetailPage({ params }: { params: { id: string } }) {
-  const event = await getEvent(params.id);
-// ---------------------------------------------------------------------------
-// Dynamic Open Graph / Twitter meta tags — issue #502
-// ---------------------------------------------------------------------------
-
 export async function generateMetadata({
   params,
 }: {
   params: { id: string };
 }): Promise<Metadata> {
-  // In production this would fetch from the API; for now we use mock data.
-  const event = MOCK_EVENTS[params.id];
+  const event = await getEvent(params.id);
 
   if (!event) {
-    return {
-      title: "Event not found | Lumentix",
-    };
+    return { title: "Event not found | Lumentix" };
   }
-
-  const imageUrl = event.imageUrl || "/og-default.png";
 
   return {
     title: `${event.title} | Lumentix`,
@@ -46,7 +33,6 @@ export async function generateMetadata({
     openGraph: {
       title: event.title,
       description: event.description,
-      images: [{ url: imageUrl, width: 1200, height: 630, alt: event.title }],
       type: "website",
       url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/events/${event.id}`,
     },
@@ -54,13 +40,12 @@ export async function generateMetadata({
       card: "summary_large_image",
       title: event.title,
       description: event.description,
-      images: [imageUrl],
     },
   };
 }
 
-export default function EventDetailPage({ params }: { params: { id: string } }) {
-  const event = MOCK_EVENTS[params.id];
+export default async function EventDetailPage({ params }: { params: { id: string } }) {
+  const event = await getEvent(params.id);
   if (!event) notFound();
 
   return (
@@ -74,9 +59,9 @@ export default function EventDetailPage({ params }: { params: { id: string } }) 
               ? 'Free'
               : `${event.ticketPrice} ${event.currency}`}
           </div>
-          {event.maxAttendees && (
+          {(event as any).maxAttendees && (
             <p className="text-sm text-gray-500">
-              {event.registrationCount ?? '?'} / {event.maxAttendees} spots taken
+              {(event as any).registrationCount ?? '?'} / {(event as any).maxAttendees} spots taken
             </p>
           )}
           <PaymentFlow

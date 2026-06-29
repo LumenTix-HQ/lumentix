@@ -478,4 +478,103 @@ describe('StellarService', () => {
       expect(mockCursor).not.toHaveBeenCalled();
     });
   });
+
+  // ── Platform balance ───────────────────────────────────────────────────
+
+  describe('Platform Balance', () => {
+    const PLATFORM_PUBLIC = Keypair.random().publicKey();
+
+    function buildServiceWithPlatformKey(): StellarService {
+      const configService = {
+        get: jest.fn((key: string) => {
+          if (key === 'stellar.platformPublicKey') return PLATFORM_PUBLIC;
+          if (key === 'stellar.horizonUrl')
+            return 'https://horizon-testnet.stellar.org';
+          if (key === 'stellar.networkPassphrase')
+            return 'Test SDF Network ; September 2015';
+          return undefined;
+        }),
+      } as unknown as ConfigService;
+
+      return new StellarService(configService);
+    }
+
+    function makePlatformMockAccount(
+      balance: string,
+      subentry_count: number,
+    ): Horizon.AccountResponse {
+      return {
+        ...makeMockAccount(makeBalances()),
+        subentry_count,
+        balances: [
+          { asset_type: 'native', balance } as Horizon.HorizonApi.BalanceLine,
+        ],
+      } as unknown as Horizon.AccountResponse;
+    }
+
+    describe('getPlatformBalanceInfo', () => {
+      it('calculates available, reserved, and minimum balances correctly', async () => {
+        // (2 subentries + 2) * 0.5 XLM reserve + 1 XLM buffer = 3 XLM minimum
+        // 2 subentries * 0.5 XLM reserve = 2 XLM reserved
+        mockLoadAccount.mockResolvedValue(
+          makePlatformMockAccount('100.0000000', 2),
+        );
+        service = buildServiceWithPlatformKey();
+
+        const result = await service.getPlatformBalanceInfo();
+
+        expect(result.available).toBe('100.0000000');
+        expect(result.reserved).toBe('2.0000000');
+        expect(result.minimumRequired).toBe('3.0000000');
+      });
+
+      it('handles zero subentries', async () => {
+        // (0 subentries + 2) * 0.5 XLM reserve + 1 XLM buffer = 2 XLM minimum
+        mockLoadAccount.mockResolvedValue(
+          makePlatformMockAccount('50.0000000', 0),
+        );
+        service = buildServiceWithPlatformKey();
+
+        const result = await service.getPlatformBalanceInfo();
+
+        expect(result.available).toBe('50.0000000');
+        expect(result.reserved).toBe('1.0000000');
+        expect(result.minimumRequired).toBe('2.0000000');
+      });
+    });
+
+    describe('checkPlatformBalance', () => {
+      it('does not throw when balance is sufficient', async () => {
+        // Have 10 XLM, need 3 XLM. Should be fine.
+        mockLoadAccount.mockResolvedValue(
+          makePlatformMockAccount('10.0000000', 2),
+        );
+        service = buildServiceWithPlatformKey();
+
+        await expect(service.checkPlatformBalance()).resolves.not.toThrow();
+      });
+
+      it('does not throw when balance is exactly the minimum required', async () => {
+        // Have 3 XLM, need 3 XLM. Should be fine.
+        mockLoadAccount.mockResolvedValue(
+          makePlatformMockAccount('3.0000000', 2),
+        );
+        service = buildServiceWithPlatformKey();
+
+        await expect(service.checkPlatformBalance()).resolves.not.toThrow();
+      });
+
+      it('throws InsufficientBalanceException when balance is too low', async () => {
+        // Have 2.99 XLM, need 3 XLM. Should throw.
+        mockLoadAccount.mockResolvedValue(
+          makePlatformMockAccount('2.9999999', 2),
+        );
+        service = buildServiceWithPlatformKey();
+
+        await expect(service.checkPlatformBalance()).rejects.toThrow(
+          'Platform XLM balance 2.9999999 is below the required minimum of 3.0000000',
+        );
+      });
+    });
+  });
 });

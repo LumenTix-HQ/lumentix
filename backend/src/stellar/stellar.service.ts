@@ -19,6 +19,7 @@ import {
   Asset,
   Memo,
 } from '@stellar/stellar-sdk';
+import * as crypto from 'crypto';
 
 export type PaymentCallback = (
   payment: Horizon.ServerApi.PaymentOperationRecord,
@@ -82,6 +83,13 @@ export class StellarService implements OnModuleDestroy {
   ): Promise<Horizon.ServerApi.TransactionRecord> {
     this.logger.debug(`getTransaction: ${hash}`);
     return this.server.transactions().transaction(hash).call();
+  }
+
+  async getTransactionOperations(
+    hash: string,
+  ): Promise<Horizon.ServerApi.OperationRecord[]> {
+    const ops = await this.server.operations().forTransaction(hash).call();
+    return ops.records;
   }
 
   extractAndValidateMemo(
@@ -284,6 +292,9 @@ export class StellarService implements OnModuleDestroy {
     }
   }
 
+  generateNonce(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
   /**
    * Create and fund a new Stellar keypair via Friendbot (testnet only).
    */
@@ -378,6 +389,49 @@ export class StellarService implements OnModuleDestroy {
       .build();
 
     return tx.toXDR();
+  }
+
+  async buildTicketTransferXdr(params: {
+    sourcePublicKey: string;
+    destPublicKey: string;
+    assetCode: string;
+    assetIssuer: string;
+  }): Promise<string> {
+    const sourceAccount = await this.server.loadAccount(params.sourcePublicKey);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: params.destPublicKey,
+          asset: new Asset(params.assetCode, params.assetIssuer),
+          amount: '0.0000001', // NFTs are non-divisible
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    return tx.toXDR();
+  }
+
+  verifySignature(
+    publicKey: string,
+    signature: string,
+    message: string,
+  ): boolean {
+    try {
+      const keypair = Keypair.fromPublicKey(publicKey);
+      const messageBuffer = Buffer.from(message, 'utf8');
+      const signatureBuffer = Buffer.from(signature, 'base64');
+      return keypair.verify(messageBuffer, signatureBuffer);
+    } catch (err) {
+      this.logger.warn(
+        `Signature verification failed: ${(err as Error).message}`,
+      );
+      return false;
+    }
   }
 
   /**

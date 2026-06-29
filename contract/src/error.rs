@@ -249,11 +249,11 @@ pub enum LumentixError {
     PricingScheduleNotFound = 101,
     /// Batch mint quantity exceeds optimized limits
     BatchMintLimitExceeded = 102,
-    // Dynamic Venue Space Allocation errors (100–103)
+    // Dynamic Venue Space Allocation errors (114–116)
     /// Venue space allocation not found
-    VenueSpaceAllocationNotFound = 100,
+    VenueSpaceAllocationNotFound = 114,
     /// Conflict detected during venue space allocation
-    VenueSpaceAllocationConflict = 101,
+    VenueSpaceAllocationConflict = 115,
 
     // Subscription-Based Access Passes errors (104–107)
     /// Subscription plan not found
@@ -264,4 +264,42 @@ pub enum LumentixError {
     // Security Monitoring errors (108–110)
     /// Security incident not found
     SecurityIncidentNotFound = 108,
+    /// Ticket transfers are currently locked by an organizer-defined blackout window
+    TransferBlackoutActive = 109,
+    /// Referral link code is already claimed by another referrer
+    ReferralLinkAlreadyExists = 110,
+    /// Referral link does not exist for the requested event
+    ReferralLinkNotFound = 111,
+    /// Referral purchase has already been processed for this buyer
+    ReferralPurchaseAlreadyProcessed = 112,
+    /// Referrers cannot refer themselves
+    SelfReferralNotAllowed = 113,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DID Ticket Linking errors (26–28)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// A DID credential is already linked to this ticket
+    TicketDidAlreadyLinked = 26,
+    /// No DID link exists for this ticket
+    TicketDidLinkNotFound = 27,
+    /// DID credential verification failed during ticket scanning
+    DidCredentialVerificationFailed = 28,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Resale Price Ceiling errors (33–34)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Proposed resale price exceeds the configured ceiling
+    ResalePriceExceedsCeiling = 33,
+    /// No price ceiling configured for this event
+    PriceCeilingNotFound = 34,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Attendance Memorabilia errors (42, 99, 103)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Memorabilia NFT has already been claimed for this ticket
+    MemorabiliaAlreadyClaimed = 42,
+    /// Event check-in proof is invalid or ticket was never used
+    CheckinProofInvalid = 99,
+    /// Memorabilia claim not found
+    MemorabiliaClaimNotFound = 103,
 }

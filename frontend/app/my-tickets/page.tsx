@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAccessToken } from "@/lib/auth/auth";
+import { getAccessToken, setTokens } from "@/lib/auth/auth";
 import TicketCard, { Ticket } from "@/components/TicketCard";
 
-type Tab = "upcoming" | "past" | "cancelled";
+type Tab = "upcoming" | "past" | "cancelled" | "refundable";
 
 interface Registration {
   id: string;
@@ -15,6 +15,9 @@ interface Registration {
   };
   status: "confirmed" | "cancelled" | "pending";
   qrUrl?: string;
+  refundEligibleUntil?: string;
+  refundAmount?: number;
+  currency?: string;
 }
 
 function toTicket(reg: Registration): Ticket {
@@ -27,19 +30,24 @@ function toTicket(reg: Registration): Ticket {
   };
 }
 
-function groupTickets(tickets: Ticket[]): Record<Tab, Ticket[]> {
+function groupTickets(tickets: Ticket[], registrations: Registration[]): Record<Tab, Ticket[]> {
   const now = new Date();
+
+  const refundableIds = new Set(
+    registrations
+      .filter((r) => r.refundEligibleUntil && new Date(r.refundEligibleUntil) > now && r.status === "confirmed")
+      .map((r) => r.id)
+  );
 
   return {
     upcoming: tickets.filter(
-      (t) =>
-        t.status !== "cancelled" && new Date(t.eventDate) >= now,
+      (t) => t.status !== "cancelled" && new Date(t.eventDate) >= now && !refundableIds.has(t.id)
     ),
     past: tickets.filter(
-      (t) =>
-        t.status !== "cancelled" && new Date(t.eventDate) < now,
+      (t) => t.status !== "cancelled" && new Date(t.eventDate) < now
     ),
     cancelled: tickets.filter((t) => t.status === "cancelled"),
+    refundable: tickets.filter((t) => refundableIds.has(t.id)),
   };
 }
 
@@ -47,14 +55,18 @@ const TAB_LABELS: Record<Tab, string> = {
   upcoming: "Upcoming",
   past: "Past",
   cancelled: "Cancelled",
+  refundable: "Request Refund",
 };
 
 export default function MyTicketsPage() {
   const router = useRouter();
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("upcoming");
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [refundSuccess, setRefundSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     const token = getAccessToken();
@@ -73,6 +85,7 @@ export default function MyTicketsPage() {
         return res.json();
       })
       .then((data: Registration[]) => {
+        setRegistrations(data);
         setTickets(data.map(toTicket));
       })
       .catch(() => {
@@ -83,7 +96,32 @@ export default function MyTicketsPage() {
       });
   }, [router]);
 
-  const grouped = groupTickets(tickets);
+  const handleRefund = async (registrationId: string) => {
+    const token = getAccessToken();
+    if (!token) return;
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+
+    setRefundingId(registrationId);
+    try {
+      const res = await fetch(`${apiUrl}/registrations/${registrationId}/refund`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Refund request failed");
+      setRefundSuccess("Refund request submitted successfully.");
+      setRegistrations((prev) =>
+        prev.map((r) => (r.id === registrationId ? { ...r, status: "cancelled" as const, refundEligibleUntil: undefined } : r))
+      );
+      setTickets((prev) => prev.map((t) => (t.id === registrationId ? { ...t, status: "cancelled" as const } : t)));
+    } catch {
+      setError("Failed to process refund. Please try again.");
+    } finally {
+      setRefundingId(null);
+    }
+  };
+
+  const grouped = groupTickets(tickets, registrations);
   const tabTickets = grouped[activeTab];
 
   return (
@@ -91,8 +129,14 @@ export default function MyTicketsPage() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6">
         <h1 className="text-3xl font-bold mb-8">My Tickets</h1>
 
-        <div className="flex gap-1 mb-8 bg-gray-800 rounded-xl p-1 w-fit">
-          {(["upcoming", "past", "cancelled"] as Tab[]).map((tab) => (
+        {refundSuccess && (
+          <div className="mb-4 p-3 rounded-xl bg-green-500/15 border border-green-500/30 text-sm text-green-300">
+            {refundSuccess}
+          </div>
+        )}
+
+        <div className="flex gap-1 mb-8 bg-gray-800 rounded-xl p-1 w-fit flex-wrap">
+          {(["upcoming", "past", "cancelled", "refundable"] as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -104,11 +148,7 @@ export default function MyTicketsPage() {
             >
               {TAB_LABELS[tab]}
               {grouped[tab].length > 0 && (
-                <span
-                  className={`ml-1.5 text-xs ${
-                    activeTab === tab ? "text-blue-200" : "text-gray-500"
-                  }`}
-                >
+                <span className={`ml-1.5 text-xs ${activeTab === tab ? "text-blue-200" : "text-gray-500"}`}>
                   ({grouped[tab].length})
                 </span>
               )}
@@ -119,10 +159,7 @@ export default function MyTicketsPage() {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div
-                key={i}
-                className="bg-gray-800 rounded-xl p-5 border border-gray-700 h-36 animate-pulse"
-              />
+              <div key={i} className="bg-gray-800 rounded-xl p-5 border border-gray-700 h-36 animate-pulse" />
             ))}
           </div>
         ) : error ? (
@@ -135,12 +172,10 @@ export default function MyTicketsPage() {
               {activeTab === "upcoming" && "No upcoming tickets yet."}
               {activeTab === "past" && "No past events found."}
               {activeTab === "cancelled" && "No cancelled tickets."}
+              {activeTab === "refundable" && "No tickets eligible for refund."}
             </p>
             {activeTab === "upcoming" && (
-              <a
-                href="/events"
-                className="mt-4 inline-block text-blue-400 hover:text-blue-300 transition underline"
-              >
+              <a href="/events" className="mt-4 inline-block text-blue-400 hover:text-blue-300 transition underline">
                 Browse events
               </a>
             )}
@@ -148,7 +183,18 @@ export default function MyTicketsPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {tabTickets.map((ticket) => (
-              <TicketCard key={ticket.id} ticket={ticket} />
+              <div key={ticket.id} className="relative">
+                <TicketCard ticket={ticket} />
+                {activeTab === "refundable" && (
+                  <button
+                    onClick={() => handleRefund(ticket.id)}
+                    disabled={refundingId === ticket.id}
+                    className="mt-2 w-full py-2 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    {refundingId === ticket.id ? "Processing..." : "Request Refund"}
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}

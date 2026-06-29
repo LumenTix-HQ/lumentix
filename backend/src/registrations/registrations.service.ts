@@ -56,46 +56,46 @@ export class RegistrationsService {
       );
     }
 
-    const existing = await this.repo.findOne({
-      where: [
-        { eventId, userId, status: RegistrationStatus.PENDING },
-        { eventId, userId, status: RegistrationStatus.CONFIRMED },
-        { eventId, userId, status: RegistrationStatus.WAITLISTED },
-      ],
-    });
-    if (existing) {
-      throw new ConflictException('You are already registered for this event');
-    }
+    try {
+      if (event.maxAttendees !== null && event.maxAttendees !== undefined) {
+        const confirmed = await this.repo.count({
+          where: [
+            { eventId, status: RegistrationStatus.CONFIRMED },
+            { eventId, status: RegistrationStatus.PENDING },
+          ],
+        });
 
-    if (event.maxAttendees !== null && event.maxAttendees !== undefined) {
-      const confirmed = await this.repo.count({
-        where: [
-          { eventId, status: RegistrationStatus.CONFIRMED },
-          { eventId, status: RegistrationStatus.PENDING },
-        ],
-      });
-
-      if (confirmed >= event.maxAttendees) {
-        const reg = await this.repo.save(
-          this.repo.create({
-            eventId,
-            userId,
-            status: RegistrationStatus.WAITLISTED,
-          }),
-        );
-        const position = await this.getWaitlistPosition(eventId, reg.id);
-        return {
-          registration: reg,
-          httpStatus: HttpStatus.ACCEPTED,
-          waitlistPosition: position,
-        };
+        if (confirmed >= event.maxAttendees) {
+          const reg = await this.repo.save(
+            this.repo.create({
+              eventId,
+              userId,
+              status: RegistrationStatus.WAITLISTED,
+            }),
+          );
+          const position = await this.getWaitlistPosition(eventId, reg.id);
+          return {
+            registration: reg,
+            httpStatus: HttpStatus.ACCEPTED,
+            waitlistPosition: position,
+          };
+        }
       }
-    }
 
-    const reg = await this.repo.save(
-      this.repo.create({ eventId, userId, status: RegistrationStatus.PENDING }),
-    );
-    return { registration: reg, httpStatus: HttpStatus.CREATED };
+      const reg = await this.repo.save(
+        this.repo.create({ eventId, userId, status: RegistrationStatus.PENDING }),
+      );
+      return { registration: reg, httpStatus: HttpStatus.CREATED };
+    } catch (err) {
+      if (err instanceof Error) {
+        // https://www.postgresql.org/docs/current/errcodes-appendix.html
+        const pgUniqueViolationCode = '23505';
+        if ((err as any).code === pgUniqueViolationCode) {
+          throw new ConflictException('You are already registered for this event');
+        }
+      }
+      throw err;
+    }
   }
 
   // ── GET /events/:id/registrations (organizer) ──────────────────────────────
@@ -225,6 +225,36 @@ export class RegistrationsService {
     });
 
     return saved;
+  }
+
+  // ── CSV Export ────────────────────────────────────────────────────────────
+
+  async exportRegistrationsCsv(eventId: string, callerId: string): Promise<string> {
+    const event = await this.eventsService.getEventById(eventId);
+    if (event.organizerId !== callerId) throw new ForbiddenException();
+
+    const registrations = await this.repo.find({
+      where: { eventId },
+      order: { createdAt: 'ASC' },
+    });
+
+    const header = 'registrationId,email,displayName,stellarPublicKey,registeredAt,paymentStatus,ticketId\n';
+    const rows = await Promise.all(
+      registrations.map(async (r) => {
+        let email = '';
+        let displayName = '';
+        let stellarPublicKey = '';
+        try {
+          const user = await this.usersService.findById(r.userId);
+          email = (user as any).email ?? '';
+          displayName = (user as any).displayName ?? '';
+          stellarPublicKey = (user as any).stellarPublicKey ?? '';
+        } catch { /* skip */ }
+        return [r.id, email, displayName, stellarPublicKey, r.createdAt.toISOString(), r.status, r.ticketId ?? ''].join(',');
+      }),
+    );
+
+    return header + rows.join('\n');
   }
 
   // ── Link payment on confirmation ───────────────────────────────────────────

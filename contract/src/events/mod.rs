@@ -255,6 +255,82 @@ impl BatchTicketsTransferred {
     }
 }
 
+/// Event emitted when organizers update a transfer blackout window.
+pub struct TransferBlackoutUpdated;
+
+impl TransferBlackoutUpdated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        starts_at: u64,
+        ends_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("txblack"),),
+            (event_id, organizer, starts_at, ends_at),
+        );
+    }
+}
+
+/// Event emitted when an organizer or admin overrides a transfer lock.
+pub struct TransferLockBypassed;
+
+impl TransferLockBypassed {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        ticket_id: u64,
+        operator: Address,
+        from: Address,
+        to: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("txbypass"),),
+            (event_id, ticket_id, operator, from, to),
+        );
+    }
+}
+
+/// Event emitted when a referral link is generated for an event.
+pub struct ReferralLinkGenerated;
+
+impl ReferralLinkGenerated {
+    pub fn emit(env: &Env, event_id: u64, referrer: Address, link_code: String) {
+        env.events()
+            .publish((symbol_short!("reflink"),), (event_id, referrer, link_code));
+    }
+}
+
+/// Event emitted when a referred purchase is processed.
+pub struct ReferralPurchaseProcessed;
+
+impl ReferralPurchaseProcessed {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        referrer: Address,
+        buyer: Address,
+        discounted_price: i128,
+        reward_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("refproc"),),
+            (event_id, referrer, buyer, discounted_price, reward_amount),
+        );
+    }
+}
+
+/// Event emitted when pending referral rewards are credited to the referrer ledger state.
+pub struct ReferralRewardsCredited;
+
+impl ReferralRewardsCredited {
+    pub fn emit(env: &Env, event_id: u64, referrer: Address, amount: i128) {
+        env.events()
+            .publish((symbol_short!("refcredit"),), (event_id, referrer, amount));
+    }
+}
+
 /// Event emitted when a ticket is marked as used (checked in)
 pub struct TicketUsed;
 
@@ -1025,7 +1101,6 @@ impl MerchandiseCreated {
     ) {
         env.events().publish(
             (symbol_short!("merch_crt"),),
-            (soroban_sdk::Symbol::new(env, "merccreate"),),
             (
                 merchandise_id,
                 event_id,
@@ -1236,93 +1311,118 @@ impl UserJourneyOptimized {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// REFUND AUTOMATION PIPELINE EVENTS (Issue #674)
+// DID TICKET LINKING EVENTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Emitted when an event is safely cancelled with a reason recorded
-pub struct EventCancelledSafely;
-
-impl EventCancelledSafely {
-    pub fn emit(env: &Env, event_id: u64, organizer: Address, tickets_sold: u32, batch_id: u64) {
+pub struct TicketDidLinked;
+impl TicketDidLinked {
+    pub fn emit(
+        env: &Env,
+        ticket_id: u64,
+        credential_id: u64,
+        subject: Address,
+        linked_at: u64,
+    ) {
         env.events().publish(
-            (symbol_short!("evcncsf"),),
-            (event_id, organizer, tickets_sold, batch_id),
+            (symbol_short!("tckdidlk"),),
+            (ticket_id, credential_id, subject, linked_at),
         );
     }
 }
 
-/// Emitted when a bulk refund pipeline is initiated for a cancelled event
-pub struct BulkRefundsInitiated;
-
-impl BulkRefundsInitiated {
-    pub fn emit(env: &Env, batch_id: u64, event_id: u64, total_tickets: u32, initiator: Address) {
+pub struct TicketDidRevoked;
+impl TicketDidRevoked {
+    pub fn emit(env: &Env, ticket_id: u64, credential_id: u64, admin: Address) {
         env.events().publish(
-            (symbol_short!("blkrfnd"),),
-            (batch_id, event_id, total_tickets, initiator),
-        );
-    }
-}
-
-/// Emitted when a bulk refund batch makes progress (individual refund within batch)
-pub struct BulkRefundProgress;
-
-impl BulkRefundProgress {
-    pub fn emit(env: &Env, batch_id: u64, event_id: u64, ticket_id: u64, refunded_count: u32, total_tickets: u32) {
-        env.events().publish(
-            (symbol_short!("rfndprog"),),
-            (batch_id, event_id, ticket_id, refunded_count, total_tickets),
-        );
-    }
-}
-
-/// Emitted when a bulk refund batch is fully completed
-pub struct BulkRefundsCompleted;
-
-impl BulkRefundsCompleted {
-    pub fn emit(env: &Env, batch_id: u64, event_id: u64, refunded_count: u32, failed_count: u32) {
-        env.events().publish(
-            (symbol_short!("rfndcmpl"),),
-            (batch_id, event_id, refunded_count, failed_count),
+            (symbol_short!("tckdidrv"),),
+            (ticket_id, credential_id, admin),
         );
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CROSS-CHAIN TICKET BRIDGE LOCK EVENTS (Issue #675)
+// RESALE PRICE CEILING EVENTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Emitted when a ticket is locked on Stellar for bridging to another chain
-pub struct TicketBridgedToChain;
-
-impl TicketBridgedToChain {
-    pub fn emit(env: &Env, lock_id: u64, ticket_id: u64, event_id: u64, owner: Address, target_chain: String, expires_at: u64) {
+pub struct PriceCeilingSet;
+impl PriceCeilingSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        ceiling_multiplier_bps: u32,
+        absolute_ceiling: i128,
+        set_by: Address,
+    ) {
         env.events().publish(
-            (symbol_short!("tktbrdg"),),
-            (lock_id, ticket_id, event_id, owner, target_chain, expires_at),
+            (symbol_short!("prceil"),),
+            (event_id, ceiling_multiplier_bps, absolute_ceiling, set_by),
         );
     }
 }
 
-/// Emitted when a cross-chain lock is verified by a validator
-pub struct CrossChainLockVerified;
-
-impl CrossChainLockVerified {
-    pub fn emit(env: &Env, lock_id: u64, ticket_id: u64, bridge_proof: String, validator: Address) {
+pub struct ResalePriceVerified;
+impl ResalePriceVerified {
+    pub fn emit(env: &Env, event_id: u64, proposed_price: i128, compliant: bool) {
         env.events().publish(
-            (symbol_short!("cclkver"),),
-            (lock_id, ticket_id, bridge_proof, validator),
+            (symbol_short!("rslprvrf"),),
+            (event_id, proposed_price, compliant),
         );
     }
 }
 
-/// Emitted when a ticket is unlocked on the destination chain (lock released on Stellar)
-pub struct TicketUnlockedOnDestination;
-
-impl TicketUnlockedOnDestination {
-    pub fn emit(env: &Env, lock_id: u64, ticket_id: u64, new_owner: Address, target_chain: String) {
+pub struct ResaleComplianceEnforced;
+impl ResaleComplianceEnforced {
+    pub fn emit(env: &Env, event_id: u64, ticket_id: u64, adjusted_price: i128, enforced_by: Address) {
         env.events().publish(
-            (symbol_short!("tktunlk"),),
-            (lock_id, ticket_id, new_owner, target_chain),
+            (symbol_short!("rslcompl"),),
+            (event_id, ticket_id, adjusted_price, enforced_by),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ATTENDANCE MEMORABILIA EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct CheckinProofValidated;
+impl CheckinProofValidated {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, attendee: Address, valid: bool) {
+        env.events().publish(
+            (symbol_short!("chkprfva"),),
+            (ticket_id, event_id, attendee, valid),
+        );
+    }
+}
+
+pub struct AttendanceMemorabiliaMinted;
+impl AttendanceMemorabiliaMinted {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        attendee: Address,
+        minted_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("attmemnt"),),
+            (nft_id, ticket_id, event_id, attendee, minted_at),
+        );
+    }
+}
+
+pub struct MemorabiliaClaimed;
+impl MemorabiliaClaimed {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        attendee: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("memclm"),),
+            (nft_id, ticket_id, event_id, attendee),
         );
     }
 }

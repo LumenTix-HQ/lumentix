@@ -19,6 +19,7 @@ import { TicketSigningService } from './ticket-signing.service';
 import { TicketPdfService } from './ticket-pdf.service';
 import { IssueTicketResponseDto } from './dto/issue-ticket-response.dto';
 import { BulkIssueResultDto } from './dto/bulk-issue-result.dto';
+import { ConfirmTransferDto } from './dto/confirm-transfer.dto';
 import { TransferTicketDto } from './dto/transfer-ticket.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
@@ -114,7 +115,22 @@ export class TicketsService {
       .where('ticket.ownerId = :ownerId', { ownerId })
       .orderBy('ticket.createdAt', 'DESC');
 
-    return paginate(queryBuilder, paginationDto, 'ticket');
+    if (paginationDto?.status) {
+      queryBuilder.andWhere('ticket.status = :status', { status: paginationDto.status });
+    }
+
+    const result = await paginate(queryBuilder, paginationDto, 'ticket');
+
+    const now = new Date();
+    const enriched = result.data.map((ticket: any) => ({
+      ...ticket,
+      isExpired:
+        ticket.status === 'valid' &&
+        ticket.event?.endDate instanceof Date &&
+        ticket.event.endDate < now,
+    }));
+
+    return { ...result, data: enriched };
   }
 
   async issueTicket(paymentId: string): Promise<IssueTicketResponseDto> {
@@ -350,11 +366,11 @@ export class TicketsService {
    * Transfer a ticket to a new owner, recording the transfer on-chain (Stellar)
    * and writing an audit event. The DB update is rolled back if Stellar fails.
    */
-  async transfer(
+  async initiateTransfer(
     ticketId: string,
     requesterId: string,
     dto: TransferTicketDto,
-  ): Promise<TicketEntity> {
+  ): Promise<{ xdr: string }> {
     // ── Validate ─────────────────────────────────────────────────────────────
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
@@ -389,70 +405,111 @@ export class TicketsService {
       );
     }
 
-    // ── DB transaction ────────────────────────────────────────────────────────
-    const previousOwnerId = ticket.ownerId;
-    const previousPublicKey = ticket.ownerPublicKey;
+    const recipient = await this.userRepo.findOne({ where: { id: dto.recipientUserId } });
+    if (!recipient) throw new NotFoundException('Recipient user not found');
+    if (!recipient.stellarPublicKey) {
+      throw new BadRequestException('Recipient does not have a linked Stellar wallet.');
+    }
 
+    if (recipient.stellarPublicKey !== dto.recipientPublicKey) {
+      throw new BadRequestException('Recipient public key does not match the one on file.');
+    }
+
+    const xdr = await this.stellarService.buildTicketTransferXdr({
+      sourcePublicKey: ticket.ownerPublicKey as string,
+      destPublicKey: dto.recipientPublicKey,
+      assetCode: ticket.assetCode,
+      assetIssuer: event.escrowPublicKey as string,
+    });
+
+    return { xdr };
+  }
+
+  async confirmTransfer(
+    ticketId: string,
+    requesterId: string,
+    dto: ConfirmTransferDto,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.ownerId !== requesterId) {
+      throw new ForbiddenException('You do not own this ticket');
+    }
+
+    const tx = await this.stellarService.getTransaction(dto.transactionHash);
+
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Associated event not found');
+
+    const recipient = await this.userRepo.findOne({ where: { id: ticket.transferHistory[ticket.transferHistory.length - 1].to } });
+    if (!recipient) throw new NotFoundException('Recipient user not found');
+
+    // ── Validate On-Chain Transaction ────────────────────────────────────────
+    const ops = await this.stellarService.getTransactionOperations(dto.transactionHash);
+    if (ops.length !== 1) {
+      throw new BadRequestException('Transaction must have exactly one operation.');
+    }
+
+    const op = ops[0];
+    if (op.type !== 'payment') {
+      throw new BadRequestException('Transaction must be a payment operation.');
+    }
+
+    if (op.asset_code !== ticket.assetCode) {
+      throw new BadRequestException('Transaction asset code does not match ticket.');
+    }
+
+    if (op.asset_issuer !== event.escrowPublicKey) {
+      throw new BadRequestException('Transaction asset issuer does not match event escrow.');
+    }
+
+    if (op.to !== recipient.stellarPublicKey) {
+      throw new BadRequestException('Transaction destination does not match recipient.');
+    }
+
+    if (op.from !== ticket.ownerPublicKey) {
+      throw new BadRequestException('Transaction source does not match original owner.');
+    }
+
+    if (op.amount !== '0.0000001') {
+      throw new BadRequestException('Transaction amount is incorrect for a ticket transfer.');
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Basic validation, more can be added here (e.g. checking operations)
+    if (!tx) {
+      throw new BadRequestException('Transaction not found on-chain.');
+    }
+
+
+    const previousOwnerId = ticket.ownerId;
     const saved = await this.dataSource.transaction(async (em) => {
-      ticket.ownerId = dto.recipientUserId;
-      ticket.ownerPublicKey = dto.recipientPublicKey;
+      ticket.ownerId = recipient.id;
+      ticket.ownerPublicKey = recipient.stellarPublicKey;
       ticket.transferHistory = [
         ...(ticket.transferHistory ?? []),
         {
           from: previousOwnerId,
-          to: dto.recipientUserId,
+          to: recipient.id,
           timestamp: new Date().toISOString(),
         },
       ];
       return em.save(TicketEntity, ticket);
     });
 
-    // ── Stellar transfer (best-effort; roll back DB on failure) ───────────────
-    try {
-      await this.stellarService.transferTicketAsset(ticket, dto.recipientPublicKey);
-    } catch (stellarErr) {
-      this.logger.error(
-        `Stellar transfer failed for ticket ${ticketId}; rolling back DB`,
-        stellarErr,
-      );
-
-      // Roll back the DB change
-      try {
-        await this.dataSource.transaction(async (em) => {
-          saved.ownerId = previousOwnerId;
-          saved.ownerPublicKey = previousPublicKey;
-          saved.transferHistory = ticket.transferHistory.slice(0, -1);
-          await em.save(TicketEntity, saved);
-        });
-      } catch (rollbackErr) {
-        this.logger.error(
-          `Rollback failed for ticket ${ticketId} — manual intervention required`,
-          rollbackErr,
-        );
-      }
-
-      throw new InternalServerErrorException(
-        'Stellar transfer failed; DB changes have been reverted',
-      );
-    }
-
-    // ── Audit event ───────────────────────────────────────────────────────────
-    try {
-      await this.auditService.log({
-        action: 'TICKET_TRANSFERRED',
-        userId: requesterId,
-        resourceId: ticketId,
-        meta: {
-          from: previousOwnerId,
-          to: dto.recipientUserId,
-          recipientPublicKey: dto.recipientPublicKey,
-          eventId: ticket.eventId,
-        },
-      });
-    } catch (auditErr) {
-      // Audit failure is non-fatal; log and continue
-      this.logger.warn(`Audit log failed for TICKET_TRANSFERRED ${ticketId}`, auditErr);
-    }
+    await this.auditService.log({
+      action: 'TICKET_TRANSFERRED' as any,
+      userId: requesterId,
+      resourceId: ticketId,
+      meta: {
+        from: previousOwnerId,
+        to: recipient.id,
+        recipientPublicKey: recipient.stellarPublicKey,
+        eventId: ticket.eventId,
+        transactionHash: dto.transactionHash,
+      },
+    });
 
     return saved;
   }

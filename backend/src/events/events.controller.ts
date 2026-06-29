@@ -119,6 +119,38 @@ export class EventsController {
     return this.eventsService.updateEvent(id, dto, req.user.id);
   }
 
+  @Patch(':id/capacity')
+  @Roles(Role.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Update event capacity',
+    description: 'Organizer only. Updates the max attendee cap. Returns 409 if reduction would go below sold ticket count.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        maxAttendees: {
+          type: 'integer',
+          nullable: true,
+          description: 'New max attendee count. Pass null for unlimited.',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Capacity updated' })
+  @ApiResponse({ status: 403, description: 'Forbidden — not the organizer' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  @ApiResponse({ status: 409, description: 'Conflict — reduction below sold count' })
+  updateCapacity(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('maxAttendees') maxAttendees: number | null,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.updateCapacity(id, req.user.id, maxAttendees ?? null);
+  }
+
   // ── Image upload ────────────────────────────────────────────────────────
 
   @Post(':id/image')
@@ -258,14 +290,32 @@ export class EventsController {
       'Organizer-only. Cancels the event and automatically triggers refunds.',
   })
   @ApiParam({ name: 'id', description: 'Event UUID' })
-  @ApiResponse({ status: 201, description: 'Event cancelled' })
+  @ApiResponse({ status: 202, description: 'Event cancellation in progress' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
+  @ApiResponse({ status: 409, description: 'Event already cancelled' })
   cancel(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
   ) {
     return this.eventsService.cancelEvent(id, req.user.id);
+  }
+
+  @Get(':id/cancellation-status')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Get event cancellation status',
+    description: 'Organizer-only. Polls the status of a cancellation job.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Cancellation status' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  getCancellationStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.getCancellationStatus(id, req.user.id);
   }
 
   @Get(':id/stats')
