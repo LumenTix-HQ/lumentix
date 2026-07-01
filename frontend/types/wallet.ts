@@ -27,4 +27,5 @@ export interface WalletContextType extends WalletState {
   // legacy aliases kept for backward compat
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
+  networkMismatch: boolean;
 }

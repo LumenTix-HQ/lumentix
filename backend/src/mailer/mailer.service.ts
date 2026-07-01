@@ -56,31 +56,16 @@ export class MailerService {
    *    await mailerService.send(to, subject, '<p>Hello</p>');
    *    ```
    */
-  async send(
-    to: string,
-    subject: string,
-    htmlOrOptions: string | Omit<SendMailOptions, 'to' | 'subject'>,
-  ): Promise<void> {
-    let html: string;
-
-    if (typeof htmlOrOptions === 'string') {
-      // Legacy call-site: raw HTML string passed directly
-      html = htmlOrOptions;
-    } else {
-      const { template, context = {}, html: rawHtml } = htmlOrOptions;
-      if (template) {
-        html = await this.templateService.render(template, context);
-      } else if (rawHtml) {
-        html = rawHtml;
-      } else {
-        html = '';
-      }
-    }
+  async send(options: SendMailOptions): Promise<void> {
+    const html = this.templateService.render(options.template, {
+      ...options.context,
+      subject: options.subject,
+    });
 
     await this.transporter.sendMail({
       from: this.mailFrom,
-      to,
-      subject,
+      to: options.to,
+      subject: options.subject,
       html,
     });
   }

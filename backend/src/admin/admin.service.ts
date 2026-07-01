@@ -1,5 +1,7 @@
+import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -16,6 +18,8 @@ import { ListAdminUsersDto } from './dto/list-admin-users.dto';
 import { ListAdminEventsDto } from './dto/list-admin-events.dto';
 import { UpdateAdminUserDto } from './dto/update-admin-user.dto';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
+import { AuditService } from '../audit/audit.service';
+import { MailerService } from '../mailer/mailer.service';
 
 @Injectable()
 export class AdminService {
@@ -26,7 +30,15 @@ export class AdminService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(RoleRequest)
     private readonly roleRequestRepository: Repository<RoleRequest>,
+    private readonly auditService: AuditService,
+    private readonly mailerService: MailerService,
   ) {}
+
+  // ── Audit Logs ────────────────────────────────────────────────────────────
+
+  async listAuditLogs(dto: ListAuditLogsDto) {
+    return this.auditService.list(dto);
+  }
 
   // ── Events ────────────────────────────────────────────────────────────────
 
@@ -217,7 +229,9 @@ export class AdminService {
   async approveRoleRequest(id: string): Promise<RoleRequest> {
     const request = await this.findRoleRequestOrFail(id);
     if (request.status !== 'pending') {
-      throw new BadRequestException(`Request is already "${request.status}".`);
+      throw new ConflictException(
+        `Role request is already "${request.status}" and cannot be re-processed.`,
+      );
     }
 
     const user = await this.findUserOrFail(request.userId);
@@ -225,17 +239,55 @@ export class AdminService {
     await this.userRepository.save(user);
 
     request.status = 'approved';
-    return this.roleRequestRepository.save(request);
+    const saved = await this.roleRequestRepository.save(request);
+
+    await this.auditService.log({
+      action: 'ROLE_APPROVED',
+      userId: request.userId,
+      resourceId: request.id,
+      meta: { requestedRole: request.requestedRole },
+    });
+
+    this.mailerService
+      .send(
+        user.email,
+        'Your role request has been approved',
+        `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been approved.</p>`,
+      )
+      .catch(() => undefined);
+
+    return saved;
   }
 
-  async rejectRoleRequest(id: string): Promise<RoleRequest> {
+  async rejectRoleRequest(id: string, reason?: string): Promise<RoleRequest> {
     const request = await this.findRoleRequestOrFail(id);
     if (request.status !== 'pending') {
-      throw new BadRequestException(`Request is already "${request.status}".`);
+      throw new ConflictException(
+        `Role request is already "${request.status}" and cannot be re-processed.`,
+      );
     }
 
     request.status = 'rejected';
-    return this.roleRequestRepository.save(request);
+    if (reason) request.reason = reason;
+    const saved = await this.roleRequestRepository.save(request);
+
+    await this.auditService.log({
+      action: 'ROLE_REJECTED',
+      userId: request.userId,
+      resourceId: request.id,
+      meta: { requestedRole: request.requestedRole, reason },
+    });
+
+    const user = await this.findUserOrFail(request.userId);
+    this.mailerService
+      .send(
+        user.email,
+        'Your role request has been declined',
+        `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been declined.${reason ? ` Reason: ${reason}` : ''}</p>`,
+      )
+      .catch(() => undefined);
+
+    return saved;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

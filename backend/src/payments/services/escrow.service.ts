@@ -67,7 +67,10 @@ export class EscrowService {
     // 1. Generate keypair (no network call yet)
     const { publicKey, secret } = this.stellarService.generateEscrowKeypair();
 
-    // 2. Fund the new account on-chain via StellarService
+    // 2. Pre-flight check: ensure platform account has enough XLM to fund
+    await this.stellarService.checkPlatformBalance();
+
+    // 3. Fund the new account on-chain via StellarService
     try {
       await this.stellarService.fundEscrowAccount(this.funderSecret, publicKey);
     } catch (err) {
@@ -77,10 +80,10 @@ export class EscrowService {
       );
     }
 
-    // 3. Encrypt the secret before storing — private key never persisted in plain text
+    // 4. Encrypt the secret before storing — private key never persisted in plain text
     const escrowSecretEncrypted = this.encryptionService.encrypt(secret);
 
-    // 4. Persist to event
+    // 5. Persist to event
     await this.eventRepository
       .createQueryBuilder()
       .update(Event)

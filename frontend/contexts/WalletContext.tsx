@@ -3,13 +3,12 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { WalletContextType, WalletState, WalletType, NetworkType } from '@/types/wallet';
 import { connectFreighter, isFreighterAvailable } from '@/lib/stellar/freighter';
+import { getNetwork } from '@stellar/freighter-api';
 import {
   saveWalletData,
   getStoredWalletData,
   clearWalletData,
 } from '@/lib/stellar/wallet-utils';
-
-// ── context ───────────────────────────────────────────────────────────────────
 
 const INITIAL: WalletState = {
   isConnected: false,
@@ -21,7 +20,22 @@ const INITIAL: WalletState = {
   error: null,
 };
 
+const EXPECTED: NetworkType =
+  (process.env.NEXT_PUBLIC_STELLAR_NETWORK as NetworkType) ?? NetworkType.TESTNET;
+
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
+
+async function checkNetworkMismatch(storedNetwork: NetworkType): Promise<boolean> {
+  try {
+    const result = await getNetwork();
+    const freighterNet = typeof result === 'string' ? result : (result as { network?: string }).network ?? '';
+    if (!freighterNet) return false;
+    const appNet = EXPECTED === NetworkType.MAINNET ? 'PUBLIC' : 'TESTNET';
+    return freighterNet.toUpperCase() !== appNet.toUpperCase();
+  } catch {
+    return false;
+  }
+}
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<WalletState>(INITIAL);
@@ -29,7 +43,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [networkMismatch, setNetworkMismatch] = useState(false);
 
   useEffect(() => {
-    const stored = loadWallet();
+    const stored = getStoredWalletData();
     if (!stored) return;
 
     setState(prev => ({ ...prev, isLoading: true }));
@@ -40,7 +54,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           const available = await isFreighterAvailable();
           if (!available) {
             clearWalletData();
-            setState(initialState);
+            setState({ ...INITIAL });
             return;
           }
 
@@ -55,45 +69,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
               isLoading: false,
               error: null,
             });
+
+            const mismatch = await checkNetworkMismatch(stored.network);
+            setNetworkMismatch(mismatch);
           } else {
             clearWalletData();
-            setState(initialState);
+            setState({ ...INITIAL });
           }
         }
-      } catch (error) {
-        clearWalletData();
-        setState(initialState);
-      }
-    };
-
-        // Network mismatch check (best-effort)
-        try {
-          const details = await (freighter as any).getNetworkDetails?.();
-          const freighterNetwork: string = details?.network ?? '';
-          if (
-            freighterNetwork &&
-            freighterNetwork.toUpperCase() !== stored.network.toUpperCase()
-          ) {
-            setNetworkMismatch(true);
-          }
-        } catch { /* non-fatal */ }
-
-        saveWallet({ walletType: stored.walletType, publicKey: address, network: stored.network });
-        setState(prev => ({
-          ...prev,
-          isConnected: true,
-          publicKey: address,
-          walletType: stored.walletType,
-          network: stored.network,
-          isLoading: false,
-          error: null,
-        }));
       } catch {
-        clearWallet();
+        clearWalletData();
         setState({ ...INITIAL });
       }
     })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const connect = useCallback(async (walletType: WalletType) => {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
@@ -115,17 +104,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         default:
           throw new Error(`Unsupported wallet type: ${walletType}`);
       }
+
       const next: WalletState = {
         ...state, isConnected: true, publicKey, walletType, isLoading: false, error: null,
       };
 
-      setState(newState);
+      setState(next);
 
       saveWalletData({
         walletType,
         publicKey,
         network: state.network,
       });
+
+      const mismatch = await checkNetworkMismatch(state.network);
+      setNetworkMismatch(mismatch);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to connect wallet';
 
@@ -140,8 +133,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, [state]);
 
   const disconnect = useCallback(() => {
-    clearWallet();
-    setState(INITIAL);
+    clearWalletData();
+    setNetworkMismatch(false);
+    setState({ ...INITIAL });
   }, []);
 
   const switchNetwork = useCallback(async (network: NetworkType) => {
@@ -174,6 +168,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         publicKey,
         network,
       });
+
+      setNetworkMismatch(false);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to switch network';
 
@@ -210,21 +206,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     getBalance,
     connectWallet: () => connect(WalletType.FREIGHTER),
     disconnectWallet: disconnect,
+    networkMismatch,
   };
 
   return (
     <WalletContext.Provider value={value}>
-      {networkMismatch && (
-        <div className="bg-orange-500/10 border-b border-orange-500/20 px-4 py-2 text-sm text-orange-400 flex items-center justify-between">
-          <span>⚠️ Network mismatch: Freighter is not on the expected network. Please switch networks in Freighter.</span>
-          <button
-            onClick={() => setNetworkMismatch(false)}
-            className="ml-4 text-orange-500/60 hover:text-orange-300 transition-colors"
-          >
-            ×
-          </button>
-        </div>
-      )}
       {showInstallPrompt && (
         <div className="fixed top-4 right-4 z-50 max-w-sm">
           <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 shadow-xl">

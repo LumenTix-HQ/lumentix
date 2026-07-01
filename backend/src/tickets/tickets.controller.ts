@@ -22,6 +22,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { BulkIssueTicketDto } from './dto/bulk-issue-ticket.dto';
 import { IssueTicketDto } from './dto/issue-ticket.dto';
+import { ConfirmTransferDto } from './dto/confirm-transfer.dto';
 import { TransferTicketDto } from './dto/transfer-ticket.dto';
 import { TicketEntity } from './entities/ticket.entity';
 import { TicketsService } from './tickets.service';
@@ -33,11 +34,27 @@ import { TicketsService } from './tickets.service';
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
+  @Get('me')
+  @ApiOperation({
+    summary: 'Get my tickets (paginated)',
+    description: 'Authenticated. Returns paginated tickets owned by the current user with optional status filter and isExpired flag.',
+  })
+  @ApiQuery({ name: 'status', required: false, enum: ['valid', 'used', 'refunded', 'expired'] })
+  @ApiResponse({ status: 200, description: 'List of tickets with isExpired flag' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getMyTicketsMe(
+    @Req() req: AuthenticatedRequest,
+    @Query() paginationDto: any,
+  ) {
+    return this.ticketsService.findByOwner(req.user.id, paginationDto);
+  }
+
   @Get('my')
   @ApiOperation({
     summary: 'Get my tickets',
     description: 'Authenticated. Returns tickets owned by the current user.',
   })
+  @ApiQuery({ name: 'status', required: false, enum: ['valid', 'used', 'refunded', 'expired'] })
   @ApiResponse({ status: 200, description: 'List of tickets' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   getMyTickets(
@@ -107,24 +124,38 @@ export class TicketsController {
 
   @Post(':id/transfer')
   @ApiOperation({
-    summary: 'Transfer a ticket to a new owner',
+    summary: 'Initiate a ticket transfer',
     description:
-      'Authenticated. Transfers a ticket to a new owner, recording the transfer ' +
-      'on the Stellar network and emitting a TICKET_TRANSFERRED audit event. ' +
-      'Fails if the event has already started or the ticket is not in a valid state.',
+      'Authenticated. Generates a transaction XDR for the client to sign and submit.',
   })
   @ApiParam({ name: 'id', description: 'Ticket UUID' })
-  @ApiResponse({ status: 201, description: 'Ticket transferred successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request — event started, ticket not valid, etc.' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden — caller does not own this ticket' })
-  @ApiResponse({ status: 404, description: 'Ticket or event not found' })
-  transfer(
+  @ApiResponse({ status: 201, description: 'Transaction XDR created' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  initiateTransfer(
     @Param('id') ticketId: string,
     @Body() dto: TransferTicketDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.ticketsService.transfer(ticketId, req.user.id, dto);
+    return this.ticketsService.initiateTransfer(ticketId, req.user.id, dto);
+  }
+
+  @Post(':id/transfer/confirm')
+  @ApiOperation({
+    summary: 'Confirm a ticket transfer',
+    description:
+      'Authenticated. Verifies the on-chain transaction and updates the ticket ownership.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 201, description: 'Ticket transferred successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  confirmTransfer(
+    @Param('id') ticketId: string,
+    @Body() dto: ConfirmTransferDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.confirmTransfer(ticketId, req.user.id, dto);
   }
 }
 

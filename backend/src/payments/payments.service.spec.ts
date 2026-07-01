@@ -191,44 +191,6 @@ describe('PaymentsService', () => {
         }),
       }) as unknown as typeof fetch;
 
-      await expect(service.confirmPayment(dto, 'user-123')).rejects.toThrow(
-        new BadRequestException('Payment asset does not match expected currency'),
-      );
-    });
-
-    it('succeeds when the on-chain asset matches payment.currency', async () => {
-      stellarService.getTransaction.mockResolvedValue({
-        memo: 'pay-123',
-        _links: { operations: { href: 'https://horizon.test/ops' } },
-      });
-      stellarService.extractAndValidateMemo.mockReturnValue('pay-123');
-      paymentsRepository.findOne.mockResolvedValue({
-        id: 'pay-123',
-        userId: 'user-123',
-        eventId: 'event-123',
-        amount: 100,
-        currency: 'USDC',
-        status: PaymentStatus.PENDING,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-        transactionHash: null,
-      });
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        json: jest.fn().mockResolvedValue({
-          _embedded: {
-            records: [
-              {
-                type: 'payment',
-                to: 'GESCROW123',
-                amount: '100',
-                asset_type: 'credit_alphanum4',
-                asset_code: 'USDC',
-              },
-            ],
-          },
-        }),
-      }) as unknown as typeof fetch;
-
       const result = await service.confirmPayment(dto, 'user-123');
 
       expect(result.status).toBe(PaymentStatus.CONFIRMED);

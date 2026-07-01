@@ -1,5 +1,8 @@
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -81,8 +84,7 @@ export class EventsService {
     private readonly currenciesService: CurrenciesService,
     @InjectRepository(EventSeries)
     private readonly eventSeriesRepository: Repository<EventSeries>,
-    @InjectRepository(EventHistory)
-    private readonly eventHistoryRepository: Repository<EventHistory>,
+    @InjectQueue('events') private readonly eventsQueue: Queue,
   ) {}
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
@@ -183,10 +185,13 @@ export class EventsService {
     return saved;
   }
 
-  async cancelEvent(id: string, callerId: string): Promise<Event> {
+  async cancelEvent(id: string, callerId: string): Promise<{ status: string; jobId: string | number; eventId: string }> {
     const event = await this.getEventById(id);
     if (event.organizerId !== callerId) {
       throw new ForbiddenException('You are not the organiser of this event.');
+    }
+    if (event.status === EventStatus.CANCELLED) {
+        throw new ConflictException('Event has already been cancelled.');
     }
     this.eventStateService.validateTransition(event.status, EventStatus.CANCELLED);
     event.status = EventStatus.CANCELLED;
@@ -198,11 +203,37 @@ export class EventsService {
       userId: callerId,
       resourceId: id,
     });
-    this.refundService
-      .refundEvent(id)
-      .catch((err) => this.logger.error(`Refund trigger failed for event ${id}`, err));
+
+    const job = await this.eventsQueue.add('cancel-event', { eventId: id });
+
     this.queueLifecycleEmail(saved).catch(() => undefined);
-    return saved;
+    return { status: 'cancellation_in_progress', jobId: job.id, eventId: id };
+  }
+
+  async getCancellationStatus(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    const job = await this.eventsQueue.getJob(id);
+
+    if (!job) {
+      return { status: 'not_found' };
+    }
+
+    const state = await job.getState();
+    const isFailed = await job.isFailed();
+    const isCompleted = await job.isCompleted();
+
+    return {
+        jobId: job.id,
+        status: state,
+        failed: isFailed,
+        completed: isCompleted,
+        progress: job.progress(),
+        failedReason: job.failedReason,
+    };
   }
 
   async deleteEvent(id: string, callerId: string): Promise<void> {
@@ -262,10 +293,14 @@ export class EventsService {
     if (organizerId)
       qb.andWhere('event.organizerId = :organizerId', { organizerId });
     if (search) {
-      qb.andWhere(
-        `to_tsvector('english', event.title || ' ' || COALESCE(event.description, '')) @@ plainto_tsquery('english', :search)`,
-        { search },
+      qb.andWhere('event.search_vector @@ plainto_tsquery(:search)', { search });
+      qb.addSelect(
+        "ts_rank(event.search_vector, plainto_tsquery(:search))",
+        'rank',
       );
+      qb.orderBy('rank', 'DESC');
+    } else {
+      qb.orderBy('event.createdAt', 'DESC');
     }
     if (category) qb.andWhere('event.category = :category', { category });
     if (filterDto.categoryIds) {
@@ -610,151 +645,26 @@ export class EventsService {
     await this.eventImageRepo.delete({ id: imageId, eventId });
   }
 
-  async archiveCompletedEvent(id: string, callerId: string): Promise<Event> {
+  async updateCapacity(
+    id: string,
+    callerId: string,
+    maxAttendees: number | null,
+  ): Promise<EventWithCapacity> {
     const event = await this.getEventById(id);
-    if (event.organizerId !== callerId) {
-      throw new ForbiddenException('You are not the organiser of this event.');
-    }
-    if (event.status !== EventStatus.COMPLETED) {
-      throw new BadRequestException('Only completed events can be archived.');
-    }
-    this.eventStateService.validateTransition(event.status, EventStatus.ARCHIVED);
-    event.status = EventStatus.ARCHIVED;
-    event.archivedAt = new Date();
-    const saved = await this.eventRepository.save(event);
-    await this.eventCacheService.invalidateCacheEntry(id);
+    if (event.organizerId !== callerId) throw new ForbiddenException();
 
-    await this.auditService.log({
-      action: AuditAction.EVENT_ARCHIVED,
-      userId: callerId,
-      resourceId: id,
-    });
-
-    await this.preserveEventHistory(id, callerId);
-    return saved;
-  }
-
-  async preserveEventHistory(id: string, callerId: string): Promise<EventHistory> {
-    const event = await this.getEventById(id);
-    if (event.organizerId !== callerId) {
-      throw new ForbiddenException('You are not the organiser of this event.');
+    if (maxAttendees !== null) {
+      if (maxAttendees < 0) {
+        throw new BadRequestException('maxAttendees must be a non-negative integer.');
+      }
+      if (maxAttendees < event.soldTickets) {
+        throw new ConflictException(
+          `Cannot reduce capacity to ${maxAttendees}: ${event.soldTickets} ticket(s) have already been sold.`,
+        );
+      }
     }
 
-    const [ticketStats, paymentStats, sponsorStats] = await Promise.all([
-      this.ticketRepository
-        .createQueryBuilder('t')
-        .select('t.status', 'status')
-        .addSelect('COUNT(*)', 'count')
-        .where('t.eventId = :id', { id })
-        .groupBy('t.status')
-        .getRawMany(),
-      this.paymentRepository
-        .createQueryBuilder('p')
-        .select('COALESCE(SUM(p.amount), 0)', 'totalRevenue')
-        .addSelect('COUNT(*)', 'refundCount')
-        .addSelect('p.status', 'status')
-        .addSelect('COUNT(*)', 'count')
-        .where('p.eventId = :id', { id })
-        .groupBy('p.status')
-        .getRawMany(),
-      this.contributionRepository
-        .createQueryBuilder('c')
-        .innerJoin('c.tier', 'tier')
-        .select('COALESCE(SUM(c.amount), 0)', 'totalSponsorship')
-        .addSelect('COUNT(*)', 'totalContributions')
-        .where('tier.eventId = :id AND c.status = :s', { id, s: ContributionStatus.CONFIRMED })
-        .getRawOne(),
-    ]);
-
-    const snapshot: Record<string, unknown> = {
-      id: event.id,
-      title: event.title,
-      description: event.description,
-      location: event.location,
-      startDate: event.startDate,
-      endDate: event.endDate,
-      ticketPrice: event.ticketPrice,
-      currency: event.currency,
-      organizerId: event.organizerId,
-      status: event.status,
-      maxAttendees: event.maxAttendees,
-      category: event.category,
-      ageRestriction: event.ageRestriction,
-      cancellationReason: event.cancellationReason,
-      cancellationDetails: event.cancellationDetails,
-      cancelledAt: event.cancelledAt,
-      archivedAt: event.archivedAt,
-      createdAt: event.createdAt,
-      updatedAt: event.updatedAt,
-    };
-
-    const ticketMap: Record<string, number> = {};
-    for (const row of ticketStats) ticketMap[row.status] = Number(row.count);
-    const ticketsSold = ticketMap['valid'] ?? 0;
-    const ticketsUsed = ticketMap['used'] ?? 0;
-
-    const confirmedRevenue = await this.paymentRepository
-      .createQueryBuilder('p')
-      .select('COALESCE(SUM(p.amount), 0)', 'totalRevenue')
-      .where('p.eventId = :id AND p.status = :s', { id, s: PaymentStatus.CONFIRMED })
-      .getRawOne();
-
-    const history = this.eventHistoryRepository.create({
-      eventId: id,
-      snapshot,
-      ticketSummary: { byStatus: ticketStats },
-      paymentSummary: { byStatus: paymentStats },
-      sponsorshipSummary: sponsorStats ?? null,
-      totalTicketsSold: ticketsSold,
-      totalTicketsUsed: ticketsUsed,
-      totalRevenue: Number(confirmedRevenue?.totalRevenue ?? 0),
-      totalSponsorship: Number(sponsorStats?.totalSponsorship ?? 0),
-    });
-
-    const saved = await this.eventHistoryRepository.save(history);
-
-    await this.auditService.log({
-      action: AuditAction.EVENT_ARCHIVED,
-      userId: callerId,
-      resourceId: id,
-      meta: { historyId: saved.id, action: 'history_preserved' },
-    });
-
-    return saved;
-  }
-
-  async enableHistoricalAnalysis(filterDto: HistoricalAnalysisDto): Promise<PaginatedResult<EventHistory>> {
-    const { organizerId, category, fromDate, toDate, search, page = 1, limit = 10 } = filterDto;
-    const qb = this.eventHistoryRepository
-      .createQueryBuilder('eh')
-      .leftJoinAndSelect(Event, 'event', 'event.id = eh.eventId');
-
-    if (organizerId) {
-      qb.andWhere('event.organizerId = :organizerId', { organizerId });
-    }
-    if (category) {
-      qb.andWhere('event.category = :category', { category });
-    }
-    if (fromDate) {
-      qb.andWhere('eh.archivedAt >= :fromDate', { fromDate: new Date(fromDate) });
-    }
-    if (toDate) {
-      qb.andWhere('eh.archivedAt <= :toDate', { toDate: new Date(toDate) });
-    }
-    if (search) {
-      qb.andWhere(
-        `to_tsvector('english', event.title || ' ' || COALESCE(event.description, '')) @@ plainto_tsquery('english', :search)`,
-        { search },
-      );
-    }
-
-    qb.orderBy('eh.archivedAt', 'DESC');
-
-    const skip = (page - 1) * limit;
-    qb.skip(skip).take(limit);
-
-    const [data, total] = await qb.getManyAndCount();
-
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    await this.eventRepository.update(id, { maxAttendees });
+    return this.getEventById(id);
   }
 }

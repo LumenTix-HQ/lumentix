@@ -74,7 +74,7 @@ export class RefundService {
    * Refund all confirmed payments for a cancelled event.
    * Returns a summary of each refund attempt.
    */
-  async refundEvent(eventId: string): Promise<RefundResultDto[]> {
+  async refundAllForEvent(eventId: string): Promise<RefundResultDto[]> {
     // 1. Verify event exists and is cancelled
     const event = await this.eventsRepository.findOne({
       where: { id: eventId },

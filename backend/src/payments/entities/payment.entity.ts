@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Unique,
 } from 'typeorm';
 
 export enum PaymentStatus {
@@ -15,13 +16,15 @@ export enum PaymentStatus {
 }
 
 @Index(['userId', 'status'])
-@Index(['eventId', 'status']) // NEW
+@Index(['eventId', 'status'])
+@Unique(['transactionHash'])
 @Entity('payments')
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Index() // NEW
+  @Index()
   @Column({ nullable: true })
   eventId: string | null;
 
@@ -31,7 +34,7 @@ export class Payment {
   @Column({ default: false })
   isSeasonPass: boolean;
 
-  @Index() // NEW
+  @Index()
   @Column()
   userId: string;
 
@@ -44,6 +47,7 @@ export class Payment {
   @Column({ nullable: true, type: 'varchar' })
   transactionHash: string | null;
 
+  @Index()
   @Column({
     type: 'enum',
     enum: PaymentStatus,
@@ -51,7 +55,6 @@ export class Payment {
   })
   status: PaymentStatus;
 
-  @Index()
   @Column({ type: 'timestamptz', nullable: true })
   expiresAt: Date | null;
 

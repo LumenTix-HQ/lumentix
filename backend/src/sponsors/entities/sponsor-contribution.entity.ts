@@ -22,6 +22,14 @@ export class SponsorContribution {
 
   @Index()
   @Column()
+  eventId: string;
+
+  @Index()
+  @Column()
+  userId: string;
+
+  @Index()
+  @Column()
   sponsorId: string;
 
   @Index()

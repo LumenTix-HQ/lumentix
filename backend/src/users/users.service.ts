@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   BadRequestException,
   ConflictException,
@@ -28,6 +27,7 @@ import {
   PortfolioResponseDto,
 } from './dto/portfolio-response.dto';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
+import { StellarService } from '../stellar/stellar.service';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -42,6 +42,7 @@ export class UsersService {
     private readonly roleRequestRepository: Repository<RoleRequest>,
     private readonly currenciesService: CurrenciesService,
     private readonly exchangeRatesService: ExchangeRatesService,
+    private readonly stellarService: StellarService,
   ) { }
 
   async createUser(
@@ -298,6 +299,30 @@ export class UsersService {
     return this.roleRequestRepository.save(request);
   }
 
+  async findOrCreateByGoogle(
+    googleId: string,
+    email: string,
+    displayName: string,
+  ): Promise<Omit<User, 'passwordHash'>> {
+    const existingByGoogleId = await this.findByGoogleId(googleId);
+    if (existingByGoogleId) {
+      return this.sanitize(existingByGoogleId);
+    }
+
+    const existingByEmail = await this.findByEmail(email);
+    if (existingByEmail) {
+      await this.updateGoogleId(existingByEmail.id, googleId);
+      return this.sanitize(existingByEmail);
+    }
+
+    const newUser = await this.createGoogleUser({
+      email,
+      googleId,
+      displayName,
+    });
+    return this.sanitize(newUser);
+  }
+
   async findByGoogleId(googleId: string) {
     return this.usersRepository.findOne({ where: { googleId } });
   }
@@ -326,6 +351,38 @@ export class UsersService {
     Object.assign(user, data);
     const saved = await this.usersRepository.save(user);
     return this.sanitize(saved);
+  }
+
+  async getWalletTransactions(
+    userId: string,
+    opts: { cursor?: string; limit?: number; order?: 'asc' | 'desc' },
+  ) {
+    const user = await this.usersRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User with id ${userId} not found`);
+
+    if (!user.stellarPublicKey) {
+      return { data: [], message: 'No wallet linked', nextCursor: null };
+    }
+
+    const limit = Math.min(opts.limit ?? 20, 200);
+    const { records } = await this.stellarService.getAccountTransactions(
+      user.stellarPublicKey,
+      opts.cursor,
+      limit,
+    );
+
+    const data = records.map((tx: any) => ({
+      id: tx.id,
+      hash: tx.hash,
+      ledger: tx.ledger_attr,
+      createdAt: tx.created_at,
+      fee: tx.fee_charged,
+      memo: tx.memo,
+    }));
+
+    const nextCursor = records.length === limit ? records[records.length - 1]?.paging_token ?? null : null;
+
+    return { data, nextCursor };
   }
 
   private sanitize(user: User): Omit<User, 'passwordHash'> {
