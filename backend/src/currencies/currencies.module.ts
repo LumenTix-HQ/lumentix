@@ -13,7 +13,7 @@ import { Payment } from '../payments/entities/payment.entity';
   controllers: [CurrenciesController],
 providers: [
   CurrenciesService,
-  CurrencyRateService
+  CurrencyRateService,
   FxProviderService,
 ],  exports: [CurrenciesService],
 })

@@ -255,11 +255,11 @@ pub enum LumentixError {
     /// Conflict detected during venue space allocation
     VenueSpaceAllocationConflict = 115,
 
-    // Subscription-Based Access Passes errors (104–107)
+    // Subscription-Based Access Passes errors (105–107)
     /// Subscription plan not found
-    SubscriptionPlanNotFound = 104,
+    SubscriptionPlanNotFound = 105,
     /// Subscription is not active
-    SubscriptionInactive = 105,
+    SubscriptionInactive = 106,
 
     // Security Monitoring errors (108–110)
     /// Security incident not found
