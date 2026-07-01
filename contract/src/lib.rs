@@ -274,13 +274,11 @@ pub use events::{
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
 pub use types::{
-    BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
-    CollectibleInventory, CrossChainTransfer, CrossChainTransferStatus, EnvironmentalImpact,
-    Event, EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,
-    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, NftCollectible,
-    OrganizerReputation,
-    RarityTier, ResalePriceCeiling, Ticket as LumentixTicket, TicketDidAssociation,
-    UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
-    UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
-    UserPreferences,
+    AttendeeProfile, BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
+    CollectibleInventory, Connection, ConnectionStatus, CrossChainTransfer,
+    CrossChainTransferStatus, EnvironmentalImpact, Event, EventMerchandise, EventReview,
+    EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
+    InsurancePool, MatchResult, NftCollectible, OrganizerReputation, PrivacyLevel,
+    RarityTier, Ticket as LumentixTicket, UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
+    UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 };

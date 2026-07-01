@@ -1,4 +1,5 @@
 use crate::error::LumentixError;
+use crate::error::LumentixError;
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer, CurrencyConfig,
@@ -58,6 +59,9 @@ const PLAN_ID_COUNTER: &str = "PLAN_CTR";
 const INCIDENT_PREFIX: &str = "INC_";
 const INCIDENT_COUNTER: &str = "INC_CTR";
 const USER_PREFS_PREFIX: &str = "UPREF_";
+const PROFILE_PREFIX: &str = "PROF_";
+const CONNECTION_PREFIX: &str = "CONN_";
+const CONNECTION_COUNTER: &str = "CONN_CTR";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
