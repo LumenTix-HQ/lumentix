@@ -35,6 +35,8 @@ describe('TicketsService', () => {
 
   const stellarServiceMock = {
     getTransaction: jest.fn(),
+    buildTicketTransferXdr: jest.fn(),
+    getTransactionOperations: jest.fn(),
   };
 
   const configServiceMock = {
@@ -253,6 +255,137 @@ describe('TicketsService', () => {
       await expect(service.verifyTicket(ticketId, signature)).rejects.toThrow(
         'Ticket has already been used',
       );
+    });
+  });
+
+  describe('initiateTransfer', () => {
+    it('should return an XDR for a valid transfer', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 't1',
+        ownerId: 'u1',
+        status: 'valid',
+        ownerPublicKey: 'GAUCTION_OWNER',
+        assetCode: 'TICKET',
+        eventId: 'e1',
+      });
+      jest.spyOn(service['eventRepo'], 'findOne').mockResolvedValue({
+        id: 'e1',
+        startDate: new Date('2099-01-01'),
+        escrowPublicKey: 'GESCROW',
+      });
+      jest.spyOn(service['userRepo'], 'findOne').mockResolvedValue({
+        id: 'u2',
+        stellarPublicKey: 'GRECIPIENT',
+      });
+      stellarServiceMock.buildTicketTransferXdr.mockResolvedValue('xdr_string');
+
+      const result = await service.initiateTransfer('t1', 'u1', {
+        recipientUserId: 'u2',
+        recipientPublicKey: 'GRECIPIENT',
+      });
+
+      expect(result).toEqual({ xdr: 'xdr_string' });
+    });
+  });
+
+  describe('confirmTransfer', () => {
+    const validTicket = {
+      id: 't1',
+      ownerId: 'u1',
+      ownerPublicKey: 'GOWNER',
+      status: 'valid',
+      assetCode: 'TICKET',
+      eventId: 'e1',
+      transferHistory: [{ to: 'u2' }],
+    };
+    const validEvent = { id: 'e1', escrowPublicKey: 'GESCROW' };
+    const validRecipient = { id: 'u2', stellarPublicKey: 'GRECIPIENT' };
+    const validOp = {
+      type: 'payment',
+      asset_code: 'TICKET',
+      asset_issuer: 'GESCROW',
+      to: 'GRECIPIENT',
+      from: 'GOWNER',
+      amount: '0.0000001',
+    };
+
+    beforeEach(() => {
+      repo.findOne.mockResolvedValue(validTicket);
+      jest.spyOn(service['eventRepo'], 'findOne').mockResolvedValue(validEvent);
+      jest.spyOn(service['userRepo'], 'findOne').mockResolvedValue(validRecipient);
+      stellarServiceMock.getTransaction.mockResolvedValue({ id: 'tx_hash' });
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([validOp]);
+      repo.save.mockImplementation((ticket) => Promise.resolve(ticket));
+    });
+
+    it('should transfer a ticket after a valid on-chain transaction', async () => {
+      const result = await service.confirmTransfer('t1', 'u1', {
+        transactionHash: 'tx_hash',
+      });
+
+      expect(result.ownerId).toBe('u2');
+      expect(result.ownerPublicKey).toBe('GRECIPIENT');
+    });
+
+    it('should reject a transaction with multiple operations', async () => {
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([validOp, validOp]);
+      await expect(
+        service.confirmTransfer('t1', 'u1', { transactionHash: 'tx_hash' }),
+      ).rejects.toThrow('Transaction must have exactly one operation.');
+    });
+
+    it('should reject a transaction that is not a payment', async () => {
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([
+        { ...validOp, type: 'createAccount' },
+      ]);
+      await expect(
+        service.confirmTransfer('t1', 'u1', { transactionHash: 'tx_hash' }),
+      ).rejects.toThrow('Transaction must be a payment operation.');
+    });
+
+    it('should reject a transaction with the wrong asset code', async () => {
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([
+        { ...validOp, asset_code: 'WRONG' },
+      ]);
+      await expect(
+        service.confirmTransfer('t1', 'u1', { transactionHash: 'tx_hash' }),
+      ).rejects.toThrow('Transaction asset code does not match ticket.');
+    });
+
+    it('should reject a transaction with the wrong asset issuer', async () => {
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([
+        { ...validOp, asset_issuer: 'WRONG' },
+      ]);
+      await expect(
+        service.confirmTransfer('t1', 'u1', { transactionHash: 'tx_hash' }),
+      ).rejects.toThrow('Transaction asset issuer does not match event escrow.');
+    });
+
+    it('should reject a transaction to the wrong recipient', async () => {
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([
+        { ...validOp, to: 'WRONG' },
+      ]);
+      await expect(
+        service.confirmTransfer('t1', 'u1', { transactionHash: 'tx_hash' }),
+      ).rejects.toThrow('Transaction destination does not match recipient.');
+    });
+
+    it('should reject a transaction from the wrong source', async () => {
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([
+        { ...validOp, from: 'WRONG' },
+      ]);
+      await expect(
+        service.confirmTransfer('t1', 'u1', { transactionHash: 'tx_hash' }),
+      ).rejects.toThrow('Transaction source does not match original owner.');
+    });
+
+    it('should reject a transaction with the wrong amount', async () => {
+      stellarServiceMock.getTransactionOperations.mockResolvedValue([
+        { ...validOp, amount: '1.0' },
+      ]);
+      await expect(
+        service.confirmTransfer('t1', 'u1', { transactionHash: 'tx_hash' }),
+      ).rejects.toThrow('Transaction amount is incorrect for a ticket transfer.');
     });
   });
 });

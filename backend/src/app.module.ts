@@ -39,6 +39,7 @@ import { SchedulingModule } from './scheduling/scheduling.module';
 import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 
 
 @Module({
@@ -79,7 +80,7 @@ import { StreamingModule } from './streaming/streaming.module';
         password: config.get<string>('DB_PASSWORD'),
         database: config.get<string>('DB_NAME'),
         autoLoadEntities: true,
-        synchronize: config.get<string>('NODE_ENV') !== 'production',
+        synchronize: false,
         logging: config.get<string>('NODE_ENV') === 'development',
       }),
     }),
@@ -120,6 +121,7 @@ import { StreamingModule } from './streaming/streaming.module';
     CategoriesModule,
     WebhooksModule,
     StreamingModule,
+    LoyaltyModule,
   ],
   controllers: [AppController],
   providers: [

@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
@@ -53,6 +53,7 @@ export class ContributionsService {
     private readonly configService: ConfigService,
     private readonly notificationService: NotificationService,
     private readonly eventsService: EventsService,
+    private readonly dataSource: DataSource,
   ) {
     this.escrowWallet =
       this.configService.get<string>('ESCROW_WALLET_PUBLIC_KEY') ?? '';
@@ -70,29 +71,59 @@ export class ContributionsService {
     tierId: string,
     sponsorId: string,
   ): Promise<ContributionIntent> {
-    const tier = await this.getTierById(tierId);
-
-    // SponsorTier has no currency field — contributions are always in XLM
     const resolvedCurrency: SupportedAsset = 'XLM';
 
-    // Enforce tier capacity
-    await this.assertCapacityAvailable(tier);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    // Persist pending contribution
-    const contribution = this.contributionRepository.create({
-      sponsorId,
-      tierId,
-      amount: tier.price,
-      transactionHash: null,
-      status: ContributionStatus.PENDING,
-    });
-    const saved = await this.contributionRepository.save(contribution);
+    let saved: SponsorContribution;
+    let tierPrice: number;
+
+    try {
+      // Lock the tier row to prevent concurrent over-contribution
+      const [tierRow] = await queryRunner.query(
+        `SELECT t.id, t.price, t."maxSponsors",
+                (SELECT COUNT(*) FROM sponsor_contributions c WHERE c."tierId" = t.id AND c.status = 'confirmed') AS confirmed_count
+         FROM sponsor_tiers t WHERE t.id = $1 FOR UPDATE`,
+        [tierId],
+      );
+
+      if (!tierRow) {
+        throw new NotFoundException(`Sponsor tier "${tierId}" not found.`);
+      }
+
+      const confirmedCount = parseInt(tierRow.confirmed_count, 10);
+      if (confirmedCount >= parseInt(tierRow.maxSponsors, 10)) {
+        throw new ConflictException(
+          `Sponsor tier is full (${tierRow.maxSponsors}/${tierRow.maxSponsors} spots taken).`,
+        );
+      }
+
+      tierPrice = parseFloat(tierRow.price);
+
+      const contribution = queryRunner.manager.create(SponsorContribution, {
+        sponsorId,
+        tierId,
+        amount: tierPrice,
+        transactionHash: null,
+        status: ContributionStatus.PENDING,
+      });
+      saved = await queryRunner.manager.save(SponsorContribution, contribution);
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
 
     await this.auditService.log({
       action: AuditAction.PAYMENT_INTENT_CREATED,
       userId: sponsorId,
       resourceId: saved.id,
-      meta: { tierId, amount: tier.price, currency: resolvedCurrency },
+      meta: { tierId, amount: tierPrice!, currency: resolvedCurrency },
     });
 
     this.logger.log(
@@ -102,7 +133,7 @@ export class ContributionsService {
     return {
       contributionId: saved.id,
       escrowWallet: this.escrowWallet,
-      amount: tier.price,
+      amount: tierPrice!,
       currency: resolvedCurrency,
       memo: saved.id,
     };

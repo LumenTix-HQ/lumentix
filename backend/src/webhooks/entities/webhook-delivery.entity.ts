@@ -6,31 +6,28 @@ import {
   Index,
 } from 'typeorm';
 
-@Index(['eventId'])
-@Index(['paymentId'])
 @Entity('webhook_deliveries')
 export class WebhookDelivery {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'uuid' })
+  @Index()
+  @Column()
   eventId: string;
 
-  @Column({ type: 'uuid' })
+  @Index()
+  @Column()
   paymentId: string;
 
-  @Column({ type: 'varchar' })
-  url: string;
-
-  @Column({ type: 'int', nullable: true, default: null })
-  statusCode: number | null;
-
-  @Column({ type: 'text', nullable: true, default: null })
-  responseBody: string | null;
-
-  @Column({ type: 'int', default: 0 })
+  @Column()
   attempt: number;
 
+  @Column({ nullable: true })
+  statusCode: number | null;
+
+  @Column({ type: 'text', nullable: true })
+  responseBody: string | null;
+
   @CreateDateColumn()
-  createdAt: Date;
+  sentAt: Date;
 }

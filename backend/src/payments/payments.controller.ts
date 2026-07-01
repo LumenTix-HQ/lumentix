@@ -3,15 +3,20 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -86,21 +91,30 @@ export class PaymentsController {
   }
 
   @Get(':id/status')
-  @SkipThrottle()
-  @ApiOperation({ summary: 'Get payment status' })
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Get payment status with ticket data' })
+  @ApiResponse({ status: 200, description: 'Payment status with optional ticket data' })
+  @ApiResponse({ status: 304, description: 'Not modified (ETag matched)' })
   async getStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+    @Headers('if-none-match') ifNoneMatch?: string,
   ) {
     const payment = await this.paymentsService.getPaymentById(id);
     if (payment.userId !== req.user.id) {
       throw new ForbiddenException('You do not have access to this payment');
     }
-    return {
-      id: payment.id,
-      status: payment.status,
-      expiresAt: payment.expiresAt,
-    };
+
+    const etag = `"${payment.updatedAt.getTime()}"`;
+    res.setHeader('ETag', etag);
+
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      res.status(HttpStatus.NOT_MODIFIED).send();
+      return;
+    }
+
+    return this.paymentsService.getPaymentStatus(id);
   }
 
   @Post('intent')

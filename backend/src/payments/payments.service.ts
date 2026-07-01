@@ -22,7 +22,6 @@ import { StellarService } from '../stellar/stellar.service';
 import { User } from '../users/entities/user.entity';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { EscrowService } from './services/escrow.service';
-import { Payment, PaymentStatus } from './entities/payment.entity';
 import { WebhooksService } from '../webhooks/webhooks.service';
 
 @Injectable()
@@ -54,6 +53,39 @@ export class PaymentsService {
     return payment;
   }
 
+  async getPaymentStatus(paymentId: string) {
+    const payment = await this.getPaymentById(paymentId);
+
+    let ticket: {
+      id: string;
+      status: string;
+      pdfUrl: string | null;
+      qrCodeDataUrl: string | null;
+    } | null = null;
+
+    if (payment.status === PaymentStatus.CONFIRMED && payment.eventId) {
+      const ticketRecord = await this.ticketRepository.findOne({
+        where: { eventId: payment.eventId, ownerId: payment.userId },
+      });
+      if (ticketRecord) {
+        ticket = {
+          id: ticketRecord.id,
+          status: ticketRecord.status,
+          pdfUrl: ticketRecord.pdfUrl,
+          qrCodeDataUrl: null,
+        };
+      }
+    }
+
+    return {
+      paymentId: payment.id,
+      status: payment.status,
+      transactionHash: payment.transactionHash,
+      confirmedAt: payment.status === PaymentStatus.CONFIRMED ? payment.updatedAt : null,
+      ticket,
+    };
+  }
+
   async getHistory(userId: string, dto: PaginationDto) {
     const qb = this.paymentsRepository
       .createQueryBuilder('payment')
@@ -77,8 +109,8 @@ export class PaymentsService {
     eventId: string,
     userId: string,
     currency?: string,
-    _usePathPayment?: boolean,
-    _sourceAsset?: string,
+    usePathPayment?: boolean,
+    sourceAsset?: string,
   ) {
     const event = await this.eventsService.getEventById(eventId);
 
@@ -181,6 +213,41 @@ export class PaymentsService {
       },
     });
 
+    // Include path payment info for non-XLM currencies
+    let pathPayment: {
+      sendAsset: string;
+      sendAmount: string;
+      path: string[];
+    } | null = null;
+
+    if (
+      (usePathPayment || selectedCurrency !== 'XLM') &&
+      sourceAsset &&
+      sourceAsset !== selectedCurrency
+    ) {
+      try {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        const userPublicKey = (user as any)?.stellarPublicKey;
+        if (userPublicKey) {
+          const pathResult = await this.stellarService.findPaymentPath(
+            userPublicKey,
+            sourceAsset,
+            selectedCurrency,
+            String(finalPrice),
+          );
+          if (pathResult) {
+            pathPayment = {
+              sendAsset: sourceAsset,
+              sendAmount: (pathResult as any).source_amount ?? String(finalPrice),
+              path: (pathResult as any).path ?? [],
+            };
+          }
+        }
+      } catch {
+        // Path payment info is optional; proceed without it
+      }
+    }
+
     return {
       paymentId: saved.id,
       memo: saved.id,
@@ -188,6 +255,7 @@ export class PaymentsService {
       currency: saved.currency,
       escrowWallet: event.escrowPublicKey,
       expiresAt: saved.expiresAt,
+      ...(pathPayment && { pathPayment }),
     };
   }
 
@@ -278,11 +346,9 @@ export class PaymentsService {
   }
 
   async confirmPayment(
-    input: ConfirmPaymentDto | string,
+    { transactionHash }: ConfirmPaymentDto,
     userId: string,
   ): Promise<Payment> {
-    const transactionHash =
-      typeof input === 'string' ? input : input.transactionHash;
 
     let txRecord: any;
     try {
@@ -290,6 +356,16 @@ export class PaymentsService {
     } catch {
       throw new BadRequestException(
         `Transaction "${transactionHash}" not found on the Stellar network.`,
+      );
+    }
+
+    // Reject duplicate transaction hash submissions (replay attack prevention)
+    const existingByHash = await this.paymentsRepository.findOne({
+      where: { transactionHash },
+    });
+    if (existingByHash) {
+      throw new ConflictException(
+        'This transaction has already been used to confirm a payment.',
       );
     }
 
@@ -465,17 +541,8 @@ export class PaymentsService {
           currency: payment.currency,
           reason,
         });
+        this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
       }
-      const event = await this.eventsService.getEventById(payment.eventId);
-      await this.notificationService.queuePaymentFailedEmail({
-        userId: payment.userId,
-        email: '',
-        eventTitle: event.title,
-        amount: Number(payment.amount),
-        currency: payment.currency,
-        reason,
-      });
-      this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
     } catch (error) {
       console.error(
         `Failed to queue payment failure email for ${payment.id}:`,

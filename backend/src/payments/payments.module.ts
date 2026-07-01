@@ -19,23 +19,20 @@ import { MultisigModule } from './multisig/multisig.module';
 import { EscrowModule } from './escrow.module';
 import { RefundModule } from './refunds/refund.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { PaymentAnalyticsController } from './controllers/payment-analytics.controller';
+import { PaymentAnalyticsService } from './services/payment-analytics.service';
+import { OrganizerGuard } from './guards/organizer.guard';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([Payment, EventSeries, Event, TicketEntity, User]),
-    TypeOrmModule.forFeature([Payment]),
-
-
-    TypeOrmModule.forFeature([Payment, User]),
-    ScheduleModule,
+    ScheduleModule.forRoot(),
     CurrenciesModule,
-    EventsModule,
-    StellarModule,            // Issue #129 – path payments
-    AuditModule,              // Issue #127 – audit logging on expiry
-    NotificationModule,       // Issue #127 – email on expiry
-    MultisigModule,           // Multi-signature payout support
+    forwardRef(() => EventsModule),
     StellarModule,
     AuditModule,
     NotificationModule,
+    MultisigModule,
     EscrowModule,
     forwardRef(() => RefundModule),
     WebhooksModule,
@@ -44,6 +41,8 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
   providers: [
     PaymentsService,
     PaymentExpiryJob,
+    PaymentAnalyticsService,
+    OrganizerGuard,
   ],
   exports: [PaymentsService],
 })

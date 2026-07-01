@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { RevenueChart } from '@/components/RevenueChart';
 import { EscrowBalanceCard } from '@/components/EscrowBalanceCard';
+import { useEventAnalytics } from '@/hooks/useEventAnalytics';
 
 interface OrganizerEvent {
   id: string;
@@ -34,6 +36,28 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function CancelConfirmModal({ open, onClose, onConfirm, eventTitle }: { open: boolean; onClose: () => void; onConfirm: () => void; eventTitle: string }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-white mb-2">Cancel Event</h3>
+        <p className="text-sm text-gray-400 mb-6">
+          Are you sure you want to cancel <strong className="text-white">{eventTitle}</strong>? This action cannot be undone and will refund all paid tickets.
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-800 text-sm font-medium transition-colors">
+            Keep Event
+          </button>
+          <button onClick={onConfirm} className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors">
+            Yes, Cancel Event
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function OrganizerDashboardPage() {
   const router = useRouter();
   const [events, setEvents] = useState<OrganizerEvent[]>([]);
@@ -41,8 +65,20 @@ export default function OrganizerDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+  const {
+    totalRevenue,
+    confirmedCount,
+    refundedCount,
+    revenueHistory,
+    escrowExpected,
+    escrowActual,
+    isLoading: analyticsLoading,
+    error: analyticsError,
+  } = useEventAnalytics(selectedEvent?.id ?? null);
 
   const fetchEvents = useCallback(async (token: string) => {
     setLoading(true);
@@ -100,6 +136,8 @@ export default function OrganizerDashboardPage() {
       setSelectedEvent((prev) => (prev ? { ...prev, status: 'cancelled' } : prev));
     } catch (err: any) {
       setActionMessage(`Error: ${err.message}`);
+    } finally {
+      setShowCancelModal(false);
     }
   };
 
@@ -136,6 +174,13 @@ export default function OrganizerDashboardPage() {
         <h1 className="text-xl font-bold text-white">Organizer Dashboard</h1>
         <p className="text-sm text-gray-400 mt-0.5">Manage your events and revenue</p>
       </header>
+
+      <CancelConfirmModal
+        open={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        onConfirm={handleCancelEvent}
+        eventTitle={selectedEvent?.title ?? ''}
+      />
 
       {actionMessage && (
         <div className="mx-6 mt-4 rounded-lg bg-indigo-900/40 border border-indigo-700 px-4 py-3 text-sm text-indigo-200 flex justify-between items-center">
@@ -174,7 +219,15 @@ export default function OrganizerDashboardPage() {
             )}
 
             {!loading && !error && events.length === 0 && (
-              <p className="text-sm text-gray-500">No events found.</p>
+              <div className="text-center py-8">
+                <p className="text-sm text-gray-500 mb-4">No events found. Create your first event to get started.</p>
+                <a
+                  href="/create"
+                  className="inline-block rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2 text-sm font-medium text-white transition-colors"
+                >
+                  Create Event
+                </a>
+              </div>
             )}
 
             {!loading && !error && events.length > 0 && (
@@ -256,12 +309,24 @@ export default function OrganizerDashboardPage() {
                 <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
                   <p className="text-xs text-gray-400 mb-1">Total Revenue</p>
                   <p className="text-2xl font-bold text-white">
-                    {selectedEvent.revenue.toLocaleString()}
+                    {analyticsLoading ? '…' : totalRevenue.toLocaleString()}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">XLM</p>
                 </div>
 
-                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4 col-span-2 sm:col-span-1">
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+                  <p className="text-xs text-gray-400 mb-1">Confirmed</p>
+                  <p className="text-2xl font-bold text-green-400">
+                    {analyticsLoading ? '…' : confirmedCount.toLocaleString()}
+                  </p>
+                  {refundedCount > 0 && (
+                    <p className="text-xs text-red-400 mt-1">
+                      {refundedCount} refunded
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
                   <p className="text-xs text-gray-400 mb-1">Remaining Capacity</p>
                   <p className="text-2xl font-bold text-white">
                     {(selectedEvent.totalTickets - selectedEvent.ticketsSold).toLocaleString()}
@@ -272,21 +337,18 @@ export default function OrganizerDashboardPage() {
 
               {/* Revenue chart */}
               <RevenueChart
-                data={
-                  selectedEvent.revenueHistory ?? [
-                    { label: 'Week 1', value: Math.round(selectedEvent.revenue * 0.2) },
-                    { label: 'Week 2', value: Math.round(selectedEvent.revenue * 0.3) },
-                    { label: 'Week 3', value: Math.round(selectedEvent.revenue * 0.25) },
-                    { label: 'Week 4', value: Math.round(selectedEvent.revenue * 0.25) },
-                  ]
-                }
+                data={revenueHistory.length > 0 ? revenueHistory : (
+                  analyticsLoading
+                    ? []
+                    : generateFallbackHistory(totalRevenue)
+                )}
                 currency="XLM"
               />
 
               {/* Escrow balance */}
               <EscrowBalanceCard
-                expected={selectedEvent.escrowExpected ?? selectedEvent.revenue}
-                actual={selectedEvent.escrowActual ?? selectedEvent.revenue}
+                expected={escrowExpected}
+                actual={escrowActual}
                 currency="XLM"
               />
 
@@ -296,19 +358,26 @@ export default function OrganizerDashboardPage() {
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
-                    onClick={handleCancelEvent}
+                    onClick={() => setShowCancelModal(true)}
                     disabled={selectedEvent.status === 'cancelled'}
                     className="rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white transition-colors"
                   >
                     Cancel Event
                   </button>
 
-                  <a
+                  <Link
                     href={`/organizer/events/${selectedEvent.id}/attendees`}
                     className="rounded-lg border border-gray-600 hover:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
                   >
                     View Attendees
-                  </a>
+                  </Link>
+
+                  <Link
+                    href={`/organizer/events/${selectedEvent.id}/edit`}
+                    className="rounded-lg border border-gray-600 hover:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+                  >
+                    Edit Event
+                  </Link>
 
                   <button
                     type="button"
@@ -325,4 +394,14 @@ export default function OrganizerDashboardPage() {
       </div>
     </main>
   );
+}
+
+function generateFallbackHistory(total: number): { label: string; value: number }[] {
+  if (total <= 0) return [];
+  const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+  const weights = [0.15, 0.25, 0.30, 0.30];
+  return weeks.map((label, i) => ({
+    label,
+    value: Math.round(total * weights[i]),
+  }));
 }

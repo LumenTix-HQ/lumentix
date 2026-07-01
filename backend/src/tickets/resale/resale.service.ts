@@ -20,8 +20,11 @@ import {
 } from './resale-transaction.entity';
 import { ListTicketForResaleDto } from './dto/list-ticket-resale.dto';
 import { BuyResaleTicketDto } from './dto/buy-resale-ticket.dto';
+import { SetPriceCeilingDto } from './dto/set-price-ceiling.dto';
+import { VerifyResalePriceDto } from './dto/verify-resale-price.dto';
+import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto';
 
-const MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
+const DEFAULT_DEFAULT_MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
 const ORGANIZER_FEE_BPS = 500; // 5% = 500 basis points
 
 @Injectable()
@@ -57,11 +60,11 @@ export class ResaleService {
     if (!event) throw new NotFoundException('Event not found');
 
     const originalPrice = Number(event.ticketPrice);
-    const maxAllowed = originalPrice * MAX_RESALE_MULTIPLIER;
+    const maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
 
     if (dto.price > maxAllowed) {
       throw new BadRequestException(
-        `Resale price cannot exceed ${MAX_RESALE_MULTIPLIER * 100}% of the original ticket price. ` +
+        `Resale price cannot exceed ${DEFAULT_MAX_RESALE_MULTIPLIER * 100}% of the original ticket price. ` +
         `Original price: ${originalPrice} ${event.currency}, max allowed: ${maxAllowed.toFixed(2)} ${dto.currency}.`,
       );
     }
@@ -108,7 +111,7 @@ export class ResaleService {
     const salePrice = Number(ticket.listingPrice);
     const originalPrice = Number(event.ticketPrice);
 
-    const maxAllowed = originalPrice * MAX_RESALE_MULTIPLIER;
+    const maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
     if (salePrice > maxAllowed) {
       throw new BadRequestException(
         'This listing exceeds the maximum allowed resale price and has been invalidated.',
@@ -251,6 +254,156 @@ export class ResaleService {
     return {
       totalEarnings: Number(result?.totalEarnings ?? 0),
       transactions: Number(result?.transactions ?? 0),
+    };
+  }
+
+  // ── Price Ceiling Management ──────────────────────────────────────────────
+
+  /** Per-event price ceiling overrides: eventId -> ceilingMultiplierBps */
+  private readonly priceCeilings: Map<string, { ceilingMultiplierBps: number; absoluteCeiling: number }> = new Map();
+
+  /**
+   * Set a custom price ceiling for an event.
+   * Only the event organizer can set this.
+   * `ceilingMultiplierBps` is the max multiplier in basis points (e.g., 15000 = 150%).
+   * `absoluteCeiling` is a hard cap (0 = disabled).
+   */
+  async setPriceCeiling(
+    organizerId: string,
+    dto: SetPriceCeilingDto,
+  ): Promise<{
+    eventId: string;
+    ceilingMultiplierBps: number;
+    absoluteCeiling: number;
+    effectiveMaxMultiple: number;
+  }> {
+    const event = await this.eventRepo.findOne({ where: { id: dto.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.organizerId !== organizerId) throw new ForbiddenException('Not the event organizer');
+
+    const multiplier = dto.ceilingMultiplierBps;
+    if (multiplier < 100 || multiplier > 100000) {
+      throw new BadRequestException('ceilingMultiplierBps must be between 100 (1%) and 100000 (1000%)');
+    }
+
+    this.priceCeilings.set(dto.eventId, {
+      ceilingMultiplierBps: multiplier,
+      absoluteCeiling: dto.absoluteCeiling,
+    });
+
+    const effectiveMaxMultiple = multiplier / 10000;
+
+    this.logger.log(
+      `Price ceiling set for event ${dto.eventId}: ${effectiveMaxMultiple}x ` +
+        `(${multiplier} bps), absolute cap: ${dto.absoluteCeiling}`,
+    );
+
+    await this.auditService.log({
+      action: AuditAction.RESALE_LISTED,
+      userId: organizerId,
+      resourceId: dto.eventId,
+      meta: {
+        ceilingMultiplierBps: multiplier,
+        absoluteCeiling: dto.absoluteCeiling,
+        effectiveMaxMultiple,
+      },
+    });
+
+    return {
+      eventId: dto.eventId,
+      ceilingMultiplierBps: multiplier,
+      absoluteCeiling: dto.absoluteCeiling,
+      effectiveMaxMultiple,
+    };
+  }
+
+  /**
+   * Verify whether a proposed resale price is compliant with the price ceiling.
+   * Returns true if the price is within bounds.
+   */
+  async verifyResalePrice(
+    dto: VerifyResalePriceDto,
+  ): Promise<{ compliant: boolean; proposedPrice: number; maxAllowedPrice: number; reason: string }> {
+    const event = await this.eventRepo.findOne({ where: { id: dto.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const originalPrice = Number(event.ticketPrice);
+    const ceiling = this.priceCeilings.get(dto.eventId);
+
+    let maxAllowed: number;
+
+    if (ceiling) {
+      const multiplierMax = originalPrice * (ceiling.ceilingMultiplierBps / 10000);
+      maxAllowed = ceiling.absoluteCeiling > 0
+        ? Math.min(multiplierMax, ceiling.absoluteCeiling)
+        : multiplierMax;
+    } else {
+      maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
+    }
+
+    const compliant = dto.proposedPrice <= maxAllowed;
+
+    return {
+      compliant,
+      proposedPrice: dto.proposedPrice,
+      maxAllowedPrice: Math.round(maxAllowed * 100) / 100,
+      reason: compliant
+        ? 'Price is within the allowed ceiling'
+        : `Price exceeds maximum allowed (${Math.round(maxAllowed * 100) / 100})`,
+    };
+  }
+
+  /**
+   * Enforce resale price compliance by capping a proposed price to the ceiling.
+   * Returns the adjusted (enforced) price.
+   */
+  async enforceResaleCompliance(
+    enforcerId: string,
+    dto: EnforceResaleComplianceDto,
+  ): Promise<{
+    originalPrice: number;
+    enforcedPrice: number;
+    wasAdjusted: boolean;
+    maxAllowedPrice: number;
+  }> {
+    const event = await this.eventRepo.findOne({ where: { id: dto.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const originalPrice = Number(event.ticketPrice);
+    const ceiling = this.priceCeilings.get(dto.eventId);
+
+    let maxAllowed: number;
+
+    if (ceiling) {
+      const multiplierMax = originalPrice * (ceiling.ceilingMultiplierBps / 10000);
+      maxAllowed = ceiling.absoluteCeiling > 0
+        ? Math.min(multiplierMax, ceiling.absoluteCeiling)
+        : multiplierMax;
+    } else {
+      maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
+    }
+
+    const wasAdjusted = dto.proposedPrice > maxAllowed;
+    const enforcedPrice = wasAdjusted ? maxAllowed : dto.proposedPrice;
+
+    if (wasAdjusted) {
+      await this.auditService.log({
+        action: AuditAction.RESALE_LISTED,
+        userId: enforcerId,
+        resourceId: dto.eventId,
+        meta: {
+          originalProposed: dto.proposedPrice,
+          enforcedPrice,
+          maxAllowedPrice: maxAllowed,
+        },
+      });
+    }
+
+    return {
+      originalPrice: dto.proposedPrice,
+      enforcedPrice: Math.round(enforcedPrice * 100) / 100,
+      wasAdjusted,
+      maxAllowedPrice: Math.round(maxAllowed * 100) / 100,
     };
   }
 

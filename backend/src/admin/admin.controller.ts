@@ -1,3 +1,4 @@
+import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 import {
   Body,
   Controller,
@@ -33,6 +34,7 @@ import { RoleRequestStatus } from '../users/entities/role-request.entity';
 import { UserRole } from '../users/enums/user-role.enum';
 import { StellarService } from '../stellar/stellar.service';
 import { StellarWebhookService } from '../stellar/stellar-webhook.service';
+import { RejectRoleRequestDto } from './dto/reject-role-request.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -46,6 +48,15 @@ export class AdminController {
     private readonly stellarService: StellarService,
     private readonly stellarWebhookService: StellarWebhookService,
   ) {}
+
+  // ─── Audit Logs ───────────────────────────────────────────────────────────
+
+  @Get('audit-logs')
+  @ApiOperation({ summary: 'List audit log entries' })
+  @ApiResponse({ status: 200, description: 'Audit logs retrieved' })
+  listAuditLogs(@Query() dto: ListAuditLogsDto) {
+    return this.adminService.listAuditLogs(dto);
+  }
 
   // ─── Stellar Stream Management ────────────────────────────────────────────
 
@@ -163,8 +174,13 @@ export class AdminController {
 
   @Patch('role-requests/:id/reject')
   @ApiOperation({ summary: 'Reject role request' })
-  rejectRoleRequest(@Param('id', ParseUUIDPipe) id: string) {
-    return this.adminService.rejectRoleRequest(id);
+  @ApiResponse({ status: 200, description: 'Role request rejected' })
+  @ApiResponse({ status: 409, description: 'Request already processed' })
+  rejectRoleRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectRoleRequestDto,
+  ) {
+    return this.adminService.rejectRoleRequest(id, dto.reason);
   }
 
   // ── Stellar ───────────────────────────────────────────────────────────────
