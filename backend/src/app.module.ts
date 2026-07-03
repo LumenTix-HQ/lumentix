@@ -40,6 +40,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
 import { ZkpModule } from './zkp/zkp.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 
 
 @Module({
@@ -122,6 +123,7 @@ import { ZkpModule } from './zkp/zkp.module';
     WebhooksModule,
     StreamingModule,
     ZkpModule,
+    LoyaltyModule,
   ],
   controllers: [AppController],
   providers: [

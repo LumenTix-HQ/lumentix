@@ -29,6 +29,7 @@ export class TicketEntity {
   @Column({ type: 'varchar', length: 128 })
   transactionHash!: string;
 
+  @Index()
   @Column({ type: 'varchar', length: 16, default: 'valid' })
   status!: TicketStatus;
 

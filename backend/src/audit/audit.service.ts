@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Repository, SelectQueryBuilder, Between, LessThan } from 'typeorm';
 import { AuditLog } from './entities/audit-log.entity';
+import { ListAuditLogsDto } from './dto/list-audit-logs.dto';
+import { paginate } from '../common/pagination/pagination.helper';
 
 export interface AuditLogEntry {
   action: string;
@@ -43,103 +45,40 @@ export class AuditService {
 
     return saved;
   }
-  async findLogs(
-  query: AuditLogQueryDto,
-) {
-  const qb =
-    this.auditLogRepository.createQueryBuilder(
-      'audit',
-    );
 
-  if (query.action) {
-    qb.andWhere(
-      'audit.action = :action',
-      {
-        action: query.action,
-      },
-    );
+  async list(dto: ListAuditLogsDto) {
+    const qb = this.auditLogRepository.createQueryBuilder('log');
+
+    if (dto.action) {
+      qb.andWhere('log.action = :action', { action: dto.action });
+    }
+    if (dto.userId) {
+      qb.andWhere('log.userId = :userId', { userId: dto.userId });
+    }
+    if (dto.resourceId) {
+      qb.andWhere('log.resourceId = :resourceId', { resourceId: dto.resourceId });
+    }
+    if (dto.fromDate && dto.toDate) {
+      qb.andWhere({
+        createdAt: Between(new Date(dto.fromDate), new Date(dto.toDate)),
+      });
+    } else if (dto.fromDate) {
+      qb.andWhere('log.createdAt >= :fromDate', { fromDate: new Date(dto.fromDate) });
+    } else if (dto.toDate) {
+      qb.andWhere('log.createdAt <= :toDate', { toDate: new Date(dto.toDate) });
+    }
+
+    return paginate(qb, dto, 'log');
   }
 
-  if (query.userId) {
-    qb.andWhere(
-      'audit.userId = :userId',
-      {
-        userId: query.userId,
-      },
-    );
+  async prune(retentionDays: number): Promise<number> {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+
+    const result = await this.auditLogRepository.delete({
+      createdAt: LessThan(cutoff),
+    });
+
+    return result.affected ?? 0;
   }
-
-  if (query.resourceId) {
-    qb.andWhere(
-      'audit.resourceId = :resourceId',
-      {
-        resourceId: query.resourceId,
-      },
-    );
-  }
-
-  if (query.fromDate) {
-    qb.andWhere(
-      'audit.createdAt >= :fromDate',
-      {
-        fromDate: query.fromDate,
-      },
-    );
-  }
-
-  if (query.toDate) {
-    qb.andWhere(
-      'audit.createdAt <= :toDate',
-      {
-        toDate: query.toDate,
-      },
-    );
-  }
-
-  qb.orderBy(
-    'audit.createdAt',
-    'DESC',
-  );
-
-  const skip =
-    (query.page - 1) * query.limit;
-
-  qb.skip(skip);
-  qb.take(query.limit);
-
-  const [items, total] =
-    await qb.getManyAndCount();
-
-  return {
-    data: items,
-    total,
-    page: query.page,
-    limit: query.limit,
-    totalPages: Math.ceil(
-      total / query.limit,
-    ),
-  };
-}
-async pruneLogs(
-  retentionDays: number,
-): Promise<number> {
-  const cutoff =
-    new Date();
-
-  cutoff.setDate(
-    cutoff.getDate() - retentionDays,
-  );
-
-  const result =
-    await this.auditLogRepository
-      .createQueryBuilder()
-      .delete()
-      .where(
-        'createdAt < :cutoff',
-        { cutoff },
-      )
-      .execute();
-
-  return result.affected ?? 0;
-}
 }

@@ -1,3 +1,4 @@
+import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 import {
   Body,
   Controller,
@@ -47,6 +48,15 @@ export class AdminController {
     private readonly stellarService: StellarService,
     private readonly stellarWebhookService: StellarWebhookService,
   ) {}
+
+  // ─── Audit Logs ───────────────────────────────────────────────────────────
+
+  @Get('audit-logs')
+  @ApiOperation({ summary: 'List audit log entries' })
+  @ApiResponse({ status: 200, description: 'Audit logs retrieved' })
+  listAuditLogs(@Query() dto: ListAuditLogsDto) {
+    return this.adminService.listAuditLogs(dto);
+  }
 
   // ─── Stellar Stream Management ────────────────────────────────────────────
 

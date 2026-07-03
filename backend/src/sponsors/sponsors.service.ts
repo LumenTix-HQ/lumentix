@@ -20,6 +20,9 @@ import { StellarService } from '../stellar/stellar.service';
 import { AuditService } from '../audit/audit.service';
 import { Role } from '../common/decorators/roles.decorator';
 
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+
 @Injectable()
 export class SponsorsService {
   constructor(
@@ -38,6 +41,7 @@ export class SponsorsService {
     private readonly escrowService: EscrowService,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async confirmSponsorPayment(transactionHash: string): Promise<boolean> {
@@ -220,18 +224,38 @@ export class SponsorsService {
   }
 
   async getEventLeaderboard(eventId: string): Promise<any[]> {
-    const rows = await this.sponsorRepo
-      .createQueryBuilder('s')
-      .select('s.userId', 'userId')
-      .addSelect('s.displayName', 'displayName')
-      .addSelect('s.logoUrl', 'logoUrl')
-      .addSelect('s.websiteUrl', 'websiteUrl')
-      .addSelect('SUM(s.amount)', 'totalContribution')
-      .where('s.eventId = :eventId', { eventId })
-      .groupBy('s.userId, s.displayName, s.logoUrl, s.websiteUrl')
-      .orderBy('SUM(s.amount)', 'DESC')
+    const cacheKey = `leaderboard:${eventId}`;
+    const cached = await this.cacheManager.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const contributions = await this.contributionRepository
+      .createQueryBuilder('contribution')
+      .innerJoin('contribution.tier', 'tier')
+      .innerJoinAndSelect('contribution.sponsor', 'sponsor')
+      .select([
+        'sponsor.displayName as "displayName"',
+        'sponsor.logoUrl as "logoUrl"',
+        'tier.name as "tierName"',
+        'SUM(contribution.amount) as "totalXlm"',
+      ])
+      .where('tier.eventId = :eventId', { eventId })
+      .andWhere('contribution.status = :status', {
+        status: ContributionStatus.CONFIRMED,
+      })
+      .groupBy(
+        'sponsor.displayName, sponsor.logoUrl, tier.name',
+      )
+      .orderBy('"totalXlm"', 'DESC')
       .getRawMany();
-    return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+
+    const leaderboard = contributions.map((c, i) => ({
+      rank: i + 1,
+      ...c,
+      totalXlm: Number(c.totalXlm),
+    }));
+
+    await this.cacheManager.set(cacheKey, leaderboard, 120);
+    return leaderboard;
   }
 
   async getSponsorProfile(userId: string): Promise<any> {

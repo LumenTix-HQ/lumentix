@@ -9,6 +9,7 @@ import { StellarService } from './stellar.service';
 import { PaymentsService } from '../payments/payments.service';
 import { SponsorsService } from '../sponsors/sponsors.service';
 import { ContributionsService } from '../sponsors/contributions.service';
+import { NotificationService } from '../notifications/notification.service';
 
 /**
  * Shared queue type for unmatched payment events.
@@ -23,33 +24,34 @@ export interface DlqItem {
   lastError: string | null;
 }
 
-const RECONNECT_DELAY_MS = 5_000;
+const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const BACKOFF_MULTIPLIER = 2;
-const MAX_CONSECUTIVE_FAILURES = 10;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 @Injectable()
 export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(StellarWebhookService.name);
 
   private streamCloser: (() => void) | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectDelay = RECONNECT_DELAY_MS;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
+  private reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
   private destroyed = false;
-  consecutiveFailures: number = 0;
 
   /**
    * In-memory dead-letter queue.
    * In production, replace with Bull/Redis.
    */
   private readonly deadLetterQueue: DlqItem[] = [];
-  private dlqProcessingInterval: ReturnType<typeof setInterval> | null = null;
+  private dlqProcessingInterval: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly stellarService: StellarService,
     private readonly paymentsService: PaymentsService,
     private readonly sponsorsService: SponsorsService,
     private readonly contributionsService: ContributionsService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -72,8 +74,8 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
   reconnect(): void {
     this.logger.log('Manual reconnect requested — resetting retry counter');
-    this.consecutiveFailures = 0;
-    this.reconnectDelay = RECONNECT_DELAY_MS;
+    this.reconnectAttempts = 0;
+    this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
     this.clearReconnectTimer();
     this.closeStream();
     this.connect();
@@ -92,23 +94,26 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
       );
 
       // Reset backoff and failure counter on successful connection
-      this.reconnectDelay = RECONNECT_DELAY_MS;
-      this.consecutiveFailures = 0;
+      this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+      this.reconnectAttempts = 0;
       this.logger.log('Stellar payment stream connected');
     } catch (err) {
-      this.consecutiveFailures += 1;
+      this.reconnectAttempts += 1;
       this.logger.error(
-        `Failed to open stream (consecutive failures: ${this.consecutiveFailures})`,
+        `Failed to open stream (attempt ${this.reconnectAttempts} of ${MAX_RECONNECT_ATTEMPTS})`,
         err,
       );
 
-      if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         this.logger.fatal(
           '[STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
-            `${this.consecutiveFailures} consecutive times and will no longer ` +
+            `${this.reconnectAttempts} consecutive times and will no longer ` +
             'attempt to reconnect automatically. ' +
             'Use POST /admin/stellar/reconnect to restart manually.',
         );
+        this.notificationService.emit('STELLAR_STREAM_DEAD', {
+          attempts: this.reconnectAttempts,
+        });
         return;
       }
 

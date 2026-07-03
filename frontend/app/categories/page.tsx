@@ -1,26 +1,45 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import CategoryCard from '@/components/CategoryCard';
 
-// This data would normally come from an API call
-const CATEGORIES = [
-  { slug: 'conference', name: 'Conferences', description: 'Industry gatherings, summits, and professional conferences', eventCount: 12 },
-  { slug: 'workshop', name: 'Workshops', description: 'Hands-on learning sessions and skill-building events', eventCount: 8 },
-  { slug: 'meetup', name: 'Meetups', description: 'Casual community gatherings and networking events', eventCount: 15 },
-  { slug: 'concert', name: 'Concerts', description: 'Live music performances and shows', eventCount: 6 },
-  { slug: 'sports', name: 'Sports', description: 'Sporting events, matches, and tournaments', eventCount: 4 },
-  { slug: 'festival', name: 'Festivals', description: 'Multi-day celebrations and cultural events', eventCount: 3 },
-  { slug: 'other', name: 'Other', description: 'Miscellaneous events and gatherings', eventCount: 9 },
-];
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-// Revalidate every 5 minutes (ISR)
+interface Category {
+  slug: string;
+  name: string;
+  description: string;
+  eventCount: number;
+}
+
+async function getCategories(): Promise<Category[]> {
+  try {
+    const res = await fetch(`${API_BASE}/categories`, { next: { revalidate: 300 } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : data.data ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export const revalidate = 300;
 
-export default function CategoriesPage() {
+export const metadata: Metadata = {
+  title: 'Event Categories | Lumentix',
+  description: 'Browse events by category — conferences, workshops, meetups, concerts, and more on Lumentix.',
+  openGraph: {
+    title: 'Event Categories | Lumentix',
+    description: 'Browse events by category on the Stellar-powered event platform.',
+  },
+};
+
+export default async function CategoriesPage() {
+  const categories = await getCategories();
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
             Browse Events by Category
@@ -31,7 +50,6 @@ export default function CategoriesPage() {
           </p>
         </div>
 
-        {/* Breadcrumb */}
         <nav className="flex items-center gap-2 text-sm text-gray-500 mb-8">
           <Link href="/" className="hover:text-gray-700 transition-colors">
             Home
@@ -40,9 +58,8 @@ export default function CategoriesPage() {
           <span className="text-gray-900 font-medium">Categories</span>
         </nav>
 
-        {/* Category grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <CategoryCard
               key={category.slug}
               slug={category.slug}
@@ -53,8 +70,7 @@ export default function CategoriesPage() {
           ))}
         </div>
 
-        {/* Empty state (if no categories) */}
-        {CATEGORIES.length === 0 && (
+        {categories.length === 0 && (
           <div className="text-center py-16">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
               <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">

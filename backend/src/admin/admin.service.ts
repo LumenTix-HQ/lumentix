@@ -1,3 +1,4 @@
+import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 import {
   BadRequestException,
   ConflictException,
@@ -32,6 +33,12 @@ export class AdminService {
     private readonly auditService: AuditService,
     private readonly mailerService: MailerService,
   ) {}
+
+  // ── Audit Logs ────────────────────────────────────────────────────────────
+
+  async listAuditLogs(dto: ListAuditLogsDto) {
+    return this.auditService.list(dto);
+  }
 
   // ── Events ────────────────────────────────────────────────────────────────
 
