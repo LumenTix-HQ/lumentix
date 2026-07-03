@@ -17,6 +17,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { getQueueToken } from '@nestjs/bull';
 
 import { EventsService } from './events.service';
 import { Event, EventStatus } from './entities/event.entity';
@@ -82,6 +83,7 @@ describe('Event Lifecycle — creation to escrow release', () => {
     queueEventCancelledEmail: jest.Mock;
   };
   let refundService: { refundEvent: jest.Mock };
+  let eventsQueue: { add: jest.Mock; getJob: jest.Mock };
 
   beforeEach(async () => {
     // Repository mocks — each test can override individual methods
@@ -121,6 +123,11 @@ describe('Event Lifecycle — creation to escrow release', () => {
       refundEvent: jest.fn().mockResolvedValue([]),
     };
 
+    eventsQueue = {
+      add: jest.fn().mockResolvedValue({ id: 'job-id-1' }),
+      getJob: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EventsService,
@@ -147,6 +154,7 @@ describe('Event Lifecycle — creation to escrow release', () => {
         { provide: AuditService, useValue: auditService },
         { provide: NotificationService, useValue: notificationService },
         { provide: RefundService, useValue: refundService },
+        { provide: getQueueToken('events'), useValue: eventsQueue },
       ],
     }).compile();
 
@@ -289,7 +297,7 @@ describe('Event Lifecycle — creation to escrow release', () => {
 
   // ── Test 6: Cancelling a published event triggers refunds ─────────────────
 
-  it('6. cancelEvent — transitions PUBLISHED → CANCELLED and triggers refund flow', async () => {
+  it('6. cancelEvent — transitions PUBLISHED → CANCELLED and enqueues a refund job', async () => {
     const publishedEvent = makeDraftEvent({
       status: EventStatus.PUBLISHED,
       escrowPublicKey: ESCROW_PUBLIC_KEY,
@@ -305,16 +313,45 @@ describe('Event Lifecycle — creation to escrow release', () => {
 
     const result = await eventsService.cancelEvent(EVENT_ID, ORGANIZER_ID);
 
-    expect(result.status).toBe(EventStatus.CANCELLED);
-    // refundEvent is called non-blocking; give the microtask queue a tick
-    await Promise.resolve();
-    expect(refundService.refundEvent).toHaveBeenCalledWith(EVENT_ID);
+    expect(result.status).toBe('cancellation_in_progress');
+    expect(result.jobId).toBe('job-id-1');
+    expect(eventsQueue.add).toHaveBeenCalledWith('cancel-event', { eventId: EVENT_ID });
     expect(auditService.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AuditAction.EVENT_CANCELLED,
         resourceId: EVENT_ID,
       }),
     );
+  });
+
+  it('6a. getCancellationStatus — returns the status of a cancellation job', async () => {
+    const publishedEvent = makeDraftEvent({
+      status: EventStatus.PUBLISHED,
+      escrowPublicKey: ESCROW_PUBLIC_KEY,
+    });
+    const mockJob = {
+      id: 'job-id-1',
+      getState: jest.fn().mockResolvedValue('active'),
+      isFailed: jest.fn().mockResolvedValue(false),
+      isCompleted: jest.fn().mockResolvedValue(false),
+      progress: jest.fn().mockReturnValue(0),
+      failedReason: null,
+    };
+
+    eventRepo.findOne.mockResolvedValue(publishedEvent);
+    eventsQueue.getJob.mockResolvedValue(mockJob);
+
+    const result = await eventsService.getCancellationStatus(EVENT_ID, ORGANIZER_ID);
+
+    expect(eventsQueue.getJob).toHaveBeenCalledWith(EVENT_ID);
+    expect(result).toEqual({
+      jobId: 'job-id-1',
+      status: 'active',
+      failed: false,
+      completed: false,
+      progress: 0,
+      failedReason: null,
+    });
   });
 
   // ── Test 7: Non-organizer cannot publish an event ─────────────────────────

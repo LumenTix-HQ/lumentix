@@ -22,6 +22,9 @@ import { AuthenticatedRequest } from '../../common/interfaces/authenticated-requ
 import { ResaleService } from './resale.service';
 import { ListTicketForResaleDto } from './dto/list-ticket-resale.dto';
 import { BuyResaleTicketDto } from './dto/buy-resale-ticket.dto';
+import { SetPriceCeilingDto } from './dto/set-price-ceiling.dto';
+import { VerifyResalePriceDto } from './dto/verify-resale-price.dto';
+import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto';
 
 @ApiTags('Resale Marketplace')
 @ApiBearerAuth()
@@ -110,5 +113,54 @@ export class ResaleController {
   @ApiResponse({ status: 200, description: 'Earnings returned' })
   async getOrganizerEarnings(@Req() req: AuthenticatedRequest) {
     return this.resaleService.getOrganizerResaleEarnings(req.user.id);
+  }
+
+  // ── POST /resale/price-ceiling ─────────────────────────────────────────────
+
+  @Post('price-ceiling')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Set a price ceiling for an event',
+    description:
+      'Organizer-only. Sets a maximum resale price ceiling to prevent scalping. ceilingMultiplierBps is in basis points (e.g., 15000 = 150%).',
+  })
+  @ApiResponse({ status: 201, description: 'Price ceiling set' })
+  @ApiResponse({ status: 400, description: 'Invalid multiplier or absolute ceiling' })
+  @ApiResponse({ status: 403, description: 'Not the event organizer' })
+  async setPriceCeiling(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: SetPriceCeilingDto,
+  ) {
+    return this.resaleService.setPriceCeiling(req.user.id, dto);
+  }
+
+  // ── POST /resale/verify-price ──────────────────────────────────────────────
+
+  @Post('verify-price')
+  @ApiOperation({
+    summary: 'Verify a resale price against the ceiling',
+    description:
+      'Checks whether a proposed resale price is compliant with the price ceiling for the event.',
+  })
+  @ApiResponse({ status: 200, description: 'Compliance check result' })
+  async verifyResalePrice(@Body() dto: VerifyResalePriceDto) {
+    return this.resaleService.verifyResalePrice(dto);
+  }
+
+  // ── POST /resale/enforce-compliance ────────────────────────────────────────
+
+  @Post('enforce-compliance')
+  @ApiOperation({
+    summary: 'Enforce resale price compliance',
+    description:
+      'Caps a proposed resale price to the maximum allowed ceiling. Returns the enforced price.',
+  })
+  @ApiResponse({ status: 200, description: 'Enforced price returned' })
+  async enforceResaleCompliance(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: EnforceResaleComplianceDto,
+  ) {
+    return this.resaleService.enforceResaleCompliance(req.user.id, dto);
   }
 }

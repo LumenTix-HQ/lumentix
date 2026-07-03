@@ -13,6 +13,9 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { StellarService } from '../stellar/stellar.service';
 import * as bcrypt from 'bcryptjs';
 
 describe('AuthService', () => {
@@ -24,6 +27,8 @@ describe('AuthService', () => {
   let passwordResetTokenRepository: any;
   let refreshTokenRepository: any;
   let walletChallengeRepository: any;
+  let cacheManager: Cache;
+  let stellarService: StellarService;
 
   beforeEach(async () => {
     passwordResetTokenRepository = {
@@ -88,6 +93,20 @@ describe('AuthService', () => {
           provide: getRepositoryToken(WalletChallenge),
           useValue: walletChallengeRepository,
         },
+        {
+          provide: CACHE_MANAGER,
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
+        {
+          provide: StellarService,
+          useValue: {
+            verifySignature: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -105,6 +124,8 @@ describe('AuthService', () => {
     walletChallengeRepository = module.get(
       getRepositoryToken(WalletChallenge),
     );
+    cacheManager = module.get(CACHE_MANAGER);
+    stellarService = module.get(StellarService);
   });
 
   afterEach(() => {
@@ -392,6 +413,61 @@ describe('AuthService', () => {
       expect(result).toEqual({ message: 'Logged out successfully.' });
       expect(tokenRecord.revoked).toBe(true);
       expect(refreshTokenRepository.save).toHaveBeenCalledWith(tokenRecord);
+    });
+  });
+
+  describe('wallet-challenge', () => {
+    it('should generate a nonce and store it in cache', async () => {
+      const userId = 'user-1';
+      const result = await authService.generateWalletChallenge(userId);
+
+      expect(result).toHaveProperty('nonce');
+      expect(result).toHaveProperty('message');
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        `wallet-challenge:${userId}`,
+        result.nonce,
+        300,
+      );
+    });
+  });
+
+  describe('wallet-verify', () => {
+    const userId = 'user-1';
+    const nonce = 'test-nonce';
+    const signature = 'test-signature';
+    const publicKey = 'G...';
+
+    it('should throw BadRequestException if nonce is invalid', async () => {
+      (cacheManager.get as jest.Mock).mockResolvedValue('different-nonce');
+
+      await expect(
+        authService.verifyWalletChallenge(userId, nonce, signature, publicKey),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw UnauthorizedException if signature is invalid', async () => {
+      (cacheManager.get as jest.Mock).mockResolvedValue(nonce);
+      (stellarService.verifySignature as jest.Mock).mockReturnValue(false);
+
+      await expect(
+        authService.verifyWalletChallenge(userId, nonce, signature, publicKey),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should link wallet on valid signature', async () => {
+      (cacheManager.get as jest.Mock).mockResolvedValue(nonce);
+      (stellarService.verifySignature as jest.Mock).mockReturnValue(true);
+
+      const result = await authService.verifyWalletChallenge(
+        userId,
+        nonce,
+        signature,
+        publicKey,
+      );
+
+      expect(result).toEqual({ linked: true, stellarPublicKey: publicKey });
+      expect(usersService.updateWallet).toHaveBeenCalledWith(userId, publicKey);
+      expect(cacheManager.del).toHaveBeenCalledWith(`wallet-challenge:${userId}`);
     });
   });
 });

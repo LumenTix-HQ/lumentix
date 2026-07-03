@@ -40,6 +40,9 @@ import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
 import { DecentralizedStorageModule } from './decentralized-storage/decentralized-storage.module';
+import { ChatModule } from './chat/chat.module';
+import { ZkpModule } from './zkp/zkp.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 
 
 @Module({
@@ -122,6 +125,9 @@ import { DecentralizedStorageModule } from './decentralized-storage/decentralize
     WebhooksModule,
     StreamingModule,
     DecentralizedStorageModule,
+    ChatModule,
+    ZkpModule,
+    LoyaltyModule,
   ],
   controllers: [AppController],
   providers: [

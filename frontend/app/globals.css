@@ -65,3 +65,16 @@ body {
 	cursor: not-allowed;
 	opacity: 0.5;
 }
+
+:root {
+  --bg-primary: #ffffff;
+  --text-primary: #111827;
+  --border-color: #e5e7eb;
+}
+
+[data-theme='dark'],
+.dark {
+  --bg-primary: #111827;
+  --text-primary: #f9fafb;
+  --border-color: #374151;
+}

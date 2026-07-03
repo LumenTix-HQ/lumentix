@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Unique,
 } from 'typeorm';
 
 export enum RegistrationStatus {
@@ -14,6 +15,7 @@ export enum RegistrationStatus {
   WAITLISTED = 'waitlisted',
 }
 
+@Unique(['eventId', 'userId'])
 @Index(['eventId', 'status'])
 @Entity('registrations')
 export class Registration {
@@ -34,6 +36,7 @@ export class Registration {
   @Column({ nullable: true })
   ticketId: string | null;
 
+  @Index()
   @Column({
     type: 'enum',
     enum: RegistrationStatus,
