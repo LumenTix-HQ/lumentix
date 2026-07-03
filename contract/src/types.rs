@@ -663,3 +663,53 @@ pub struct UserPreferences {
     pub preferred_categories: Vec<String>,
     pub max_price: i128,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Refund Automation Pipeline (Issue #674)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of a bulk refund batch
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RefundBatchStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// Tracks progress of a bulk refund pipeline for a cancelled event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundBatch {
+    pub batch_id: u64,
+    pub event_id: u64,
+    pub total_tickets: u32,
+    pub refunded_count: u32,
+    pub failed_count: u32,
+    pub status: RefundBatchStatus,
+    pub initiated_at: u64,
+    pub completed_at: Option<u64>,
+    pub initiated_by: Address,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Chain Ticket Bridge Lock (Issue #675)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Represents a ticket locked on the source chain for bridging
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CrossChainLock {
+    pub lock_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub owner: Address,
+    pub target_chain: String,
+    pub destination_address: String,
+    pub locked_at: u64,
+    pub expires_at: u64,
+    pub verified: bool,
+    pub unlocked: bool,
+    pub bridge_proof: Option<String>,
+}
