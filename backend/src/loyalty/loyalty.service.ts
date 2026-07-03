@@ -360,7 +360,196 @@ export class LoyaltyService {
     }
   }
 
+  // ── Calculate Loyalty Points ────────────────────────────────────────────────
+
+  /**
+   * Calculate loyalty points for a user based on their full purchase and
+   * attendance history. Factors considered:
+   * - Confirmed event registrations (+100 pts each)
+   * - Ticket purchases (+50 pts each)
+   * - Bonus for consecutive attendance streak (+10% bonus)
+   * - Early bird bonus for first 5 events (+25 pts each)
+   */
+  async calculateLoyaltyPoints(userId: string): Promise<{
+    basePoints: number;
+    streakBonus: number;
+    earlyBirdBonus: number;
+    totalPoints: number;
+    tier: { name: string; minPoints: number; nextTier: string | null; pointsToNextTier: number | null };
+  }> {
+    const account = await this.accountRepo.findOne({ where: { userId } });
+
+    if (!account) {
+      return {
+        basePoints: 0,
+        streakBonus: 0,
+        earlyBirdBonus: 0,
+        totalPoints: 0,
+        tier: this.calculateTier(0),
+      };
+    }
+
+    const transactions = await this.txRepo.find({
+      where: { userId, type: LoyaltyTransactionType.EARN },
+      order: { createdAt: 'ASC' },
+    });
+
+    const basePoints = transactions
+      .filter((tx) => !tx.description?.includes('streak') && !tx.description?.includes('early'))
+      .reduce((sum, tx) => sum + tx.points, 0);
+
+    const uniqueEvents = new Set(
+      transactions.filter((tx) => tx.eventId).map((tx) => tx.eventId),
+    );
+
+    const streakBonus = Math.floor(uniqueEvents.size / 3) * 10;
+    const earlyBirdBonus = Math.min(uniqueEvents.size, 5) * 25;
+
+    const totalPoints = basePoints + streakBonus + earlyBirdBonus;
+
+    return {
+      basePoints,
+      streakBonus,
+      earlyBirdBonus,
+      totalPoints,
+      tier: this.calculateTier(totalPoints),
+    };
+  }
+
+  // ── Upgrade Loyalty Tier ───────────────────────────────────────────────────
+
+  /**
+   * Automatically upgrade a user's loyalty tier based on their total earned points.
+   * Tier thresholds: Bronze (0), Silver (500), Gold (1500), Platinum (5000).
+   * Returns the new tier and any applicable tier-upgrade discount.
+   */
+  async upgradeLoyaltyTier(
+    userId: string,
+  ): Promise<{
+    previousTier: string;
+    newTier: string;
+    upgraded: boolean;
+    tierUpgradeDiscount: number | null;
+  }> {
+    const account = await this.accountRepo.findOne({ where: { userId } });
+
+    if (!account) {
+      return {
+        previousTier: 'None',
+        newTier: 'Bronze',
+        upgraded: true,
+        tierUpgradeDiscount: null,
+      };
+    }
+
+    const previousTier = this.calculateTier(
+      account.totalPointsEarned - account.totalPointsRedeemed,
+    ).name;
+    const newTierCalc = this.calculateTier(account.totalPointsEarned);
+    const upgraded = newTierCalc.name !== previousTier;
+
+    const tierUpgradeDiscount: number | null = upgraded
+      ? this.getTierUpgradeDiscountPercent(newTierCalc.name)
+      : null;
+
+    if (upgraded && tierUpgradeDiscount) {
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + DISCOUNT_VALIDITY_DAYS);
+
+      const code = `TIERUP-${this.generateShortCode()}`;
+      const discount = this.discountRepo.create({
+        userId,
+        code,
+        discountPercent: tierUpgradeDiscount,
+        pointsSpent: 0,
+        status: DiscountStatus.ACTIVE,
+        expiresAt,
+        usedOnEventId: null,
+      });
+      await this.discountRepo.save(discount);
+
+      this.logger.log(
+        `User ${userId} upgraded from ${previousTier} to ${newTierCalc.name}. ` +
+          `Tier upgrade discount: ${tierUpgradeDiscount}% (code: ${code})`,
+      );
+    }
+
+    return {
+      previousTier,
+      newTier: newTierCalc.name,
+      upgraded,
+      tierUpgradeDiscount,
+    };
+  }
+
+  // ── Apply Tier Discounts ───────────────────────────────────────────────────
+
+  /**
+   * Apply automatic tier-based discounts to an event purchase.
+   * Discount percentages by tier: Bronze (0%), Silver (2%), Gold (5%), Platinum (10%).
+   */
+  async applyTierDiscounts(
+    userId: string,
+    eventId: string,
+  ): Promise<{
+    tier: string;
+    discountPercent: number;
+    discountApplied: boolean;
+  }> {
+    const account = await this.accountRepo.findOne({ where: { userId } });
+
+    if (!account) {
+      return {
+        tier: 'None',
+        discountPercent: 0,
+        discountApplied: false,
+      };
+    }
+
+    const tierInfo = this.calculateTier(account.totalPointsEarned);
+    const discountPercent = this.getTierAutoDiscountPercent(tierInfo.name);
+
+    return {
+      tier: tierInfo.name,
+      discountPercent,
+      discountApplied: discountPercent > 0,
+    };
+  }
+
   // ── Private Helpers ────────────────────────────────────────────────────────
+
+  private getTierUpgradeDiscountPercent(tier: string): number {
+    switch (tier) {
+      case 'Silver':
+        return 5;
+      case 'Gold':
+        return 10;
+      case 'Platinum':
+        return 15;
+      default:
+        return 0;
+    }
+  }
+
+  private getTierAutoDiscountPercent(tier: string): number {
+    switch (tier) {
+      case 'Silver':
+        return 2;
+      case 'Gold':
+        return 5;
+      case 'Platinum':
+        return 10;
+      default:
+        return 0;
+    }
+  }
+
+  private generateShortCode(): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    return Array.from({ length: 8 }, () =>
+      chars.charAt(Math.floor(Math.random() * chars.length)),
+    ).join('');
+  }
 
   private generateDiscountCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';

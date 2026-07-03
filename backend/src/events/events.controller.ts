@@ -290,14 +290,32 @@ export class EventsController {
       'Organizer-only. Cancels the event and automatically triggers refunds.',
   })
   @ApiParam({ name: 'id', description: 'Event UUID' })
-  @ApiResponse({ status: 201, description: 'Event cancelled' })
+  @ApiResponse({ status: 202, description: 'Event cancellation in progress' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
+  @ApiResponse({ status: 409, description: 'Event already cancelled' })
   cancel(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
   ) {
     return this.eventsService.cancelEvent(id, req.user.id);
+  }
+
+  @Get(':id/cancellation-status')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Get event cancellation status',
+    description: 'Organizer-only. Polls the status of a cancellation job.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Cancellation status' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  getCancellationStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.getCancellationStatus(id, req.user.id);
   }
 
   @Get(':id/stats')

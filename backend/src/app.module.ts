@@ -40,6 +40,8 @@ import { CategoriesModule } from './categories/categories.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
 import { ChatModule } from './chat/chat.module';
+import { ZkpModule } from './zkp/zkp.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
 
 
 @Module({
@@ -122,6 +124,8 @@ import { ChatModule } from './chat/chat.module';
     WebhooksModule,
     StreamingModule,
     ChatModule,
+    ZkpModule,
+    LoyaltyModule,
   ],
   controllers: [AppController],
   providers: [
