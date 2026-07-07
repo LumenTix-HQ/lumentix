@@ -38,8 +38,10 @@ import { EscrowService } from '../payments/services/escrow.service';
 import { RefundService } from '../payments/refunds/refund.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { EventImage } from './entities/event-image.entity';
+import { EventHistory } from './entities/event-history.entity';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
+import { HistoricalAnalysisDto } from './dto/historical-analysis.dto';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -257,11 +259,10 @@ export class EventsService {
       where: { eventId: id, status: 'valid' },
     });
 
-    const result = {
     const remainingCapacity =
       event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
 
-    return {
+    const result: EventWithCapacity = {
       ...event,
       soldTickets,
       remainingCapacity,
@@ -327,12 +328,6 @@ export class EventsService {
 
     qb.skip((page - 1) * limit).take(limit);
 
-    const [rawEvents, total] = await Promise.all([
-      qb.getRawAndEntities(),
-      qb.getCount(),
-    ]);
-
-    qb.orderBy('event.createdAt', 'DESC').skip((page - 1) * limit).take(limit);
     const [rawEvents, total] = await Promise.all([qb.getRawAndEntities(), qb.getCount()]);
     const data: EventWithCapacity[] = rawEvents.entities.map((event, i) => {
       const soldTickets = Number(rawEvents.raw[i]?.soldTickets ?? 0);
@@ -622,6 +617,8 @@ export class EventsService {
 
     const saved = await this.eventRepository.save(targetEvents);
     return { updatedEvents: saved };
+  }
+
   async addEventImage(eventId: string, organizerId: string, dto: AddEventImageDto): Promise<EventImage> {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');

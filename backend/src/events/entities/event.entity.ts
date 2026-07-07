@@ -15,6 +15,7 @@ export enum EventStatus {
   PUBLISHED = 'published',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+  ARCHIVED = 'archived',
 }
 
 export enum EventAgeRestriction {
@@ -137,6 +138,13 @@ export class Event {
    */
   @Column({ type: 'timestamp', nullable: true })
   cancelledAt: Date | null;
+
+  /**
+   * Timestamp when event was archived for historical preservation.
+   */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  archivedAt: Date | null;
+
   @ManyToMany(() => Category, (c) => c.events)
   @JoinTable({ name: 'event_categories' })
   categories: Category[];

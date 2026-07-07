@@ -549,6 +549,7 @@ export class StellarService implements OnModuleDestroy {
         minimumRequired.toFixed(7),
       );
     }
+  }
 
   /**
    * Transfer a ticket asset to a new owner on the Stellar network.
