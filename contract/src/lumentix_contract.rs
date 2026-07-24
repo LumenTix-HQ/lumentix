@@ -13,17 +13,20 @@ use crate::events::{
     EventSalesPaused, EventSalesResumed, EventStatusChanged, EventTimeExtended, EventUpdated,
     FundsDeposited, FundsWithdrawn, GenericEventStateTransition, IdentityCredentialIssued,
     IdentityCredentialRevoked, InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased,
-    MemorabiliaClaimed, MerchandiseCreated, MerchandisePurchased, NftMinted, NftTraded,
+    MemorabiliaClaimed, MerchandiseCreated, MerchandiseLinkedToTicket, MerchandisePreordered,
+    MerchandisePurchased, NftMinted, NftTraded,
     OraclePriceUpdated,
     PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, PriceCeilingSet,
     ProtocolFeeQueried,
     ReferralLinkGenerated, ReferralPurchaseProcessed, ReferralRewardsCredited, ReputationUpdated,
     ResaleComplianceEnforced, ResalePriceVerified, ReviewSubmitted, SeatHoldReleased, SeatSelected,
+    SeatUpgradeBidPlaced, SeatUpgradeBidRefunded, SeatUpgradeBidResolved,
     TicketDidLinked, TicketDidRevoked, TicketPurchased, TicketRefunded,
     TicketRevoked, TicketTransferred, TicketUsed, TransferBlackoutUpdated, TransferLockBypassed,
     UpgradeExecuted,
     UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast, VenueLayoutCreated,
     VipTicketAssigned, VipTierCreated, WaitlistAvailabilityNotified, WaitlistJoined,
+    WaitlistOfferExpired, WaitlistSpotReleased,
     VenueSpaceAllocated, SpaceUtilizationOptimized, VenueConflictManaged,
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
@@ -35,8 +38,8 @@ use crate::types::{
     CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
     CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
     EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
-    MemorabiliaClaim, NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord,
-    ResalePriceCeiling, Seat, Ticket,
+    MemorabiliaClaim, MerchVoucher, NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord,
+    ResalePriceCeiling, Seat, SeatUpgradeBid, Ticket,
     TicketDidAssociation, TicketTransferRecord, TransferBlackout, UpgradeGovernanceConfig,
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
@@ -1397,11 +1400,61 @@ impl LumentixContract {
         storage::set_waitlist_offer(&env, event_id, &buyer, &offer);
         Self::add_offer_recipient_if_missing(&env, event_id, &buyer);
 
-        let new_reserved = storage::get_waitlist_reserved(&env, event_id).saturating_add(quantity);
         storage::set_waitlist_reserved(&env, event_id, new_reserved);
         WaitlistAvailabilityNotified::emit(&env, event_id, buyer, quantity, expires_at);
 
         Ok(expires_at)
+    }
+
+    /// Alias for joining event waitlist (Issue #696)
+    pub fn join_event_waitlist(
+        env: Env,
+        event_id: u64,
+        buyer: Address,
+    ) -> Result<u32, LumentixError> {
+        Self::join_waitlist(env, event_id, buyer)
+    }
+
+    /// Automatically offers returned or cancelled spots to the next waitlisted buyer (Issue #696)
+    pub fn release_spot_to_next_in_line(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+        let now = env.ledger().timestamp();
+        Self::cleanup_expired_waitlist_offers(&env, event_id, now);
+        let queue = storage::get_waitlist_queue(&env, event_id);
+        if queue.is_empty() {
+            return Ok(0);
+        }
+        let processed = Self::process_waitlist_queue_internal(&env, event_id, 1);
+        if processed > 0 {
+            let recipient = storage::get_waitlist_queue(&env, event_id)
+                .get(0)
+                .unwrap_or(organizer);
+            WaitlistSpotReleased::emit(&env, event_id, recipient, processed);
+        }
+        Ok(processed)
+    }
+
+    /// Expire and clean up an active waitlist offer for a buyer (Issue #696)
+    pub fn expire_waitlist_offer(
+        env: Env,
+        event_id: u64,
+        buyer: Address,
+    ) -> Result<(), LumentixError> {
+        if let Some(offer) = storage::get_waitlist_offer(&env, event_id, &buyer) {
+            let reserved = storage::get_waitlist_reserved(&env, event_id);
+            storage::set_waitlist_reserved(&env, event_id, reserved.saturating_sub(offer.quantity));
+            storage::remove_waitlist_offer(&env, event_id, &buyer);
+            WaitlistOfferExpired::emit(&env, event_id, buyer);
+        }
+        Ok(())
     }
 
     /// Get the status of an event by ID.
@@ -4710,6 +4763,109 @@ impl LumentixContract {
         storage::get_merchandise(&env, merchandise_id)
     }
 
+    /// Link a merchandise item to a ticket (Issue #701)
+    pub fn link_merch_to_ticket(
+        env: Env,
+        buyer: Address,
+        ticket_id: u64,
+        merchandise_id: u64,
+    ) -> Result<(), LumentixError> {
+        buyer.require_auth();
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != buyer {
+            return Err(LumentixError::Unauthorized);
+        }
+        let merchandise = storage::get_merchandise(&env, merchandise_id)?;
+        if merchandise.event_id != ticket.event_id {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+        storage::set_ticket_merch_link(&env, ticket_id, merchandise_id);
+        MerchandiseLinkedToTicket::emit(&env, ticket_id, merchandise_id, buyer);
+        Ok(())
+    }
+
+    /// Process payment for pre-ordering event merchandise during ticketing flow (Issue #701)
+    pub fn process_preorder_payment(
+        env: Env,
+        buyer: Address,
+        ticket_id: u64,
+        merchandise_id: u64,
+    ) -> Result<u64, LumentixError> {
+        buyer.require_auth();
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != buyer {
+            return Err(LumentixError::Unauthorized);
+        }
+        let mut item = storage::get_merchandise(&env, merchandise_id)?;
+        if item.event_id != ticket.event_id {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+        if !item.active {
+            return Err(LumentixError::MerchandiseNotActive);
+        }
+        if item.remaining_supply == 0 {
+            return Err(LumentixError::MerchandiseSoldOut);
+        }
+
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&buyer, &env.current_contract_address(), &item.price);
+        }
+        storage::add_escrow(&env, item.event_id, item.price);
+        item.remaining_supply -= 1;
+        storage::set_merchandise(&env, merchandise_id, &item);
+
+        storage::set_ticket_merch_link(&env, ticket_id, merchandise_id);
+
+        let voucher_id = storage::get_next_voucher_id(&env);
+        storage::increment_voucher_id(&env);
+        let voucher = MerchVoucher {
+            voucher_id,
+            buyer: buyer.clone(),
+            ticket_id,
+            merchandise_id,
+            issued_at: env.ledger().timestamp(),
+            redeemed: false,
+        };
+        storage::set_merch_voucher(&env, voucher_id, &voucher);
+
+        MerchandisePreordered::emit(&env, voucher_id, ticket_id, merchandise_id, buyer, item.price);
+        Ok(voucher_id)
+    }
+
+    /// Generate a merchandise redemption voucher for pre-ordered items (Issue #701)
+    pub fn generate_merch_redemption_voucher(
+        env: Env,
+        buyer: Address,
+        ticket_id: u64,
+        merchandise_id: u64,
+    ) -> Result<u64, LumentixError> {
+        buyer.require_auth();
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != buyer {
+            return Err(LumentixError::Unauthorized);
+        }
+        let merchandise = storage::get_merchandise(&env, merchandise_id)?;
+        if merchandise.event_id != ticket.event_id {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+        if !storage::has_ticket_merch_link(&env, ticket_id, merchandise_id) {
+            storage::set_ticket_merch_link(&env, ticket_id, merchandise_id);
+        }
+        let voucher_id = storage::get_next_voucher_id(&env);
+        storage::increment_voucher_id(&env);
+        let voucher = MerchVoucher {
+            voucher_id,
+            buyer: buyer.clone(),
+            ticket_id,
+            merchandise_id,
+            issued_at: env.ledger().timestamp(),
+            redeemed: false,
+        };
+        storage::set_merch_voucher(&env, voucher_id, &voucher);
+        Ok(voucher_id)
+    }
+
     /// Mint a commemorative NFT collectible for a special event.
     /// Only the event organizer can mint NFTs.
     /// Requires a collectible inventory to be configured first via manage_collectible_inventory.
@@ -5638,5 +5794,124 @@ impl LumentixContract {
             },
         );
         TicketTransferred::emit(env, ticket_id, event_id, from, to);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SEAT UPGRADE BIDDING MARKETPLACE (Issue #691)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Place a bid to upgrade a standard ticket's seat or VIP tier.
+    pub fn place_upgrade_bid(
+        env: Env,
+        bidder: Address,
+        ticket_id: u64,
+        target_tier: String,
+        bid_amount: i128,
+    ) -> Result<u64, LumentixError> {
+        bidder.require_auth();
+        validation::validate_positive_amount(bid_amount)?;
+        validation::validate_string_not_empty(&target_tier)?;
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != bidder {
+            return Err(LumentixError::Unauthorized);
+        }
+        let event = storage::get_event(&env, ticket.event_id)?;
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        if let Ok(token_address) = storage::get_token_result(&env) {
+            let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+            token_client.transfer(&bidder, &env.current_contract_address(), &bid_amount);
+        }
+
+        let bid_id = storage::get_next_upgrade_bid_id(&env);
+        storage::increment_upgrade_bid_id(&env);
+
+        let bid = SeatUpgradeBid {
+            bid_id,
+            event_id: ticket.event_id,
+            ticket_id,
+            bidder: bidder.clone(),
+            target_tier: target_tier.clone(),
+            bid_amount,
+            timestamp: env.ledger().timestamp(),
+            resolved: false,
+            won: false,
+            refunded: false,
+        };
+
+        storage::set_seat_upgrade_bid(&env, bid_id, &bid);
+        SeatUpgradeBidPlaced::emit(&env, bid_id, ticket.event_id, ticket_id, bidder, bid_amount);
+
+        Ok(bid_id)
+    }
+
+    /// Automatically resolve active seat upgrade bids for an event (Issue #691).
+    /// Winning bids upgrade the ticket VIP tier/seat and add funds to event escrow.
+    pub fn auto_resolve_seat_upgrades(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let bid_ids = storage::get_event_upgrade_bid_ids(&env, event_id);
+        let mut resolved_count: u32 = 0;
+
+        for bid_id in bid_ids.iter() {
+            if let Ok(mut bid) = storage::get_seat_upgrade_bid(&env, bid_id) {
+                if !bid.resolved {
+                    if let Ok(mut ticket) = storage::get_ticket(&env, bid.ticket_id) {
+                        ticket.vip_tier = Some(bid.target_tier.clone());
+                        storage::set_ticket(&env, bid.ticket_id, &ticket);
+
+                        storage::add_escrow(&env, event_id, bid.bid_amount);
+                        bid.resolved = true;
+                        bid.won = true;
+                        storage::set_seat_upgrade_bid(&env, bid_id, &bid);
+
+                        SeatUpgradeBidResolved::emit(&env, bid_id, event_id, bid.ticket_id, true);
+                        resolved_count += 1;
+                    }
+                }
+            }
+        }
+
+        Ok(resolved_count)
+    }
+
+    /// Refund unsuccessful or losing seat upgrade bids (Issue #691).
+    pub fn refund_unsuccessful_bids(
+        env: Env,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        let bid_ids = storage::get_event_upgrade_bid_ids(&env, event_id);
+        let mut refunded_count: u32 = 0;
+
+        for bid_id in bid_ids.iter() {
+            if let Ok(mut bid) = storage::get_seat_upgrade_bid(&env, bid_id) {
+                if (!bid.won || !bid.resolved) && !bid.refunded {
+                    if let Ok(token_address) = storage::get_token_result(&env) {
+                        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+                        token_client.transfer(&env.current_contract_address(), &bid.bidder, &bid.bid_amount);
+                    }
+                    bid.resolved = true;
+                    bid.won = false;
+                    bid.refunded = true;
+                    storage::set_seat_upgrade_bid(&env, bid_id, &bid);
+
+                    SeatUpgradeBidRefunded::emit(&env, bid_id, bid.bidder, bid.bid_amount);
+                    refunded_count += 1;
+                }
+            }
+        }
+
+        Ok(refunded_count)
     }
 }

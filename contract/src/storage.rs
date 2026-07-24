@@ -3,8 +3,8 @@ use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
-    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, NftCollectible,
-    OrganizerReputation, ResalePriceCeiling, Seat,
+    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
+    OrganizerReputation, ResalePriceCeiling, Seat, SeatUpgradeBid,
     Ticket, TicketDidAssociation, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
@@ -1799,4 +1799,153 @@ pub fn get_memorabilia_claim(
 pub fn has_memorabilia_claimed(env: &Env, ticket_id: u64) -> bool {
     let key = (MEMORABILIA_CLAIM_PREFIX, ticket_id);
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TICKET MERCH & VOUCHER STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TICKET_MERCH_PREFIX: &str = "TKTMERCH_";
+const MERCH_VOUCHER_PREFIX: &str = "MRCHVOUCH_";
+const MERCH_VOUCHER_COUNTER: &str = "MRCHVOUCH_CTR";
+
+pub fn set_ticket_merch_link(env: &Env, ticket_id: u64, merchandise_id: u64) {
+    let key = (TICKET_MERCH_PREFIX, ticket_id, merchandise_id);
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn has_ticket_merch_link(env: &Env, ticket_id: u64, merchandise_id: u64) -> bool {
+    let key = (TICKET_MERCH_PREFIX, ticket_id, merchandise_id);
+    env.storage().persistent().has(&key)
+}
+
+pub fn get_next_voucher_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&MERCH_VOUCHER_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_voucher_id(env: &Env) {
+    let next_id = get_next_voucher_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&MERCH_VOUCHER_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_merch_voucher(env: &Env, voucher_id: u64, voucher: &MerchVoucher) {
+    let key = (MERCH_VOUCHER_PREFIX, voucher_id);
+    env.storage().persistent().set(&key, voucher);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_merch_voucher(env: &Env, voucher_id: u64) -> Result<MerchVoucher, LumentixError> {
+    let key = (MERCH_VOUCHER_PREFIX, voucher_id);
+    let voucher = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::MerchandiseNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(voucher)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SEAT UPGRADE BIDDING STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const UPGRADE_BID_PREFIX: &str = "UPGBID_";
+const UPGRADE_BID_COUNTER: &str = "UPGBID_CTR";
+const EVENT_UPGRADE_BIDS_PREFIX: &str = "EVTUPGBIDS_";
+
+pub fn get_next_upgrade_bid_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&UPGRADE_BID_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_upgrade_bid_id(env: &Env) {
+    let next_id = get_next_upgrade_bid_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&UPGRADE_BID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_seat_upgrade_bid(env: &Env, bid_id: u64, bid: &SeatUpgradeBid) {
+    let key = (UPGRADE_BID_PREFIX, bid_id);
+    env.storage().persistent().set(&key, bid);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+
+    let event_bids_key = (EVENT_UPGRADE_BIDS_PREFIX, bid.event_id);
+    let mut bids = env
+        .storage()
+        .persistent()
+        .get::<_, Vec<u64>>(&event_bids_key)
+        .unwrap_or_else(|| Vec::new(env));
+    let mut exists = false;
+    for existing_id in bids.iter() {
+        if existing_id == bid_id {
+            exists = true;
+            break;
+        }
+    }
+    if !exists {
+        bids.push_back(bid_id);
+        env.storage().persistent().set(&event_bids_key, &bids);
+    }
+    env.storage()
+        .persistent()
+        .extend_ttl(&event_bids_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_seat_upgrade_bid(env: &Env, bid_id: u64) -> Result<SeatUpgradeBid, LumentixError> {
+    let key = (UPGRADE_BID_PREFIX, bid_id);
+    let bid = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::TicketNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(bid)
+}
+
+pub fn get_event_upgrade_bid_ids(env: &Env, event_id: u64) -> Vec<u64> {
+    let key = (EVENT_UPGRADE_BIDS_PREFIX, event_id);
+    let bids = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    bids
 }
