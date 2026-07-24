@@ -58,6 +58,10 @@ const PLAN_ID_COUNTER: &str = "PLAN_CTR";
 const INCIDENT_PREFIX: &str = "INC_";
 const INCIDENT_COUNTER: &str = "INC_CTR";
 const USER_PREFS_PREFIX: &str = "UPREF_";
+const ZKP_PARAMS: &str = "ZKP_PARAMS";
+const COMPLIANCE_RULES: &str = "COMP_RULES";
+const STAFF_ROLE_PREFIX: &str = "STAFF_";
+const VISUAL_LAYOUT_PREFIX: &str = "VISLAY_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -1800,3 +1804,71 @@ pub fn has_memorabilia_claimed(env: &Env, ticket_id: u64) -> bool {
     let key = (MEMORABILIA_CLAIM_PREFIX, ticket_id);
     env.storage().persistent().has(&key)
 }
+
+// ── ZKP Storage ────────────────────────────────────────────────────────────
+
+pub fn set_zkp_params(env: &Env, params: &String) {
+    env.storage().instance().set(&ZKP_PARAMS, params);
+}
+
+pub fn get_zkp_params(env: &Env) -> Option<String> {
+    env.storage().instance().get(&ZKP_PARAMS)
+}
+
+// ── Compliance Storage ─────────────────────────────────────────────────────
+
+pub fn set_compliance_rules(env: &Env, rules: &String) {
+    env.storage().instance().set(&COMPLIANCE_RULES, rules);
+}
+
+pub fn get_compliance_rules(env: &Env) -> Option<String> {
+    env.storage().instance().get(&COMPLIANCE_RULES)
+}
+
+// ── Staff Role Storage ─────────────────────────────────────────────────────
+
+pub fn set_staff_role(env: &Env, organizer: &Address, staff: &Address, role: &String) {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    env.storage().persistent().set(&key, role);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_staff_role(env: &Env, organizer: &Address, staff: &Address) -> Option<String> {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    let role = env.storage().persistent().get(&key);
+    if role.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    role
+}
+
+pub fn remove_staff_role(env: &Env, organizer: &Address, staff: &Address) {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    env.storage().persistent().remove(&key);
+}
+
+// ── Visual Layout Storage ──────────────────────────────────────────────────
+
+pub fn set_visual_layout(env: &Env, event_id: u64, layout_data: &String) {
+    let key = (VISUAL_LAYOUT_PREFIX, event_id);
+    env.storage().persistent().set(&key, layout_data);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_visual_layout(env: &Env, event_id: u64) -> Option<String> {
+    let key = (VISUAL_LAYOUT_PREFIX, event_id);
+    let layout = env.storage().persistent().get(&key);
+    if layout.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    layout
+}
+
