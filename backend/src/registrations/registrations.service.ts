@@ -21,6 +21,7 @@ import { RefundService } from '../payments/refunds/refund.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationService } from '../notifications/notification.service';
 import { UsersService } from '../users/users.service';
+import { CalendarService } from '../calendar/calendar.service';
 
 export interface RegisterResult {
   registration: Registration;
@@ -43,6 +44,7 @@ export class RegistrationsService {
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
     private readonly usersService: UsersService,
+    private readonly calendarService: CalendarService,
   ) {}
 
   // ── POST /events/:id/register ──────────────────────────────────────────────
@@ -271,6 +273,47 @@ export class RegistrationsService {
     reg.paymentId = paymentId;
     reg.status = RegistrationStatus.CONFIRMED;
     await this.repo.save(reg);
+
+    // Queue calendar invite email (best-effort)
+    try {
+      const [event, user] = await Promise.all([
+        this.eventsService.getEventById(eventId),
+        this.usersService.findById(userId),
+      ]);
+
+      const userEmail = (user as any).email;
+      if (userEmail) {
+        const calendarData = this.calendarService.createAllCalendarLinks({
+          eventTitle: event.title,
+          eventDescription: event.description ?? undefined,
+          startDate: event.startDate.toISOString(),
+          endDate: event.endDate.toISOString(),
+          location: event.location ?? undefined,
+        });
+
+        const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:3001';
+        const icsDownloadUrl = `${apiBaseUrl}/events/${eventId}/ical`;
+
+        await this.notificationService.queueCalendarInvite({
+          to: userEmail,
+          eventTitle: event.title,
+          eventDescription: event.description ?? undefined,
+          startDate: event.startDate.toISOString(),
+          endDate: event.endDate.toISOString(),
+          location: event.location ?? undefined,
+          organizerName: 'Lumentix',
+          googleUrl: calendarData.google,
+          outlookUrl: calendarData.outlook,
+          yahooUrl: calendarData.yahoo,
+          icsDownloadUrl,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not queue calendar invite for user ${userId} on event ${eventId}`,
+        err,
+      );
+    }
   }
 
   async linkTicket(

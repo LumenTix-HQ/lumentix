@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -45,6 +45,7 @@ import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { EmailCampaignsModule } from './email-campaigns/email-campaigns.module';
 import { TaxModule } from './tax/tax.module';
+import { CalendarModule } from './calendar/calendar.module';
 
 
 @Module({
@@ -132,6 +133,7 @@ import { TaxModule } from './tax/tax.module';
     LoyaltyModule,
     EmailCampaignsModule,
     TaxModule,
+    CalendarModule,
   ],
   controllers: [AppController],
   providers: [
