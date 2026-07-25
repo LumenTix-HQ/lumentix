@@ -1426,3 +1426,56 @@ impl MemorabiliaClaimed {
         );
     }
 }
+
+// ─── Email Campaign Events ───────────────────────────────────────────────────
+
+/// Emitted when an organizer creates a new email campaign
+pub struct EmailCampaignCreated;
+impl EmailCampaignCreated {
+    pub fn emit(
+        env: &Env,
+        campaign_id: u64,
+        organizer: Address,
+        subject: String,
+        recipient_count: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("emcreate"),),
+            (campaign_id, organizer, subject, recipient_count),
+        );
+    }
+}
+
+/// Emitted when an organizer dispatches marketing emails for a campaign
+pub struct MarketingEmailsSent;
+impl MarketingEmailsSent {
+    pub fn emit(
+        env: &Env,
+        campaign_id: u64,
+        organizer: Address,
+        recipient_count: u32,
+        sent_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("emsent"),),
+            (campaign_id, organizer, recipient_count, sent_at),
+        );
+    }
+}
+
+/// Emitted when analytics for a campaign are updated
+pub struct EmailAnalyticsUpdated;
+impl EmailAnalyticsUpdated {
+    pub fn emit(
+        env: &Env,
+        campaign_id: u64,
+        total_opened: u32,
+        total_clicked: u32,
+        last_updated_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("emalytic"),),
+            (campaign_id, total_opened, total_clicked, last_updated_at),
+        );
+    }
+}

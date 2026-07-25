@@ -302,4 +302,20 @@ pub enum LumentixError {
     CheckinProofInvalid = 99,
     /// Memorabilia claim not found
     MemorabiliaClaimNotFound = 103,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Email Campaign errors (116–121)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Email campaign not found
+    EmailCampaignNotFound = 116,
+    /// Email campaign subject or body is empty
+    EmailCampaignInvalidContent = 117,
+    /// Email campaign has already been sent and cannot be modified
+    EmailCampaignAlreadySent = 118,
+    /// Caller is not the campaign organizer
+    EmailCampaignUnauthorized = 119,
+    /// Campaign analytics record not found
+    EmailCampaignAnalyticsNotFound = 120,
+    /// Delivery count exceeds the number of recipients
+    EmailCampaignInvalidDeliveryCount = 121,
 }

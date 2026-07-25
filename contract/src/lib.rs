@@ -249,7 +249,6 @@ mod upgrade_carbon_identity_crosschain_tests;
 
 #[cfg(test)]
 mod merchandise_nft_tests;
-
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
@@ -270,6 +269,7 @@ pub use events::{
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
+    EmailCampaignCreated, MarketingEmailsSent, EmailAnalyticsUpdated,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -283,4 +283,5 @@ pub use types::{
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
     UserPreferences,
+    EmailCampaign, EmailCampaignStatus, EmailCampaignAnalytics,
 };

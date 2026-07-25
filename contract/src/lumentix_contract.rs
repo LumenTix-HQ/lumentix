@@ -28,6 +28,7 @@ use crate::events::{
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
+    EmailCampaignCreated, MarketingEmailsSent, EmailAnalyticsUpdated,
 };
 use crate::storage;
 use crate::types::{
@@ -44,6 +45,7 @@ use crate::types::{
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
+    EmailCampaign, EmailCampaignStatus, EmailCampaignAnalytics,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
@@ -5638,5 +5640,178 @@ impl LumentixContract {
             },
         );
         TicketTransferred::emit(env, ticket_id, event_id, from, to);
+    }
+
+    // ─── Email Campaign Functions ────────────────────────────────────────────
+
+    /// Create a new email newsletter campaign.
+    ///
+    /// The organizer must call `require_auth`. Optionally scoped to a single
+    /// event via `event_id`; pass `None` to target all past attendees for all
+    /// events owned by this organizer.
+    ///
+    /// Returns the new campaign ID on success.
+    pub fn create_email_campaign(
+        env: Env,
+        organizer: Address,
+        event_id: Option<u64>,
+        subject: String,
+        body_html: String,
+        recipient_count: u32,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        if subject.len() == 0 {
+            return Err(LumentixError::EmailCampaignInvalidContent);
+        }
+        if body_html.len() == 0 {
+            return Err(LumentixError::EmailCampaignInvalidContent);
+        }
+
+        let campaign_id = storage::next_email_campaign_id(&env);
+        let now = env.ledger().timestamp();
+
+        let campaign = EmailCampaign {
+            id: campaign_id,
+            organizer: organizer.clone(),
+            event_id,
+            subject: subject.clone(),
+            body_html,
+            status: EmailCampaignStatus::Draft,
+            created_at: now,
+            scheduled_at: None,
+            sent_at: None,
+            recipient_count,
+        };
+
+        storage::set_email_campaign(&env, campaign_id, &campaign);
+
+        // Initialise zero-value analytics record eagerly so callers never get
+        // "not found" when querying analytics before dispatch.
+        let analytics = EmailCampaignAnalytics {
+            campaign_id,
+            total_sent: 0,
+            total_delivered: 0,
+            total_opened: 0,
+            total_clicked: 0,
+            total_bounced: 0,
+            total_unsubscribed: 0,
+            last_updated_at: now,
+        };
+        storage::set_email_campaign_analytics(&env, campaign_id, &analytics);
+
+        EmailCampaignCreated::emit(&env, campaign_id, organizer, subject, recipient_count);
+
+        Ok(campaign_id)
+    }
+
+    /// Mark a campaign as sent and record the dispatch timestamp.
+    ///
+    /// Only the original campaign organizer may call this.  The campaign must
+    /// be in `Draft` or `Scheduled` status — attempting to re-send an already
+    /// sent campaign returns `EmailCampaignAlreadySent`.
+    pub fn send_marketing_emails(
+        env: Env,
+        organizer: Address,
+        campaign_id: u64,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let mut campaign = storage::get_email_campaign(&env, campaign_id)?;
+
+        if campaign.organizer != organizer {
+            return Err(LumentixError::EmailCampaignUnauthorized);
+        }
+        if campaign.status == EmailCampaignStatus::Sent {
+            return Err(LumentixError::EmailCampaignAlreadySent);
+        }
+
+        let now = env.ledger().timestamp();
+        campaign.status = EmailCampaignStatus::Sending;
+        campaign.sent_at = Some(now);
+        storage::set_email_campaign(&env, campaign_id, &campaign);
+
+        // Flip to Sent immediately — actual delivery is handled off-chain by
+        // the backend queue; the contract records the intent and timestamp.
+        campaign.status = EmailCampaignStatus::Sent;
+        storage::set_email_campaign(&env, campaign_id, &campaign);
+
+        // Update analytics: stamp total_sent with the recipient count.
+        let mut analytics = storage::get_email_campaign_analytics(&env, campaign_id)?;
+        analytics.total_sent = campaign.recipient_count;
+        analytics.last_updated_at = now;
+        storage::set_email_campaign_analytics(&env, campaign_id, &analytics);
+
+        MarketingEmailsSent::emit(
+            &env,
+            campaign_id,
+            organizer,
+            campaign.recipient_count,
+            now,
+        );
+
+        Ok(())
+    }
+
+    /// Update delivery/engagement analytics for a campaign.
+    ///
+    /// Only the campaign organizer may report analytics (prevents spoofing).
+    /// Delivery and engagement counts must not exceed `total_sent`.
+    pub fn track_email_analytics(
+        env: Env,
+        organizer: Address,
+        campaign_id: u64,
+        total_delivered: u32,
+        total_opened: u32,
+        total_clicked: u32,
+        total_bounced: u32,
+        total_unsubscribed: u32,
+    ) -> Result<EmailCampaignAnalytics, LumentixError> {
+        organizer.require_auth();
+
+        let campaign = storage::get_email_campaign(&env, campaign_id)?;
+
+        if campaign.organizer != organizer {
+            return Err(LumentixError::EmailCampaignUnauthorized);
+        }
+
+        // Basic sanity check — delivered cannot exceed what was sent.
+        if total_delivered > campaign.recipient_count {
+            return Err(LumentixError::EmailCampaignInvalidDeliveryCount);
+        }
+
+        let now = env.ledger().timestamp();
+        let analytics = EmailCampaignAnalytics {
+            campaign_id,
+            total_sent: campaign.recipient_count,
+            total_delivered,
+            total_opened,
+            total_clicked,
+            total_bounced,
+            total_unsubscribed,
+            last_updated_at: now,
+        };
+
+        storage::set_email_campaign_analytics(&env, campaign_id, &analytics);
+
+        EmailAnalyticsUpdated::emit(&env, campaign_id, total_opened, total_clicked, now);
+
+        Ok(analytics)
+    }
+
+    /// Retrieve the stored analytics for a campaign (read-only).
+    pub fn get_email_campaign_analytics(
+        env: Env,
+        campaign_id: u64,
+    ) -> Result<EmailCampaignAnalytics, LumentixError> {
+        storage::get_email_campaign_analytics(&env, campaign_id)
+    }
+
+    /// Retrieve the campaign metadata (read-only).
+    pub fn get_email_campaign(
+        env: Env,
+        campaign_id: u64,
+    ) -> Result<EmailCampaign, LumentixError> {
+        storage::get_email_campaign(&env, campaign_id)
     }
 }

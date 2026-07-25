@@ -43,6 +43,7 @@ import { DecentralizedStorageModule } from './decentralized-storage/decentralize
 import { ChatModule } from './chat/chat.module';
 import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
+import { EmailCampaignsModule } from './email-campaigns/email-campaigns.module';
 
 
 @Module({
@@ -128,6 +129,7 @@ import { LoyaltyModule } from './loyalty/loyalty.module';
     ChatModule,
     ZkpModule,
     LoyaltyModule,
+    EmailCampaignsModule,
   ],
   controllers: [AppController],
   providers: [

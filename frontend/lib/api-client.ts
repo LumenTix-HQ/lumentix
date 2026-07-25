@@ -473,4 +473,87 @@ export const apiClient = {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     }),
+
+  // ── Email Campaigns ───────────────────────────────────────────────────────
+  /**
+   * Create a new email newsletter campaign (create_email_campaign).
+   * Campaign is saved in DRAFT status for review before sending.
+   */
+  createEmailCampaign: (
+    body: {
+      subject: string;
+      bodyHtml: string;
+      eventId?: string;
+      scheduledAt?: string;
+    },
+    token: string,
+  ) =>
+    request<any>('/email-campaigns', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  /**
+   * Dispatch marketing emails to past attendees (send_marketing_emails).
+   * Transitions the campaign from DRAFT → SENT and enqueues delivery jobs.
+   */
+  sendMarketingEmails: (campaignId: string, token: string) =>
+    request<any>(`/email-campaigns/${campaignId}/send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  /**
+   * Update delivery/engagement analytics for a campaign (track_email_analytics).
+   * Call this as webhook or polling results arrive from the mail provider.
+   */
+  trackEmailAnalytics: (
+    campaignId: string,
+    body: {
+      totalDelivered?: number;
+      totalOpened?: number;
+      totalClicked?: number;
+      totalBounced?: number;
+      totalUnsubscribed?: number;
+    },
+    token: string,
+  ) =>
+    request<any>(`/email-campaigns/${campaignId}/analytics`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  listEmailCampaigns: (token: string) =>
+    request<any[]>('/email-campaigns', {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  getEmailCampaign: (campaignId: string, token: string) =>
+    request<any>(`/email-campaigns/${campaignId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  getEmailCampaignAnalytics: (campaignId: string, token: string) =>
+    request<any>(`/email-campaigns/${campaignId}/analytics`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  updateEmailCampaign: (
+    campaignId: string,
+    body: { subject?: string; bodyHtml?: string; scheduledAt?: string },
+    token: string,
+  ) =>
+    request<any>(`/email-campaigns/${campaignId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+
+  cancelEmailCampaign: (campaignId: string, token: string) =>
+    request<any>(`/email-campaigns/${campaignId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }),
 };

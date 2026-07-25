@@ -10,6 +10,7 @@ use crate::types::{
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
+    EmailCampaign, EmailCampaignAnalytics,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -1799,4 +1800,80 @@ pub fn get_memorabilia_claim(
 pub fn has_memorabilia_claimed(env: &Env, ticket_id: u64) -> bool {
     let key = (MEMORABILIA_CLAIM_PREFIX, ticket_id);
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMAIL CAMPAIGN STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const EMAIL_CAMPAIGN_ID_COUNTER: &str = "EMCAMP_CTR";
+const EMAIL_CAMPAIGN_PREFIX: &str = "EMCAMP_";
+const EMAIL_CAMPAIGN_ANALYTICS_PREFIX: &str = "EMANA_";
+
+pub fn next_email_campaign_id(env: &Env) -> u64 {
+    let id: u64 = env
+        .storage()
+        .instance()
+        .get(&EMAIL_CAMPAIGN_ID_COUNTER)
+        .unwrap_or(0u64)
+        + 1;
+    env.storage()
+        .instance()
+        .set(&EMAIL_CAMPAIGN_ID_COUNTER, &id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn set_email_campaign(env: &Env, campaign_id: u64, campaign: &EmailCampaign) {
+    let key = (EMAIL_CAMPAIGN_PREFIX, campaign_id);
+    env.storage().persistent().set(&key, campaign);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_email_campaign(
+    env: &Env,
+    campaign_id: u64,
+) -> Result<EmailCampaign, LumentixError> {
+    let key = (EMAIL_CAMPAIGN_PREFIX, campaign_id);
+    let campaign = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::EmailCampaignNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(campaign)
+}
+
+pub fn set_email_campaign_analytics(
+    env: &Env,
+    campaign_id: u64,
+    analytics: &EmailCampaignAnalytics,
+) {
+    let key = (EMAIL_CAMPAIGN_ANALYTICS_PREFIX, campaign_id);
+    env.storage().persistent().set(&key, analytics);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_email_campaign_analytics(
+    env: &Env,
+    campaign_id: u64,
+) -> Result<EmailCampaignAnalytics, LumentixError> {
+    let key = (EMAIL_CAMPAIGN_ANALYTICS_PREFIX, campaign_id);
+    let analytics = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::EmailCampaignAnalyticsNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(analytics)
 }
