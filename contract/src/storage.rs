@@ -11,6 +11,7 @@ use crate::types::{
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
     EmailCampaign, EmailCampaignAnalytics,
+    TaxRule, TaxCollectionRecord, TaxReport,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -1876,4 +1877,161 @@ pub fn get_email_campaign_analytics(
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(analytics)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAX DETERMINATION STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TAX_RULE_ID_COUNTER: &str = "TAXRULE_CTR";
+const TAX_RULE_PREFIX: &str = "TAXRULE_";
+/// Maps jurisdiction_code → rule_id so we can look up by code
+const TAX_RULE_BY_CODE_PREFIX: &str = "TAXCODE_";
+const TAX_COLLECTION_ID_COUNTER: &str = "TAXCOL_CTR";
+const TAX_COLLECTION_PREFIX: &str = "TAXCOL_";
+const TAX_REPORT_ID_COUNTER: &str = "TAXRPT_CTR";
+const TAX_REPORT_PREFIX: &str = "TAXRPT_";
+
+// ── Tax Rule ────────────────────────────────────────────────────────────────
+
+pub fn next_tax_rule_id(env: &Env) -> u64 {
+    let id: u64 = env
+        .storage()
+        .instance()
+        .get(&TAX_RULE_ID_COUNTER)
+        .unwrap_or(0u64)
+        + 1;
+    env.storage().instance().set(&TAX_RULE_ID_COUNTER, &id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn set_tax_rule(env: &Env, rule_id: u64, rule: &TaxRule) {
+    let key = (TAX_RULE_PREFIX, rule_id);
+    env.storage().persistent().set(&key, rule);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    // Also index by jurisdiction_code for O(1) lookup
+    let code_key = (TAX_RULE_BY_CODE_PREFIX, rule.jurisdiction_code.clone());
+    env.storage().persistent().set(&code_key, &rule_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&code_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_tax_rule(env: &Env, rule_id: u64) -> Result<TaxRule, LumentixError> {
+    let key = (TAX_RULE_PREFIX, rule_id);
+    let rule = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::TaxRuleNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(rule)
+}
+
+pub fn get_tax_rule_by_code(env: &Env, jurisdiction_code: &String) -> Result<TaxRule, LumentixError> {
+    let code_key = (TAX_RULE_BY_CODE_PREFIX, jurisdiction_code.clone());
+    let rule_id: u64 = env
+        .storage()
+        .persistent()
+        .get(&code_key)
+        .ok_or(LumentixError::TaxRuleNotFound)?;
+    get_tax_rule(env, rule_id)
+}
+
+pub fn has_tax_rule_for_code(env: &Env, jurisdiction_code: &String) -> bool {
+    let code_key = (TAX_RULE_BY_CODE_PREFIX, jurisdiction_code.clone());
+    env.storage().persistent().has(&code_key)
+}
+
+// ── Tax Collection Record ───────────────────────────────────────────────────
+
+pub fn next_tax_collection_id(env: &Env) -> u64 {
+    let id: u64 = env
+        .storage()
+        .instance()
+        .get(&TAX_COLLECTION_ID_COUNTER)
+        .unwrap_or(0u64)
+        + 1;
+    env.storage()
+        .instance()
+        .set(&TAX_COLLECTION_ID_COUNTER, &id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn set_tax_collection_record(env: &Env, record_id: u64, record: &TaxCollectionRecord) {
+    let key = (TAX_COLLECTION_PREFIX, record_id);
+    env.storage().persistent().set(&key, record);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_tax_collection_record(
+    env: &Env,
+    record_id: u64,
+) -> Result<TaxCollectionRecord, LumentixError> {
+    let key = (TAX_COLLECTION_PREFIX, record_id);
+    let record = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::TaxCollectionRecordNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(record)
+}
+
+pub fn get_tax_collection_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&TAX_COLLECTION_ID_COUNTER)
+        .unwrap_or(0u64)
+}
+
+// ── Tax Report ──────────────────────────────────────────────────────────────
+
+pub fn next_tax_report_id(env: &Env) -> u64 {
+    let id: u64 = env
+        .storage()
+        .instance()
+        .get(&TAX_REPORT_ID_COUNTER)
+        .unwrap_or(0u64)
+        + 1;
+    env.storage().instance().set(&TAX_REPORT_ID_COUNTER, &id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn set_tax_report(env: &Env, report_id: u64, report: &TaxReport) {
+    let key = (TAX_REPORT_PREFIX, report_id);
+    env.storage().persistent().set(&key, report);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_tax_report(env: &Env, report_id: u64) -> Result<TaxReport, LumentixError> {
+    let key = (TAX_REPORT_PREFIX, report_id);
+    let report = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::TaxReportNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(report)
 }

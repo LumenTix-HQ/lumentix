@@ -44,6 +44,7 @@ import { ChatModule } from './chat/chat.module';
 import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { EmailCampaignsModule } from './email-campaigns/email-campaigns.module';
+import { TaxModule } from './tax/tax.module';
 
 
 @Module({
@@ -130,6 +131,7 @@ import { EmailCampaignsModule } from './email-campaigns/email-campaigns.module';
     ZkpModule,
     LoyaltyModule,
     EmailCampaignsModule,
+    TaxModule,
   ],
   controllers: [AppController],
   providers: [

@@ -270,6 +270,7 @@ pub use events::{
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     EmailCampaignCreated, MarketingEmailsSent, EmailAnalyticsUpdated,
+    TaxRuleRegistered, TicketSalesTaxCalculated, TaxCollected, TaxReportExported,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -284,4 +285,5 @@ pub use types::{
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
     UserPreferences,
     EmailCampaign, EmailCampaignStatus, EmailCampaignAnalytics,
+    TaxRule, TaxJurisdiction, TicketTaxCalculation, TaxCollectionRecord, TaxReport,
 };

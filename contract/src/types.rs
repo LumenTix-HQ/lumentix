@@ -759,3 +759,107 @@ pub struct CrossChainLock {
     pub unlocked: bool,
     pub bridge_proof: Option<String>,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tax Determination System
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Jurisdiction type for tax applicability
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TaxJurisdiction {
+    /// US state-level tax
+    UsState,
+    /// Country-level tax (VAT, GST, etc.)
+    Country,
+    /// Municipal / city tax
+    Municipal,
+}
+
+/// A single applicable tax rule for a jurisdiction
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaxRule {
+    /// Unique rule identifier
+    pub rule_id: u64,
+    /// Human-readable jurisdiction name (e.g. "California", "Germany")
+    pub jurisdiction_name: String,
+    /// ISO 3166-1 alpha-2 country code or US state abbreviation
+    pub jurisdiction_code: String,
+    /// Jurisdiction type
+    pub jurisdiction_type: TaxJurisdiction,
+    /// Tax rate in basis points (e.g., 875 = 8.75%)
+    pub rate_bps: u32,
+    /// True when the rule is active and should be applied
+    pub is_active: bool,
+    /// Timestamp when the rule was last updated
+    pub updated_at: u64,
+}
+
+/// Result of a tax calculation for a ticket purchase
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TicketTaxCalculation {
+    /// The event for which tax was calculated
+    pub event_id: u64,
+    /// Ticket base price (before tax)
+    pub base_price: i128,
+    /// Total tax amount in the same currency units as base_price
+    pub tax_amount: i128,
+    /// Final price (base_price + tax_amount)
+    pub total_price: i128,
+    /// Effective tax rate in basis points (weighted across rules)
+    pub effective_rate_bps: u32,
+    /// ISO 3166 jurisdiction code used for the calculation
+    pub jurisdiction_code: String,
+    /// Ledger timestamp of the calculation
+    pub calculated_at: u64,
+}
+
+/// An immutable on-chain record of a tax collection event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaxCollectionRecord {
+    /// Unique sequential record identifier
+    pub record_id: u64,
+    /// Ticket purchase that triggered this collection
+    pub ticket_id: u64,
+    /// Event associated with the ticket
+    pub event_id: u64,
+    /// Purchaser address
+    pub purchaser: Address,
+    /// Tax amount collected
+    pub tax_amount: i128,
+    /// Currency code (e.g. "USD", "XLM")
+    pub currency: String,
+    /// Jurisdiction code used
+    pub jurisdiction_code: String,
+    /// On-chain timestamp of collection
+    pub collected_at: u64,
+    /// Whether the tax has been remitted/exported
+    pub remitted: bool,
+}
+
+/// Aggregated tax report for a given jurisdiction and time window
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaxReport {
+    /// Unique report identifier
+    pub report_id: u64,
+    /// Jurisdiction this report covers
+    pub jurisdiction_code: String,
+    /// Number of collection records included
+    pub record_count: u32,
+    /// Total tax collected across all records
+    pub total_tax_collected: i128,
+    /// Currency of the collected amount
+    pub currency: String,
+    /// Start of the reporting window (ledger timestamp)
+    pub period_start: u64,
+    /// End of the reporting window (ledger timestamp)
+    pub period_end: u64,
+    /// Address of the admin who exported the report
+    pub exported_by: Address,
+    /// Timestamp when the report was generated
+    pub generated_at: u64,
+}

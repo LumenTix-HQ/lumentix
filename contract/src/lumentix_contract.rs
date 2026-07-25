@@ -32,6 +32,7 @@ use crate::events::{
 };
 use crate::storage;
 use crate::types::{
+use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CancellationReason,
     CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
     CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
@@ -5813,5 +5814,292 @@ impl LumentixContract {
         campaign_id: u64,
     ) -> Result<EmailCampaign, LumentixError> {
         storage::get_email_campaign(&env, campaign_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // TAX DETERMINATION — calculate_ticket_sales_tax, record_tax_collection,
+    //                     export_tax_reports
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Register or update a tax rule for a jurisdiction.
+    ///
+    /// Only the contract admin may call this.  If a rule already exists for
+    /// `jurisdiction_code` it is overwritten (updated), allowing rate changes.
+    /// `rate_bps` must be in the range [0, 10000] (0–100 %).
+    pub fn register_tax_rule(
+        env: Env,
+        admin: Address,
+        jurisdiction_code: String,
+        jurisdiction_name: String,
+        jurisdiction_type: crate::types::TaxJurisdiction,
+        rate_bps: u32,
+    ) -> Result<u64, LumentixError> {
+        admin.require_auth();
+
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_string_not_empty(&jurisdiction_code)?;
+        validation::validate_string_not_empty(&jurisdiction_name)?;
+
+        if rate_bps > 10_000 {
+            return Err(LumentixError::TaxInvalidRate);
+        }
+
+        // Reuse existing rule_id if one exists for this jurisdiction_code,
+        // otherwise allocate a new one.
+        let rule_id = if storage::has_tax_rule_for_code(&env, &jurisdiction_code) {
+            let existing = storage::get_tax_rule_by_code(&env, &jurisdiction_code)?;
+            existing.rule_id
+        } else {
+            storage::next_tax_rule_id(&env)
+        };
+
+        let rule = crate::types::TaxRule {
+            rule_id,
+            jurisdiction_name,
+            jurisdiction_code: jurisdiction_code.clone(),
+            jurisdiction_type,
+            rate_bps,
+            is_active: true,
+            updated_at: env.ledger().timestamp(),
+        };
+
+        storage::set_tax_rule(&env, rule_id, &rule);
+
+        crate::events::TaxRuleRegistered::emit(
+            &env,
+            rule_id,
+            jurisdiction_code,
+            rate_bps,
+            admin,
+        );
+
+        Ok(rule_id)
+    }
+
+    /// Look up the active tax rule for a jurisdiction code.
+    pub fn get_tax_rule(env: Env, jurisdiction_code: String) -> Result<crate::types::TaxRule, LumentixError> {
+        storage::get_tax_rule_by_code(&env, &jurisdiction_code)
+    }
+
+    /// Calculate the sales tax for a ticket purchase without recording anything.
+    ///
+    /// Looks up the active tax rule for `jurisdiction_code`, applies the rate
+    /// to `base_price`, and returns a [`TicketTaxCalculation`].  This is a
+    /// read-like operation (it only emits an event and does not mutate state).
+    ///
+    /// # Arguments
+    /// * `event_id`          – The event being purchased
+    /// * `base_price`        – Ticket price before tax (must be > 0)
+    /// * `jurisdiction_code` – ISO 3166 country / US state code
+    pub fn calculate_ticket_sales_tax(
+        env: Env,
+        event_id: u64,
+        base_price: i128,
+        jurisdiction_code: String,
+    ) -> Result<crate::types::TicketTaxCalculation, LumentixError> {
+        if base_price <= 0 {
+            return Err(LumentixError::TaxInvalidBasePrice);
+        }
+        validation::validate_string_not_empty(&jurisdiction_code)?;
+
+        let rule = storage::get_tax_rule_by_code(&env, &jurisdiction_code)?;
+
+        if !rule.is_active {
+            return Err(LumentixError::TaxRuleNotFound);
+        }
+
+        // tax_amount = base_price × rate_bps / 10_000  (rounded down)
+        let tax_amount = base_price * (rule.rate_bps as i128) / 10_000i128;
+        let total_price = base_price + tax_amount;
+
+        let calc = crate::types::TicketTaxCalculation {
+            event_id,
+            base_price,
+            tax_amount,
+            total_price,
+            effective_rate_bps: rule.rate_bps,
+            jurisdiction_code: jurisdiction_code.clone(),
+            calculated_at: env.ledger().timestamp(),
+        };
+
+        crate::events::TicketSalesTaxCalculated::emit(
+            &env,
+            event_id,
+            base_price,
+            tax_amount,
+            jurisdiction_code,
+        );
+
+        Ok(calc)
+    }
+
+    /// Record a tax collection event after a ticket is purchased.
+    ///
+    /// Called by the purchaser (or a backend service acting on their behalf)
+    /// to create an immutable on-chain tax receipt linked to a `ticket_id`.
+    /// The tax amount is validated against the active rule for
+    /// `jurisdiction_code` to prevent misreporting.
+    ///
+    /// Returns the new `record_id`.
+    pub fn record_tax_collection(
+        env: Env,
+        purchaser: Address,
+        ticket_id: u64,
+        event_id: u64,
+        jurisdiction_code: String,
+        currency: String,
+    ) -> Result<u64, LumentixError> {
+        purchaser.require_auth();
+
+        validation::validate_string_not_empty(&jurisdiction_code)?;
+        validation::validate_string_not_empty(&currency)?;
+
+        // Fetch the event to get its ticket_price as the authoritative base
+        let event = storage::get_event(&env, event_id)?;
+        let base_price = event.ticket_price;
+
+        if base_price <= 0 {
+            return Err(LumentixError::TaxInvalidBasePrice);
+        }
+
+        let rule = storage::get_tax_rule_by_code(&env, &jurisdiction_code)?;
+
+        if !rule.is_active {
+            return Err(LumentixError::TaxRuleNotFound);
+        }
+
+        let tax_amount = base_price * (rule.rate_bps as i128) / 10_000i128;
+
+        let record_id = storage::next_tax_collection_id(&env);
+
+        let record = crate::types::TaxCollectionRecord {
+            record_id,
+            ticket_id,
+            event_id,
+            purchaser: purchaser.clone(),
+            tax_amount,
+            currency: currency.clone(),
+            jurisdiction_code: jurisdiction_code.clone(),
+            collected_at: env.ledger().timestamp(),
+            remitted: false,
+        };
+
+        storage::set_tax_collection_record(&env, record_id, &record);
+
+        crate::events::TaxCollected::emit(
+            &env,
+            record_id,
+            ticket_id,
+            event_id,
+            purchaser,
+            tax_amount,
+            jurisdiction_code,
+        );
+
+        Ok(record_id)
+    }
+
+    /// Retrieve a single tax collection record.
+    pub fn get_tax_collection_record(
+        env: Env,
+        record_id: u64,
+    ) -> Result<crate::types::TaxCollectionRecord, LumentixError> {
+        storage::get_tax_collection_record(&env, record_id)
+    }
+
+    /// Export an aggregated tax report for a jurisdiction over a time window.
+    ///
+    /// Iterates over all tax collection records, filters by `jurisdiction_code`
+    /// and the inclusive `[period_start, period_end]` window, sums the tax
+    /// amounts, and persists an immutable [`TaxReport`] on-chain.
+    ///
+    /// Only the contract admin may generate reports (admin auth required).
+    ///
+    /// Returns the generated [`TaxReport`].
+    pub fn export_tax_reports(
+        env: Env,
+        admin: Address,
+        jurisdiction_code: String,
+        currency: String,
+        period_start: u64,
+        period_end: u64,
+    ) -> Result<crate::types::TaxReport, LumentixError> {
+        admin.require_auth();
+
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_string_not_empty(&jurisdiction_code)?;
+        validation::validate_string_not_empty(&currency)?;
+
+        if period_start >= period_end {
+            return Err(LumentixError::TaxInvalidPeriod);
+        }
+
+        // Scan all collection records and aggregate matching ones
+        let total_records = storage::get_tax_collection_count(&env);
+        let mut total_tax: i128 = 0i128;
+        let mut matched_count: u32 = 0u32;
+
+        let mut record_id = 1u64;
+        while record_id <= total_records {
+            if let Ok(record) = storage::get_tax_collection_record(&env, record_id) {
+                if record.jurisdiction_code == jurisdiction_code
+                    && record.currency == currency
+                    && record.collected_at >= period_start
+                    && record.collected_at <= period_end
+                {
+                    total_tax += record.tax_amount;
+                    matched_count += 1;
+                }
+            }
+            record_id += 1;
+        }
+
+        if matched_count == 0 {
+            return Err(LumentixError::TaxNoRecordsForJurisdiction);
+        }
+
+        let report_id = storage::next_tax_report_id(&env);
+        let now = env.ledger().timestamp();
+
+        let report = crate::types::TaxReport {
+            report_id,
+            jurisdiction_code: jurisdiction_code.clone(),
+            record_count: matched_count,
+            total_tax_collected: total_tax,
+            currency,
+            period_start,
+            period_end,
+            exported_by: admin.clone(),
+            generated_at: now,
+        };
+
+        storage::set_tax_report(&env, report_id, &report);
+
+        crate::events::TaxReportExported::emit(
+            &env,
+            report_id,
+            jurisdiction_code,
+            total_tax,
+            matched_count,
+            admin,
+        );
+
+        Ok(report)
+    }
+
+    /// Retrieve a previously generated tax report.
+    pub fn get_tax_report(
+        env: Env,
+        report_id: u64,
+    ) -> Result<crate::types::TaxReport, LumentixError> {
+        storage::get_tax_report(&env, report_id)
     }
 }

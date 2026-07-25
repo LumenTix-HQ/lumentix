@@ -1479,3 +1479,76 @@ impl EmailAnalyticsUpdated {
         );
     }
 }
+
+// ─── Tax Determination Events ────────────────────────────────────────────────
+
+/// Emitted when an admin registers a new tax rule for a jurisdiction
+pub struct TaxRuleRegistered;
+impl TaxRuleRegistered {
+    pub fn emit(
+        env: &Env,
+        rule_id: u64,
+        jurisdiction_code: String,
+        rate_bps: u32,
+        registered_by: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("taxreg"),),
+            (rule_id, jurisdiction_code, rate_bps, registered_by),
+        );
+    }
+}
+
+/// Emitted when a ticket sales tax is calculated (read-only operation)
+pub struct TicketSalesTaxCalculated;
+impl TicketSalesTaxCalculated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        base_price: i128,
+        tax_amount: i128,
+        jurisdiction_code: String,
+    ) {
+        env.events().publish(
+            (symbol_short!("taxcalc"),),
+            (event_id, base_price, tax_amount, jurisdiction_code),
+        );
+    }
+}
+
+/// Emitted when a tax collection record is created after a ticket purchase
+pub struct TaxCollected;
+impl TaxCollected {
+    pub fn emit(
+        env: &Env,
+        record_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        purchaser: Address,
+        tax_amount: i128,
+        jurisdiction_code: String,
+    ) {
+        env.events().publish(
+            (symbol_short!("taxcoll"),),
+            (record_id, ticket_id, event_id, purchaser, tax_amount, jurisdiction_code),
+        );
+    }
+}
+
+/// Emitted when an admin exports a tax report for a jurisdiction
+pub struct TaxReportExported;
+impl TaxReportExported {
+    pub fn emit(
+        env: &Env,
+        report_id: u64,
+        jurisdiction_code: String,
+        total_tax_collected: i128,
+        record_count: u32,
+        exported_by: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("taxrpt"),),
+            (report_id, jurisdiction_code, total_tax_collected, record_count, exported_by),
+        );
+    }
+}
