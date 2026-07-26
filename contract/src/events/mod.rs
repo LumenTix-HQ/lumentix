@@ -1426,3 +1426,112 @@ impl MemorabiliaClaimed {
         );
     }
 }
+
+pub struct MerchandiseLinkedToTicket;
+impl MerchandiseLinkedToTicket {
+    pub fn emit(
+        env: &Env,
+        ticket_id: u64,
+        merchandise_id: u64,
+        buyer: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("merclnk"),),
+            (ticket_id, merchandise_id, buyer),
+        );
+    }
+}
+
+pub struct MerchandisePreordered;
+impl MerchandisePreordered {
+    pub fn emit(
+        env: &Env,
+        voucher_id: u64,
+        ticket_id: u64,
+        merchandise_id: u64,
+        buyer: Address,
+        price: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("mercord"),),
+            (voucher_id, ticket_id, merchandise_id, buyer, price),
+        );
+    }
+}
+
+pub struct WaitlistSpotReleased;
+impl WaitlistSpotReleased {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        recipient: Address,
+        spots: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("wspotrel"),),
+            (event_id, recipient, spots),
+        );
+    }
+}
+
+pub struct WaitlistOfferExpired;
+impl WaitlistOfferExpired {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        buyer: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("woffexp"),),
+            (event_id, buyer),
+        );
+    }
+}
+
+pub struct SeatUpgradeBidPlaced;
+impl SeatUpgradeBidPlaced {
+    pub fn emit(
+        env: &Env,
+        bid_id: u64,
+        event_id: u64,
+        ticket_id: u64,
+        bidder: Address,
+        bid_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgbidpl"),),
+            (bid_id, event_id, ticket_id, bidder, bid_amount),
+        );
+    }
+}
+
+pub struct SeatUpgradeBidResolved;
+impl SeatUpgradeBidResolved {
+    pub fn emit(
+        env: &Env,
+        bid_id: u64,
+        event_id: u64,
+        ticket_id: u64,
+        won: bool,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgbidrs"),),
+            (bid_id, event_id, ticket_id, won),
+        );
+    }
+}
+
+pub struct SeatUpgradeBidRefunded;
+impl SeatUpgradeBidRefunded {
+    pub fn emit(
+        env: &Env,
+        bid_id: u64,
+        bidder: Address,
+        amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgbidrf"),),
+            (bid_id, bidder, amount),
+        );
+    }
+}

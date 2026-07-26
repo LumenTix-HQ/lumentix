@@ -528,6 +528,34 @@ pub struct EventMerchandise {
     pub active: bool,
 }
 
+/// Pre-ordered merchandise voucher linked to a ticket
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MerchVoucher {
+    pub voucher_id: u64,
+    pub buyer: Address,
+    pub ticket_id: u64,
+    pub merchandise_id: u64,
+    pub issued_at: u64,
+    pub redeemed: bool,
+}
+
+/// Bid for an upgraded seat or VIP tier
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeatUpgradeBid {
+    pub bid_id: u64,
+    pub event_id: u64,
+    pub ticket_id: u64,
+    pub bidder: Address,
+    pub target_tier: String,
+    pub bid_amount: i128,
+    pub timestamp: u64,
+    pub resolved: bool,
+    pub won: bool,
+    pub refunded: bool,
+}
+
 /// A commemorative NFT collectible for a special event
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
