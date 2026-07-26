@@ -302,4 +302,12 @@ pub enum LumentixError {
     CheckinProofInvalid = 99,
     /// Memorabilia claim not found
     MemorabiliaClaimNotFound = 103,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Core feature implementation errors
+    // ═══════════════════════════════════════════════════════════════════════
+    /// The provided zero-knowledge proof is invalid
+    InvalidZkp = 150,
+    /// Staff member doesn't have the required role/permission
+    StaffRoleNotFound = 151,
 }

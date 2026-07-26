@@ -167,6 +167,8 @@ pub struct Seat {
     pub occupied: bool,
     pub held_until: u64,
     pub held_by: Option<Address>,
+    pub x: Option<u32>,
+    pub y: Option<u32>,
 }
 
 // ── Multi-Currency ─────────────────────────────────────────────────────────
