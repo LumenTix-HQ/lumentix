@@ -340,4 +340,20 @@ pub enum LumentixError {
     TaxRuleAlreadyExists = 129,
     /// Ticket base price must be positive to compute tax
     TaxInvalidBasePrice = 130,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Calendar Integration errors (131–138)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// iCal record not found
+    ICalRecordNotFound = 131,
+    /// Google Calendar link record not found
+    GoogleCalendarLinkNotFound = 132,
+    /// Calendar invite record not found
+    CalendarInviteNotFound = 133,
+    /// Recipient email string is empty
+    CalendarInviteEmptyEmail = 134,
+    /// Caller is not the ticket owner
+    CalendarInviteUnauthorized = 135,
+    /// Event must be Published to generate calendar entries
+    CalendarEventNotPublished = 136,
 }

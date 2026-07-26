@@ -1552,3 +1552,55 @@ impl TaxReportExported {
         );
     }
 }
+
+// ─── Calendar Integration Events ─────────────────────────────────────────────
+
+/// Emitted when an iCal record is generated for a ticket holder
+pub struct ICalFileGenerated;
+impl ICalFileGenerated {
+    pub fn emit(
+        env: &Env,
+        record_id: u64,
+        event_id: u64,
+        ticket_id: u64,
+        attendee: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("icalgen"),),
+            (record_id, event_id, ticket_id, attendee),
+        );
+    }
+}
+
+/// Emitted when a Google Calendar link is created for a ticket holder
+pub struct GoogleCalendarLinkCreated;
+impl GoogleCalendarLinkCreated {
+    pub fn emit(
+        env: &Env,
+        record_id: u64,
+        event_id: u64,
+        attendee: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("gcallink"),),
+            (record_id, event_id, attendee),
+        );
+    }
+}
+
+/// Emitted when a calendar invite is dispatched to an attendee
+pub struct CalendarInviteSent;
+impl CalendarInviteSent {
+    pub fn emit(
+        env: &Env,
+        record_id: u64,
+        event_id: u64,
+        ticket_id: u64,
+        attendee: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("calinvite"),),
+            (record_id, event_id, ticket_id, attendee),
+        );
+    }
+}

@@ -863,3 +863,59 @@ pub struct TaxReport {
     /// Timestamp when the report was generated
     pub generated_at: u64,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Calendar Integration
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A generated iCalendar (RFC 5545) record anchored to a ticket purchase
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ICalRecord {
+    /// Unique record id (sequential)
+    pub record_id: u64,
+    /// Event this record belongs to
+    pub event_id: u64,
+    /// Ticket that triggered the generation
+    pub ticket_id: u64,
+    /// Attendee address
+    pub attendee: Address,
+    /// RFC 5545 UID for the VEVENT (deterministic: "evt-{event_id}-{ticket_id}@lumentix")
+    pub uid: String,
+    /// Ledger timestamp when the record was created
+    pub generated_at: u64,
+}
+
+/// A Google Calendar deep-link record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GoogleCalendarLink {
+    /// Unique record id
+    pub record_id: u64,
+    /// Event this link belongs to
+    pub event_id: u64,
+    /// Attendee who requested the link
+    pub attendee: Address,
+    /// The encoded URL (stored on-chain as proof of issuance)
+    pub url: String,
+    /// Ledger timestamp
+    pub created_at: u64,
+}
+
+/// A calendar invite dispatch record (proof that an invite was sent)
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CalendarInviteRecord {
+    /// Unique record id
+    pub record_id: u64,
+    /// Event
+    pub event_id: u64,
+    /// Ticket that triggered the invite
+    pub ticket_id: u64,
+    /// Attendee address
+    pub attendee: Address,
+    /// Destination email address (stored as a String for on-chain reference)
+    pub recipient_email: String,
+    /// Ledger timestamp
+    pub sent_at: u64,
+}

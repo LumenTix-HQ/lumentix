@@ -12,6 +12,7 @@ use crate::types::{
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
     EmailCampaign, EmailCampaignAnalytics,
     TaxRule, TaxCollectionRecord, TaxReport,
+    ICalRecord, GoogleCalendarLink, CalendarInviteRecord,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -2034,4 +2035,81 @@ pub fn get_tax_report(env: &Env, report_id: u64) -> Result<TaxReport, LumentixEr
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(report)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CALENDAR INTEGRATION STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ICAL_ID_COUNTER: &str = "ICAL_CTR";
+const ICAL_PREFIX: &str = "ICAL_";
+const GCAL_ID_COUNTER: &str = "GCAL_CTR";
+const GCAL_PREFIX: &str = "GCAL_";
+const CALINVITE_ID_COUNTER: &str = "CALINV_CTR";
+const CALINVITE_PREFIX: &str = "CALINV_";
+
+// ── iCal Records ────────────────────────────────────────────────────────────
+
+pub fn next_ical_id(env: &Env) -> u64 {
+    let id: u64 = env.storage().instance().get(&ICAL_ID_COUNTER).unwrap_or(0u64) + 1;
+    env.storage().instance().set(&ICAL_ID_COUNTER, &id);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn set_ical_record(env: &Env, record_id: u64, record: &ICalRecord) {
+    let key = (ICAL_PREFIX, record_id);
+    env.storage().persistent().set(&key, record);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_ical_record(env: &Env, record_id: u64) -> Result<ICalRecord, LumentixError> {
+    let key = (ICAL_PREFIX, record_id);
+    let rec = env.storage().persistent().get(&key).ok_or(LumentixError::ICalRecordNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(rec)
+}
+
+// ── Google Calendar Links ────────────────────────────────────────────────────
+
+pub fn next_gcal_id(env: &Env) -> u64 {
+    let id: u64 = env.storage().instance().get(&GCAL_ID_COUNTER).unwrap_or(0u64) + 1;
+    env.storage().instance().set(&GCAL_ID_COUNTER, &id);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn set_gcal_link(env: &Env, record_id: u64, link: &GoogleCalendarLink) {
+    let key = (GCAL_PREFIX, record_id);
+    env.storage().persistent().set(&key, link);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_gcal_link(env: &Env, record_id: u64) -> Result<GoogleCalendarLink, LumentixError> {
+    let key = (GCAL_PREFIX, record_id);
+    let link = env.storage().persistent().get(&key).ok_or(LumentixError::GoogleCalendarLinkNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(link)
+}
+
+// ── Calendar Invite Records ──────────────────────────────────────────────────
+
+pub fn next_calinvite_id(env: &Env) -> u64 {
+    let id: u64 = env.storage().instance().get(&CALINVITE_ID_COUNTER).unwrap_or(0u64) + 1;
+    env.storage().instance().set(&CALINVITE_ID_COUNTER, &id);
+    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn set_calinvite_record(env: &Env, record_id: u64, record: &CalendarInviteRecord) {
+    let key = (CALINVITE_PREFIX, record_id);
+    env.storage().persistent().set(&key, record);
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_calinvite_record(env: &Env, record_id: u64) -> Result<CalendarInviteRecord, LumentixError> {
+    let key = (CALINVITE_PREFIX, record_id);
+    let rec = env.storage().persistent().get(&key).ok_or(LumentixError::CalendarInviteNotFound)?;
+    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(rec)
 }

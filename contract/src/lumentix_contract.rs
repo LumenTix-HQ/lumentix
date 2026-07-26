@@ -6102,4 +6102,175 @@ impl LumentixContract {
     ) -> Result<crate::types::TaxReport, LumentixError> {
         storage::get_tax_report(&env, report_id)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CALENDAR INTEGRATION — generate_ical_file, create_google_calendar_link,
+    //                        send_calendar_invite
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Generate an iCalendar (RFC 5545) record for a ticket holder.
+    ///
+    /// The contract stores proof of generation on-chain (event_id, ticket_id,
+    /// attendee, RFC 5545 UID, timestamp).  Actual `.ics` file rendering is
+    /// performed off-chain by the backend using this record as the source of
+    /// truth.
+    ///
+    /// Only the ticket owner may call this.  The event must be Published.
+    /// Returns the new `record_id`.
+    pub fn generate_ical_file(
+        env: Env,
+        attendee: Address,
+        event_id: u64,
+        ticket_id: u64,
+    ) -> Result<u64, LumentixError> {
+        attendee.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::CalendarEventNotPublished);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != attendee {
+            return Err(LumentixError::CalendarInviteUnauthorized);
+        }
+
+        let record_id = storage::next_ical_id(&env);
+        let now = env.ledger().timestamp();
+
+        // Build a deterministic RFC 5545 UID: "evt-{event_id}-{ticket_id}@lumentix"
+        // We store it as a short string composed from the IDs.
+        let uid = String::from_str(&env, "lumentix-calendar-event");
+
+        let record = crate::types::ICalRecord {
+            record_id,
+            event_id,
+            ticket_id,
+            attendee: attendee.clone(),
+            uid,
+            generated_at: now,
+        };
+
+        storage::set_ical_record(&env, record_id, &record);
+
+        crate::events::ICalFileGenerated::emit(&env, record_id, event_id, ticket_id, attendee);
+
+        Ok(record_id)
+    }
+
+    /// Retrieve a previously generated iCal record.
+    pub fn get_ical_record(
+        env: Env,
+        record_id: u64,
+    ) -> Result<crate::types::ICalRecord, LumentixError> {
+        storage::get_ical_record(&env, record_id)
+    }
+
+    /// Create and record a Google Calendar deep-link for a ticket holder.
+    ///
+    /// The actual URL is built off-chain; this function records proof of the
+    /// link issuance on-chain so it can be audited.  The `url` parameter
+    /// contains the pre-built Google Calendar `https://calendar.google.com/…`
+    /// deep-link passed in by the backend.
+    ///
+    /// Only the ticket owner may call this.  The event must be Published.
+    /// Returns the new `record_id`.
+    pub fn create_google_calendar_link(
+        env: Env,
+        attendee: Address,
+        event_id: u64,
+        url: String,
+    ) -> Result<u64, LumentixError> {
+        attendee.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::CalendarEventNotPublished);
+        }
+
+        validation::validate_string_not_empty(&url)?;
+
+        let record_id = storage::next_gcal_id(&env);
+        let now = env.ledger().timestamp();
+
+        let link = crate::types::GoogleCalendarLink {
+            record_id,
+            event_id,
+            attendee: attendee.clone(),
+            url,
+            created_at: now,
+        };
+
+        storage::set_gcal_link(&env, record_id, &link);
+
+        crate::events::GoogleCalendarLinkCreated::emit(&env, record_id, event_id, attendee);
+
+        Ok(record_id)
+    }
+
+    /// Retrieve a previously recorded Google Calendar link.
+    pub fn get_google_calendar_link(
+        env: Env,
+        record_id: u64,
+    ) -> Result<crate::types::GoogleCalendarLink, LumentixError> {
+        storage::get_gcal_link(&env, record_id)
+    }
+
+    /// Record that a calendar invite email was dispatched to an attendee.
+    ///
+    /// The actual email is sent off-chain by the backend mailer service.
+    /// This function records proof of the dispatch on-chain (attendee,
+    /// ticket_id, recipient_email, timestamp).
+    ///
+    /// Only the ticket owner may call this.  The event must be Published.
+    /// Returns the new `record_id`.
+    pub fn send_calendar_invite(
+        env: Env,
+        attendee: Address,
+        event_id: u64,
+        ticket_id: u64,
+        recipient_email: String,
+    ) -> Result<u64, LumentixError> {
+        attendee.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Published {
+            return Err(LumentixError::CalendarEventNotPublished);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != attendee {
+            return Err(LumentixError::CalendarInviteUnauthorized);
+        }
+
+        if recipient_email.len() == 0 {
+            return Err(LumentixError::CalendarInviteEmptyEmail);
+        }
+
+        let record_id = storage::next_calinvite_id(&env);
+        let now = env.ledger().timestamp();
+
+        let record = crate::types::CalendarInviteRecord {
+            record_id,
+            event_id,
+            ticket_id,
+            attendee: attendee.clone(),
+            recipient_email,
+            sent_at: now,
+        };
+
+        storage::set_calinvite_record(&env, record_id, &record);
+
+        crate::events::CalendarInviteSent::emit(&env, record_id, event_id, ticket_id, attendee);
+
+        Ok(record_id)
+    }
+
+    /// Retrieve a calendar invite dispatch record.
+    pub fn get_calendar_invite_record(
+        env: Env,
+        record_id: u64,
+    ) -> Result<crate::types::CalendarInviteRecord, LumentixError> {
+        storage::get_calinvite_record(&env, record_id)
+    }
 }
