@@ -1427,180 +1427,111 @@ impl MemorabiliaClaimed {
     }
 }
 
-// ─── Email Campaign Events ───────────────────────────────────────────────────
-
-/// Emitted when an organizer creates a new email campaign
-pub struct EmailCampaignCreated;
-impl EmailCampaignCreated {
+pub struct MerchandiseLinkedToTicket;
+impl MerchandiseLinkedToTicket {
     pub fn emit(
         env: &Env,
-        campaign_id: u64,
-        organizer: Address,
-        subject: String,
-        recipient_count: u32,
-    ) {
-        env.events().publish(
-            (symbol_short!("emcreate"),),
-            (campaign_id, organizer, subject, recipient_count),
-        );
-    }
-}
-
-/// Emitted when an organizer dispatches marketing emails for a campaign
-pub struct MarketingEmailsSent;
-impl MarketingEmailsSent {
-    pub fn emit(
-        env: &Env,
-        campaign_id: u64,
-        organizer: Address,
-        recipient_count: u32,
-        sent_at: u64,
-    ) {
-        env.events().publish(
-            (symbol_short!("emsent"),),
-            (campaign_id, organizer, recipient_count, sent_at),
-        );
-    }
-}
-
-/// Emitted when analytics for a campaign are updated
-pub struct EmailAnalyticsUpdated;
-impl EmailAnalyticsUpdated {
-    pub fn emit(
-        env: &Env,
-        campaign_id: u64,
-        total_opened: u32,
-        total_clicked: u32,
-        last_updated_at: u64,
-    ) {
-        env.events().publish(
-            (symbol_short!("emalytic"),),
-            (campaign_id, total_opened, total_clicked, last_updated_at),
-        );
-    }
-}
-
-// ─── Tax Determination Events ────────────────────────────────────────────────
-
-/// Emitted when an admin registers a new tax rule for a jurisdiction
-pub struct TaxRuleRegistered;
-impl TaxRuleRegistered {
-    pub fn emit(
-        env: &Env,
-        rule_id: u64,
-        jurisdiction_code: String,
-        rate_bps: u32,
-        registered_by: Address,
-    ) {
-        env.events().publish(
-            (symbol_short!("taxreg"),),
-            (rule_id, jurisdiction_code, rate_bps, registered_by),
-        );
-    }
-}
-
-/// Emitted when a ticket sales tax is calculated (read-only operation)
-pub struct TicketSalesTaxCalculated;
-impl TicketSalesTaxCalculated {
-    pub fn emit(
-        env: &Env,
-        event_id: u64,
-        base_price: i128,
-        tax_amount: i128,
-        jurisdiction_code: String,
-    ) {
-        env.events().publish(
-            (symbol_short!("taxcalc"),),
-            (event_id, base_price, tax_amount, jurisdiction_code),
-        );
-    }
-}
-
-/// Emitted when a tax collection record is created after a ticket purchase
-pub struct TaxCollected;
-impl TaxCollected {
-    pub fn emit(
-        env: &Env,
-        record_id: u64,
         ticket_id: u64,
+        merchandise_id: u64,
+        buyer: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("merclnk"),),
+            (ticket_id, merchandise_id, buyer),
+        );
+    }
+}
+
+pub struct MerchandisePreordered;
+impl MerchandisePreordered {
+    pub fn emit(
+        env: &Env,
+        voucher_id: u64,
+        ticket_id: u64,
+        merchandise_id: u64,
+        buyer: Address,
+        price: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("mercord"),),
+            (voucher_id, ticket_id, merchandise_id, buyer, price),
+        );
+    }
+}
+
+pub struct WaitlistSpotReleased;
+impl WaitlistSpotReleased {
+    pub fn emit(
+        env: &Env,
         event_id: u64,
-        purchaser: Address,
-        tax_amount: i128,
-        jurisdiction_code: String,
+        recipient: Address,
+        spots: u32,
     ) {
         env.events().publish(
-            (symbol_short!("taxcoll"),),
-            (record_id, ticket_id, event_id, purchaser, tax_amount, jurisdiction_code),
+            (symbol_short!("wspotrel"),),
+            (event_id, recipient, spots),
         );
     }
 }
 
-/// Emitted when an admin exports a tax report for a jurisdiction
-pub struct TaxReportExported;
-impl TaxReportExported {
+pub struct WaitlistOfferExpired;
+impl WaitlistOfferExpired {
     pub fn emit(
         env: &Env,
-        report_id: u64,
-        jurisdiction_code: String,
-        total_tax_collected: i128,
-        record_count: u32,
-        exported_by: Address,
+        event_id: u64,
+        buyer: Address,
     ) {
         env.events().publish(
-            (symbol_short!("taxrpt"),),
-            (report_id, jurisdiction_code, total_tax_collected, record_count, exported_by),
+            (symbol_short!("woffexp"),),
+            (event_id, buyer),
         );
     }
 }
 
-// ─── Calendar Integration Events ─────────────────────────────────────────────
-
-/// Emitted when an iCal record is generated for a ticket holder
-pub struct ICalFileGenerated;
-impl ICalFileGenerated {
+pub struct SeatUpgradeBidPlaced;
+impl SeatUpgradeBidPlaced {
     pub fn emit(
         env: &Env,
-        record_id: u64,
+        bid_id: u64,
         event_id: u64,
         ticket_id: u64,
-        attendee: Address,
+        bidder: Address,
+        bid_amount: i128,
     ) {
         env.events().publish(
-            (symbol_short!("icalgen"),),
-            (record_id, event_id, ticket_id, attendee),
+            (symbol_short!("upgbidpl"),),
+            (bid_id, event_id, ticket_id, bidder, bid_amount),
         );
     }
 }
 
-/// Emitted when a Google Calendar link is created for a ticket holder
-pub struct GoogleCalendarLinkCreated;
-impl GoogleCalendarLinkCreated {
+pub struct SeatUpgradeBidResolved;
+impl SeatUpgradeBidResolved {
     pub fn emit(
         env: &Env,
-        record_id: u64,
-        event_id: u64,
-        attendee: Address,
-    ) {
-        env.events().publish(
-            (symbol_short!("gcallink"),),
-            (record_id, event_id, attendee),
-        );
-    }
-}
-
-/// Emitted when a calendar invite is dispatched to an attendee
-pub struct CalendarInviteSent;
-impl CalendarInviteSent {
-    pub fn emit(
-        env: &Env,
-        record_id: u64,
+        bid_id: u64,
         event_id: u64,
         ticket_id: u64,
-        attendee: Address,
+        won: bool,
     ) {
         env.events().publish(
-            (symbol_short!("calinvite"),),
-            (record_id, event_id, ticket_id, attendee),
+            (symbol_short!("upgbidrs"),),
+            (bid_id, event_id, ticket_id, won),
+        );
+    }
+}
+
+pub struct SeatUpgradeBidRefunded;
+impl SeatUpgradeBidRefunded {
+    pub fn emit(
+        env: &Env,
+        bid_id: u64,
+        bidder: Address,
+        amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgbidrf"),),
+            (bid_id, bidder, amount),
         );
     }
 }

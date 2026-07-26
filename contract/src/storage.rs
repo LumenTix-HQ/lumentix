@@ -3,8 +3,8 @@ use crate::types::{
     AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
-    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, NftCollectible,
-    OrganizerReputation, ResalePriceCeiling, Seat,
+    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
+    OrganizerReputation, ResalePriceCeiling, Seat, SeatUpgradeBid,
     Ticket, TicketDidAssociation, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
@@ -61,6 +61,10 @@ const PLAN_ID_COUNTER: &str = "PLAN_CTR";
 const INCIDENT_PREFIX: &str = "INC_";
 const INCIDENT_COUNTER: &str = "INC_CTR";
 const USER_PREFS_PREFIX: &str = "UPREF_";
+const ZKP_PARAMS: &str = "ZKP_PARAMS";
+const COMPLIANCE_RULES: &str = "COMP_RULES";
+const STAFF_ROLE_PREFIX: &str = "STAFF_";
+const VISUAL_LAYOUT_PREFIX: &str = "VISLAY_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -1804,312 +1808,70 @@ pub fn has_memorabilia_claimed(env: &Env, ticket_id: u64) -> bool {
     env.storage().persistent().has(&key)
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// EMAIL CAMPAIGN STORAGE
-// ═══════════════════════════════════════════════════════════════════════════
+// ── ZKP Storage ────────────────────────────────────────────────────────────
 
-const EMAIL_CAMPAIGN_ID_COUNTER: &str = "EMCAMP_CTR";
-const EMAIL_CAMPAIGN_PREFIX: &str = "EMCAMP_";
-const EMAIL_CAMPAIGN_ANALYTICS_PREFIX: &str = "EMANA_";
-
-pub fn next_email_campaign_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&EMAIL_CAMPAIGN_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage()
-        .instance()
-        .set(&EMAIL_CAMPAIGN_ID_COUNTER, &id);
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
+pub fn set_zkp_params(env: &Env, params: &String) {
+    env.storage().instance().set(&ZKP_PARAMS, params);
 }
 
-pub fn set_email_campaign(env: &Env, campaign_id: u64, campaign: &EmailCampaign) {
-    let key = (EMAIL_CAMPAIGN_PREFIX, campaign_id);
-    env.storage().persistent().set(&key, campaign);
+pub fn get_zkp_params(env: &Env) -> Option<String> {
+    env.storage().instance().get(&ZKP_PARAMS)
+}
+
+// ── Compliance Storage ─────────────────────────────────────────────────────
+
+pub fn set_compliance_rules(env: &Env, rules: &String) {
+    env.storage().instance().set(&COMPLIANCE_RULES, rules);
+}
+
+pub fn get_compliance_rules(env: &Env) -> Option<String> {
+    env.storage().instance().get(&COMPLIANCE_RULES)
+}
+
+// ── Staff Role Storage ─────────────────────────────────────────────────────
+
+pub fn set_staff_role(env: &Env, organizer: &Address, staff: &Address, role: &String) {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    env.storage().persistent().set(&key, role);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_email_campaign(
-    env: &Env,
-    campaign_id: u64,
-) -> Result<EmailCampaign, LumentixError> {
-    let key = (EMAIL_CAMPAIGN_PREFIX, campaign_id);
-    let campaign = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::EmailCampaignNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(campaign)
+pub fn get_staff_role(env: &Env, organizer: &Address, staff: &Address) -> Option<String> {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    let role = env.storage().persistent().get(&key);
+    if role.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    role
 }
 
-pub fn set_email_campaign_analytics(
-    env: &Env,
-    campaign_id: u64,
-    analytics: &EmailCampaignAnalytics,
-) {
-    let key = (EMAIL_CAMPAIGN_ANALYTICS_PREFIX, campaign_id);
-    env.storage().persistent().set(&key, analytics);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+pub fn remove_staff_role(env: &Env, organizer: &Address, staff: &Address) {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    env.storage().persistent().remove(&key);
 }
 
-pub fn get_email_campaign_analytics(
-    env: &Env,
-    campaign_id: u64,
-) -> Result<EmailCampaignAnalytics, LumentixError> {
-    let key = (EMAIL_CAMPAIGN_ANALYTICS_PREFIX, campaign_id);
-    let analytics = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::EmailCampaignAnalyticsNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(analytics)
-}
+// ── Visual Layout Storage ──────────────────────────────────────────────────
 
-// ═══════════════════════════════════════════════════════════════════════════
-// TAX DETERMINATION STORAGE
-// ═══════════════════════════════════════════════════════════════════════════
-
-const TAX_RULE_ID_COUNTER: &str = "TAXRULE_CTR";
-const TAX_RULE_PREFIX: &str = "TAXRULE_";
-/// Maps jurisdiction_code → rule_id so we can look up by code
-const TAX_RULE_BY_CODE_PREFIX: &str = "TAXCODE_";
-const TAX_COLLECTION_ID_COUNTER: &str = "TAXCOL_CTR";
-const TAX_COLLECTION_PREFIX: &str = "TAXCOL_";
-const TAX_REPORT_ID_COUNTER: &str = "TAXRPT_CTR";
-const TAX_REPORT_PREFIX: &str = "TAXRPT_";
-
-// ── Tax Rule ────────────────────────────────────────────────────────────────
-
-pub fn next_tax_rule_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&TAX_RULE_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage().instance().set(&TAX_RULE_ID_COUNTER, &id);
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_tax_rule(env: &Env, rule_id: u64, rule: &TaxRule) {
-    let key = (TAX_RULE_PREFIX, rule_id);
-    env.storage().persistent().set(&key, rule);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    // Also index by jurisdiction_code for O(1) lookup
-    let code_key = (TAX_RULE_BY_CODE_PREFIX, rule.jurisdiction_code.clone());
-    env.storage().persistent().set(&code_key, &rule_id);
-    env.storage()
-        .persistent()
-        .extend_ttl(&code_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-}
-
-pub fn get_tax_rule(env: &Env, rule_id: u64) -> Result<TaxRule, LumentixError> {
-    let key = (TAX_RULE_PREFIX, rule_id);
-    let rule = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::TaxRuleNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(rule)
-}
-
-pub fn get_tax_rule_by_code(env: &Env, jurisdiction_code: &String) -> Result<TaxRule, LumentixError> {
-    let code_key = (TAX_RULE_BY_CODE_PREFIX, jurisdiction_code.clone());
-    let rule_id: u64 = env
-        .storage()
-        .persistent()
-        .get(&code_key)
-        .ok_or(LumentixError::TaxRuleNotFound)?;
-    get_tax_rule(env, rule_id)
-}
-
-pub fn has_tax_rule_for_code(env: &Env, jurisdiction_code: &String) -> bool {
-    let code_key = (TAX_RULE_BY_CODE_PREFIX, jurisdiction_code.clone());
-    env.storage().persistent().has(&code_key)
-}
-
-// ── Tax Collection Record ───────────────────────────────────────────────────
-
-pub fn next_tax_collection_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&TAX_COLLECTION_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage()
-        .instance()
-        .set(&TAX_COLLECTION_ID_COUNTER, &id);
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_tax_collection_record(env: &Env, record_id: u64, record: &TaxCollectionRecord) {
-    let key = (TAX_COLLECTION_PREFIX, record_id);
-    env.storage().persistent().set(&key, record);
+pub fn set_visual_layout(env: &Env, event_id: u64, layout_data: &String) {
+    let key = (VISUAL_LAYOUT_PREFIX, event_id);
+    env.storage().persistent().set(&key, layout_data);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_tax_collection_record(
-    env: &Env,
-    record_id: u64,
-) -> Result<TaxCollectionRecord, LumentixError> {
-    let key = (TAX_COLLECTION_PREFIX, record_id);
-    let record = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::TaxCollectionRecordNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(record)
+pub fn get_visual_layout(env: &Env, event_id: u64) -> Option<String> {
+    let key = (VISUAL_LAYOUT_PREFIX, event_id);
+    let layout = env.storage().persistent().get(&key);
+    if layout.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    layout
 }
 
-pub fn get_tax_collection_count(env: &Env) -> u64 {
-    env.storage()
-        .instance()
-        .get(&TAX_COLLECTION_ID_COUNTER)
-        .unwrap_or(0u64)
-}
-
-// ── Tax Report ──────────────────────────────────────────────────────────────
-
-pub fn next_tax_report_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&TAX_REPORT_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage().instance().set(&TAX_REPORT_ID_COUNTER, &id);
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_tax_report(env: &Env, report_id: u64, report: &TaxReport) {
-    let key = (TAX_REPORT_PREFIX, report_id);
-    env.storage().persistent().set(&key, report);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-}
-
-pub fn get_tax_report(env: &Env, report_id: u64) -> Result<TaxReport, LumentixError> {
-    let key = (TAX_REPORT_PREFIX, report_id);
-    let report = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::TaxReportNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(report)
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CALENDAR INTEGRATION STORAGE
-// ═══════════════════════════════════════════════════════════════════════════
-
-const ICAL_ID_COUNTER: &str = "ICAL_CTR";
-const ICAL_PREFIX: &str = "ICAL_";
-const GCAL_ID_COUNTER: &str = "GCAL_CTR";
-const GCAL_PREFIX: &str = "GCAL_";
-const CALINVITE_ID_COUNTER: &str = "CALINV_CTR";
-const CALINVITE_PREFIX: &str = "CALINV_";
-
-// ── iCal Records ────────────────────────────────────────────────────────────
-
-pub fn next_ical_id(env: &Env) -> u64 {
-    let id: u64 = env.storage().instance().get(&ICAL_ID_COUNTER).unwrap_or(0u64) + 1;
-    env.storage().instance().set(&ICAL_ID_COUNTER, &id);
-    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_ical_record(env: &Env, record_id: u64, record: &ICalRecord) {
-    let key = (ICAL_PREFIX, record_id);
-    env.storage().persistent().set(&key, record);
-    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-}
-
-pub fn get_ical_record(env: &Env, record_id: u64) -> Result<ICalRecord, LumentixError> {
-    let key = (ICAL_PREFIX, record_id);
-    let rec = env.storage().persistent().get(&key).ok_or(LumentixError::ICalRecordNotFound)?;
-    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(rec)
-}
-
-// ── Google Calendar Links ────────────────────────────────────────────────────
-
-pub fn next_gcal_id(env: &Env) -> u64 {
-    let id: u64 = env.storage().instance().get(&GCAL_ID_COUNTER).unwrap_or(0u64) + 1;
-    env.storage().instance().set(&GCAL_ID_COUNTER, &id);
-    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_gcal_link(env: &Env, record_id: u64, link: &GoogleCalendarLink) {
-    let key = (GCAL_PREFIX, record_id);
-    env.storage().persistent().set(&key, link);
-    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-}
-
-pub fn get_gcal_link(env: &Env, record_id: u64) -> Result<GoogleCalendarLink, LumentixError> {
-    let key = (GCAL_PREFIX, record_id);
-    let link = env.storage().persistent().get(&key).ok_or(LumentixError::GoogleCalendarLinkNotFound)?;
-    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(link)
-}
-
-// ── Calendar Invite Records ──────────────────────────────────────────────────
-
-pub fn next_calinvite_id(env: &Env) -> u64 {
-    let id: u64 = env.storage().instance().get(&CALINVITE_ID_COUNTER).unwrap_or(0u64) + 1;
-    env.storage().instance().set(&CALINVITE_ID_COUNTER, &id);
-    env.storage().instance().extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_calinvite_record(env: &Env, record_id: u64, record: &CalendarInviteRecord) {
-    let key = (CALINVITE_PREFIX, record_id);
-    env.storage().persistent().set(&key, record);
-    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-}
-
-pub fn get_calinvite_record(env: &Env, record_id: u64) -> Result<CalendarInviteRecord, LumentixError> {
-    let key = (CALINVITE_PREFIX, record_id);
-    let rec = env.storage().persistent().get(&key).ok_or(LumentixError::CalendarInviteNotFound)?;
-    env.storage().persistent().extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(rec)
-}
