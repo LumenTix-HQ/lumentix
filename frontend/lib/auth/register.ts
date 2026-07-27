@@ -1,5 +1,3 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
 export interface RegisterPayload {
   email: string;
   password: string;
@@ -12,7 +10,9 @@ export interface AuthResponse {
   user?: { id: string; email: string; role: string };
 }
 
-export async function registerUser(payload: RegisterPayload): Promise<AuthResponse> {
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+export async function registerUser(payload: RegisterPayload): Promise<{ ok: boolean }> {
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -31,7 +31,7 @@ export async function registerUser(payload: RegisterPayload): Promise<AuthRespon
 }
 
 export async function loginUser(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/auth/login`, {
+  const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -39,8 +39,10 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message ?? 'Login failed');
+    const err: any = new Error(body.message ?? 'Login failed');
+    err.status = res.status;
+    throw err;
   }
 
-  return res.json();
+  return { accessToken: '', refreshToken: '' };
 }

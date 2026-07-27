@@ -8,19 +8,23 @@ import { localDateTimeToUTC } from "@/lib/utils/datetime";
 
 type EventRecord = { id: string; title: string; location?: string };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
-
 function toApiDate(value: string, timezone: string): string {
-    // The picker emits a wall-clock string like "2025-06-15T15:00". Interpret
-    // it in the organizer's chosen IANA zone and convert to a UTC ISO string.
     return localDateTimeToUTC(value, timezone);
 }
 
-async function parseApiError(response: Response): Promise<string> {
-    const payload = await response.json().catch(() => null);
-    if (typeof payload?.message === "string") return payload.message;
-    if (Array.isArray(payload?.message)) return payload.message.join(", ");
-    return `Request failed with status ${response.status}`;
+async function proxyFetch<T>(path: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(`/api/proxy/${path.replace(/^\//, '')}`, init);
+    if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        const msg = typeof payload?.message === "string"
+            ? payload.message
+            : Array.isArray(payload?.message)
+                ? payload.message.join(", ")
+                : `Request failed with status ${res.status}`;
+        throw new Error(msg);
+    }
+    if (res.status === 204) return null as T;
+    return res.json();
 }
 
 export default function CreateEventPage() {
@@ -32,9 +36,10 @@ export default function CreateEventPage() {
     const fetchEvents = async () => {
         setLoadError(null);
         try {
-            const response = await fetch(`${API_BASE_URL}/events?page=1&limit=10`, { cache: "no-store" });
-            if (!response.ok) throw new Error(await parseApiError(response));
-            const payload = (await response.json()) as { data?: EventRecord[] };
+            const payload = await proxyFetch<{ data?: EventRecord[] }>(
+                "events?page=1&limit=10",
+                { cache: "no-store" },
+            );
             setEvents(payload.data ?? []);
         } catch (error) {
             setLoadError(error instanceof Error ? error.message : "Could not load events");
@@ -49,12 +54,8 @@ export default function CreateEventPage() {
         setSubmitError(null);
         setSubmitSuccess(null);
         try {
-            window.localStorage.setItem("lumentix_access_token", values.authToken);
-            window.localStorage.setItem("lumentix_wallet_public_key", values.walletPublicKey);
-
-            const response = await fetch(`${API_BASE_URL}/events`, {
+            const created = await proxyFetch<EventRecord>("events", {
                 method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${values.authToken}` },
                 body: JSON.stringify({
                     title: values.title,
                     description: values.description || undefined,
@@ -67,9 +68,6 @@ export default function CreateEventPage() {
                     status: values.status,
                 }),
             });
-
-            if (!response.ok) throw new Error(await parseApiError(response));
-            const created = (await response.json()) as EventRecord;
             setSubmitSuccess(`Event "${created.title}" created successfully.`);
             await fetchEvents();
         } catch (error) {
@@ -87,8 +85,8 @@ export default function CreateEventPage() {
 
     const initialValues = {
         ...defaultCreateEventValues,
-        authToken: typeof window === "undefined" ? "" : window.localStorage.getItem("lumentix_access_token") ?? "",
-        walletPublicKey: typeof window === "undefined" ? "" : window.localStorage.getItem("lumentix_wallet_public_key") ?? "",
+        authToken: "",
+        walletPublicKey: "",
     };
 
     return (

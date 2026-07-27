@@ -1,20 +1,19 @@
-const ACCESS_TOKEN_KEY = 'lumentix_access_token';
-const REFRESH_TOKEN_KEY = 'lumentix_refresh_token';
+export async function setTokens(access: string, refresh: string): Promise<void> {
+  await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ access_token: access, refresh_token: refresh }),
+  });
+}
 
-export function setTokens(access: string, refresh: string): void {
-  localStorage.setItem(ACCESS_TOKEN_KEY, access);
-  localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+export async function clearTokens(): Promise<void> {
+  await fetch("/api/auth/logout", { method: "POST" });
 }
 
 export function getAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+  return null;
 }
 
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
-}
-
-export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  return null;
 }
