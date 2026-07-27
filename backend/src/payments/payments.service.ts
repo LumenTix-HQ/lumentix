@@ -474,6 +474,31 @@ export class PaymentsService {
     );
   }
 
+  async findPaymentPaths(
+    sourcePublicKey: string,
+    sourceAsset: string,
+    destAsset: string,
+    destAmount: string,
+  ) {
+    const records = await this.stellarService.findPaymentPath(
+      sourcePublicKey,
+      sourceAsset,
+      destAsset,
+      destAmount,
+    );
+
+    return records.map((record: any, index: number) => ({
+      rank: index + 1,
+      sourceAmount: record.source_amount,
+      sourceAsset: sourceAsset,
+      destinationAmount: record.destination_amount,
+      destinationAsset: destAsset,
+      path: (record.path ?? []).map((a: any) =>
+        a.asset_code ? `${a.asset_code}:${a.asset_issuer}` : 'native',
+      ),
+    }));
+  }
+
   async expireStalePayments(): Promise<void> {
     const expired = await this.paymentsRepository.find({
       where: {

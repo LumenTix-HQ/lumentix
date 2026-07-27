@@ -150,6 +150,15 @@ export class AuthService {
   async generateWalletChallenge(userId: string): Promise<{ nonce: string; message: string }> {
     const nonce = this.stellarService.generateNonce();
     const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
+
+    const challenge = this.walletChallengeRepository.create({
+      userId,
+      nonce,
+      used: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+    });
+    await this.walletChallengeRepository.save(challenge);
+
     await this.cacheManager.set(`wallet-challenge:${userId}`, nonce, 300);
     return { nonce, message };
   }
@@ -165,11 +174,40 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired nonce. Please request a new one.');
     }
 
+    // Check for nonce reuse via the WalletChallenge entity
+    const challenge = await this.walletChallengeRepository.findOne({
+      where: { userId, nonce },
+    });
+
+    if (!challenge) {
+      throw new BadRequestException('Invalid or expired nonce. Please request a new one.');
+    }
+
+    if (challenge.used) {
+      await this.auditService.log({
+        action: AuditAction.WALLET_NONCE_REPLAY,
+        userId,
+        resourceId: challenge.id,
+        meta: {
+          reason: 'Nonce reuse attempt detected',
+          publicKey,
+          nonce,
+        },
+      });
+      throw new BadRequestException(
+        'This nonce has already been used. Please request a new challenge.',
+      );
+    }
+
     const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
     const isValid = this.stellarService.verifySignature(publicKey, signature, message);
     if (!isValid) {
       throw new UnauthorizedException('Invalid signature. Please try again.');
     }
+
+    // Mark the nonce as used to prevent replay
+    challenge.used = true;
+    await this.walletChallengeRepository.save(challenge);
 
     await this.usersService.updateWallet(userId, publicKey);
     await this.cacheManager.del(`wallet-challenge:${userId}`);

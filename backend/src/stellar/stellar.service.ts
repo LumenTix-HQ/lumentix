@@ -391,6 +391,28 @@ export class StellarService implements OnModuleDestroy {
     return tx.toXDR();
   }
 
+  /**
+   * Build a pathPaymentStrictReceive operation (without wrapping in a full transaction).
+   * Useful when composing multi-operation transactions on the client side.
+   */
+  buildPathPaymentOp(params: {
+    sourceAsset: Asset;
+    sendMax: string;
+    destPublicKey: string;
+    destAsset: Asset;
+    destAmount: string;
+    path: Asset[];
+  }): ReturnType<typeof Operation.pathPaymentStrictReceive> {
+    return Operation.pathPaymentStrictReceive({
+      sendAsset: params.sourceAsset,
+      sendMax: params.sendMax,
+      destination: params.destPublicKey,
+      destAsset: params.destAsset,
+      destAmount: params.destAmount,
+      path: params.path,
+    });
+  }
+
   async buildTicketTransferXdr(params: {
     sourcePublicKey: string;
     destPublicKey: string;
