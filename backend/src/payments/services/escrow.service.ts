@@ -68,7 +68,39 @@ export class EscrowService {
     const { publicKey, secret } = this.stellarService.generateEscrowKeypair();
 
     // 2. Pre-flight check: ensure platform account has enough XLM to fund
-    await this.stellarService.checkPlatformBalance();
+    const platformPublicKey =
+      this.configService.get<string>('stellar.platformPublicKey') ?? '';
+    if (!platformPublicKey) {
+      throw new InternalServerErrorException(
+        'Platform public key is not configured.',
+      );
+    }
+
+    const platformAccount = await this.stellarService.getAccount(
+      platformPublicKey,
+    );
+    const signerCount = platformAccount.signers.length;
+    const requiredXlm = 0.5 * (2 + signerCount);
+
+    const nativeBalance = platformAccount.balances.find(
+      (b) => b.asset_type === 'native',
+    );
+    const availableXlm = parseFloat(nativeBalance?.balance ?? '0');
+
+    if (availableXlm < requiredXlm) {
+      this.logger.error(
+        `Insufficient platform balance to create escrow: ` +
+          `available=${availableXlm.toFixed(7)} XLM, ` +
+          `required=${requiredXlm.toFixed(7)} XLM ` +
+          `(signers=${signerCount})`,
+      );
+      throw new InternalServerErrorException(
+        `Insufficient platform balance to create escrow. ` +
+          `Available: ${availableXlm.toFixed(7)} XLM, ` +
+          `Required: ${requiredXlm.toFixed(7)} XLM (${signerCount} signer(s)). ` +
+          `Fund the platform account or remove extra signers.`,
+      );
+    }
 
     // 3. Fund the new account on-chain via StellarService
     try {

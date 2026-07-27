@@ -887,7 +887,7 @@ export class RefundService {
         );
       }
 
-      const txResponse = await this.stellarService.sendPayment(
+      const txResponse = await this.retrySendPayment(
         escrowSecret,
         user.stellarPublicKey,
         String(amount),
@@ -939,6 +939,9 @@ export class RefundService {
     } catch (error: unknown) {
       const reason =
         error instanceof Error ? error.message : 'Unknown error during refund';
+
+      payment.status = PaymentStatus.FAILED;
+      await this.paymentsRepository.save(payment);
 
       await this.auditService.log({
         action: 'REFUND_FAILED',
@@ -1155,6 +1158,46 @@ export class RefundService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // PRIVATE — retrySendPayment (exponential backoff for Horizon timeouts)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private static readonly REFUND_RETRY_DELAYS_MS = [30_000, 120_000, 600_000];
+
+  private async retrySendPayment(
+    sourceSecret: string,
+    destination: string,
+    amount: string,
+    currency: string,
+    paymentId: string,
+  ): Promise<ReturnType<StellarService['sendPayment']>> {
+    const maxRetries = RefundService.REFUND_RETRY_DELAYS_MS.length;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.stellarService.sendPayment(
+          sourceSecret,
+          destination,
+          amount,
+          currency,
+        );
+      } catch (err: unknown) {
+        if (attempt < maxRetries && isHorizonTimeout(err)) {
+          const delay = RefundService.REFUND_RETRY_DELAYS_MS[attempt];
+          this.logger.warn(
+            `Horizon timeout on refund paymentId=${paymentId} ` +
+              `(attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw new Error('Exhausted all retry attempts for refund sendPayment');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // PRIVATE — mapDisputeToDto
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1181,4 +1224,15 @@ export class RefundService {
       reviewedBy: dispute.reviewedBy || undefined,
     };
   }
+}
+
+function isHorizonTimeout(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message?.toLowerCase() ?? '';
+  return (
+    msg.includes('timeout') ||
+    msg.includes('ETIMEOUT') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up')
+  );
 }

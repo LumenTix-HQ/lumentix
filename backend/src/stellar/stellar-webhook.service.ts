@@ -105,8 +105,8 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
       );
 
       if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        this.logger.fatal(
-          '[STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
+        this.logger.error(
+          '[CRITICAL][STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
             `${this.reconnectAttempts} consecutive times and will no longer ` +
             'attempt to reconnect automatically. ' +
             'Use POST /admin/stellar/reconnect to restart manually.',
