@@ -35,16 +35,20 @@ import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { PaymentsService } from './payments.service';
 import { RefundService } from './refunds/refund.service';
+import { EscrowService } from './services/escrow.service';
+import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @ApiTags('Payments')
 @ApiBearerAuth()
 @Controller('payments')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
+    private readonly escrowService: EscrowService,
   ) {}
 
   @Get('history')
