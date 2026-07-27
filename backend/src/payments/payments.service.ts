@@ -512,6 +512,15 @@ export class PaymentsService {
     }
   }
 
+  async mergeEscrowToOrganizer(eventId: string, organizerId: string) {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+    return this.escrowService.mergeEscrowToOrganizer(eventId, event.organizerId);
+  }
+
   private async resolvePaymentOperations(txRecord: any): Promise<PaymentOperation[]> {
     try {
       const operationsHref = txRecord._links.operations?.href;
