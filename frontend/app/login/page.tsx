@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { setTokens } from "@/lib/auth/auth";
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -49,11 +48,7 @@ export default function LoginPage() {
         return;
       }
 
-      if (data.accessToken && data.refreshToken) {
-        setTokens(data.accessToken, data.refreshToken);
-      }
-
-      const redirect = searchParams.get("redirect") ?? "/events";
+      const redirect = searchParams.get("redirect") ?? "/";
       router.push(redirect);
     } catch {
       setErrorMessage("Network error. Please check your connection.");
@@ -152,6 +147,13 @@ export default function LoginPage() {
             )}
           </button>
         </form>
+
+        <p className="text-center text-sm text-gray-500 mt-6">
+          Don&apos;t have an account?{" "}
+          <a href="/register" className="text-blue-400 hover:underline">
+            Sign up
+          </a>
+        </p>
       </div>
     </main>
   );

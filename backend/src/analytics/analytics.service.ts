@@ -40,6 +40,11 @@ import {
   BusinessOutcomePredictionDto,
   MarketTrendsDto,
 } from './dto/bi-dashboard.dto';
+import {
+  RevenueDashboardDto,
+  CurrencyRevenue,
+  RevenueTimePoint,
+} from './dto/revenue-dashboard.dto';
 import { EventStatus } from '../events/entities/event.entity';
 
 @Injectable()
@@ -697,6 +702,71 @@ export class AnalyticsService {
       demographics,
       attendance,
       refunds,
+    };
+  }
+
+  async getRevenueDashboard(
+    eventId: string,
+    organizerId: string,
+  ): Promise<RevenueDashboardDto> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) {
+      throw new NotFoundException(`Event with id "${eventId}" not found`);
+    }
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+
+    const confirmedPayments = await this.paymentRepository.find({
+      where: { eventId, status: PaymentStatus.CONFIRMED },
+      order: { createdAt: 'ASC' },
+    });
+
+    const totalRevenue = confirmedPayments.reduce(
+      (sum, p) => sum + Number(p.amount),
+      0,
+    );
+    const ticketCount = confirmedPayments.length;
+    const averagePrice = ticketCount > 0 ? totalRevenue / ticketCount : 0;
+
+    const currencyMap = new Map<string, { tickets: number; amount: number }>();
+    for (const payment of confirmedPayments) {
+      const currency = payment.currency || 'XLM';
+      const existing = currencyMap.get(currency) || { tickets: 0, amount: 0 };
+      existing.tickets += 1;
+      existing.amount += Number(payment.amount);
+      currencyMap.set(currency, existing);
+    }
+
+    const currencyBreakdown: CurrencyRevenue[] = Array.from(currencyMap.entries()).map(
+      ([currency, data]) => ({
+        currency,
+        ticketCount: data.tickets,
+        totalAmount: data.amount,
+        avgPrice: data.tickets > 0 ? data.amount / data.tickets : 0,
+      }),
+    );
+
+    const dailyMap = new Map<string, RevenueTimePoint>();
+    for (const payment of confirmedPayments) {
+      const day = payment.createdAt.toISOString().slice(0, 10);
+      const existing = dailyMap.get(day) || { date: day, ticketsSold: 0, revenue: 0 };
+      existing.ticketsSold += 1;
+      existing.revenue += Number(payment.amount);
+      dailyMap.set(day, existing);
+    }
+    const timeSeries = Array.from(dailyMap.values()).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+
+    return {
+      eventId,
+      totalRevenue,
+      ticketCount,
+      averagePrice,
+      currencyBreakdown,
+      timeSeries,
+      generatedAt: new Date().toISOString(),
     };
   }
 

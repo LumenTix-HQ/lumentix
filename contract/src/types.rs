@@ -743,3 +743,31 @@ pub struct CrossChainLock {
     pub unlocked: bool,
     pub bridge_proof: Option<String>,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event Certification (Issue #654)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A blockchain-issued certification standard an event can be certified against.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CertificationStandard {
+    /// Certifies the event and its tickets are verified as authentic/non-counterfeit.
+    AuthenticityVerified,
+    /// Certifies the event meets the platform's quality-assurance criteria.
+    QualityAssured,
+    /// Certifies the event meets the platform's safety-compliance criteria.
+    SafetyCompliant,
+}
+
+/// A certificate issued for an event under a specific standard.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventCertificate {
+    pub certificate_id: u64,
+    pub event_id: u64,
+    pub organizer: Address,
+    pub standard: CertificationStandard,
+    pub issued_at: u64,
+    pub revoked: bool,
+}

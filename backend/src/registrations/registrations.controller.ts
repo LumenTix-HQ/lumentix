@@ -102,17 +102,17 @@ export class RegistrationsController {
   @ApiParam({ name: 'id', description: 'Event UUID' })
   @ApiResponse({ status: 200, description: 'CSV file' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 429, description: 'Rate limit exceeded (10/hour per organizer)' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded (5/minute per organizer)' })
   async exportCsv(
     @Param('id', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
     @Res() res: Response,
   ) {
-    const rateKey = `export-limit:${req.user.id}`;
+    const rateKey = `export-rate:${req.user.id}`;
     const count = await this.redis.incr(rateKey);
-    if (count === 1) await this.redis.expire(rateKey, 3600);
-    if (count > 10) {
-      return res.status(429).json({ message: 'Export rate limit exceeded. Maximum 10 exports per hour.' });
+    if (count === 1) await this.redis.expire(rateKey, 60);
+    if (count > 5) {
+      return res.status(429).json({ message: 'Export rate limit exceeded. Maximum 5 exports per minute.' });
     }
 
     const csv = await this.service.exportRegistrationsCsv(eventId, req.user.id);

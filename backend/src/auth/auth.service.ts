@@ -1,10 +1,11 @@
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
@@ -25,6 +26,8 @@ const REFRESH_TTL_DAYS = 30;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
@@ -156,6 +159,15 @@ export class AuthService {
   async generateWalletChallenge(userId: string): Promise<{ nonce: string; message: string }> {
     const nonce = this.stellarService.generateNonce();
     const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
+
+    const challenge = this.walletChallengeRepository.create({
+      userId,
+      nonce,
+      used: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+    });
+    await this.walletChallengeRepository.save(challenge);
+
     await this.cacheManager.set(`wallet-challenge:${userId}`, nonce, 300);
     return { nonce, message };
   }
@@ -171,11 +183,40 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired nonce. Please request a new one.');
     }
 
+    // Check for nonce reuse via the WalletChallenge entity
+    const challenge = await this.walletChallengeRepository.findOne({
+      where: { userId, nonce },
+    });
+
+    if (!challenge) {
+      throw new BadRequestException('Invalid or expired nonce. Please request a new one.');
+    }
+
+    if (challenge.used) {
+      await this.auditService.log({
+        action: AuditAction.WALLET_NONCE_REPLAY,
+        userId,
+        resourceId: challenge.id,
+        meta: {
+          reason: 'Nonce reuse attempt detected',
+          publicKey,
+          nonce,
+        },
+      });
+      throw new BadRequestException(
+        'This nonce has already been used. Please request a new challenge.',
+      );
+    }
+
     const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
     const isValid = this.stellarService.verifySignature(publicKey, signature, message);
     if (!isValid) {
       throw new UnauthorizedException('Invalid signature. Please try again.');
     }
+
+    // Mark the nonce as used to prevent replay
+    challenge.used = true;
+    await this.walletChallengeRepository.save(challenge);
 
     await this.usersService.updateWallet(userId, publicKey);
     await this.cacheManager.del(`wallet-challenge:${userId}`);
@@ -188,6 +229,68 @@ export class AuthService {
     });
 
     return { linked: true, stellarPublicKey: publicKey };
+  }
+
+  // ─── Wallet-based login (unauthenticated) ─────────────────────────────────
+
+  async requestWalletChallenge(publicKey: string): Promise<{ nonce: string; accountAddress: string }> {
+    const nonce = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await this.walletChallengeRepository.save(
+      this.walletChallengeRepository.create({
+        userId: publicKey,
+        nonce,
+        expiresAt,
+        used: false,
+      }),
+    );
+
+    return { nonce, accountAddress: publicKey };
+  }
+
+  async walletLogin(
+    publicKey: string,
+    nonce: string,
+    signature: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    const challenge = await this.walletChallengeRepository.findOne({
+      where: { nonce, used: false },
+    });
+    if (!challenge) throw new BadRequestException('Invalid or expired challenge. Please request a new one.');
+    if (challenge.expiresAt.getTime() <= Date.now()) throw new BadRequestException('Challenge has expired.');
+
+    const message = nonce;
+    const isValid = this.stellarService.verifySignature(publicKey, signature, message);
+    if (!isValid) throw new UnauthorizedException('Invalid Stellar signature.');
+
+    challenge.used = true;
+    await this.walletChallengeRepository.save(challenge);
+
+    let user = await this.usersService.findByStellarPublicKey(publicKey);
+    if (!user) {
+      user = await this.usersService.createWalletUser(publicKey);
+    }
+
+    const { access_token } = this.signToken((user as any).id, (user as any).role);
+    const refresh_token = await this.issueRefreshToken((user as any).id);
+    return { access_token, refresh_token };
+  }
+
+  // ─── Password reset token cleanup ──────────────────────────────────────────
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async cleanupExpiredPasswordResetTokens(): Promise<void> {
+    const result = await this.passwordResetTokenRepository.delete({
+      used: true,
+    });
+    const expiredResult = await this.passwordResetTokenRepository.delete({
+      expiresAt: LessThan(new Date()),
+    });
+    const total = (result.affected ?? 0) + (expiredResult.affected ?? 0);
+    if (total > 0) {
+      this.logger.log(`Cleaned up ${total} password-reset tokens`);
+    }
   }
 
   // ─── Email Verification ─────────────────────────────────────────────────────

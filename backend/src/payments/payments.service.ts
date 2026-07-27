@@ -474,6 +474,31 @@ export class PaymentsService {
     );
   }
 
+  async findPaymentPaths(
+    sourcePublicKey: string,
+    sourceAsset: string,
+    destAsset: string,
+    destAmount: string,
+  ) {
+    const records = await this.stellarService.findPaymentPath(
+      sourcePublicKey,
+      sourceAsset,
+      destAsset,
+      destAmount,
+    );
+
+    return records.map((record: any, index: number) => ({
+      rank: index + 1,
+      sourceAmount: record.source_amount,
+      sourceAsset: sourceAsset,
+      destinationAmount: record.destination_amount,
+      destinationAsset: destAsset,
+      path: (record.path ?? []).map((a: any) =>
+        a.asset_code ? `${a.asset_code}:${a.asset_issuer}` : 'native',
+      ),
+    }));
+  }
+
   async expireStalePayments(): Promise<void> {
     const expired = await this.paymentsRepository.find({
       where: {
@@ -485,6 +510,15 @@ export class PaymentsService {
     for (const payment of expired) {
       await this.markFailed(payment, 'Payment expired');
     }
+  }
+
+  async mergeEscrowToOrganizer(eventId: string, organizerId: string) {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+    return this.escrowService.mergeEscrowToOrganizer(eventId, event.organizerId);
   }
 
   private async resolvePaymentOperations(txRecord: any): Promise<PaymentOperation[]> {
