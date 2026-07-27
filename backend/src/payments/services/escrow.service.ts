@@ -254,6 +254,32 @@ export class EscrowService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Balance query — organizer view
+  // ─────────────────────────────────────────────────────────────────────────
+
+  async getEscrowBalance(
+    eventId: string,
+    organizerId: string,
+  ): Promise<{ escrowPublicKey: string; balance: string; currency: string }> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new BadRequestException(`Event "${eventId}" not found.`);
+    if (event.organizerId !== organizerId) {
+      throw new BadRequestException('Only the event organizer can view escrow balance.');
+    }
+    if (!event.escrowPublicKey) {
+      throw new BadRequestException(`No escrow account found for event "${eventId}".`);
+    }
+
+    const balance = await this.stellarService.getXlmBalance(event.escrowPublicKey);
+
+    return {
+      escrowPublicKey: event.escrowPublicKey,
+      balance,
+      currency: 'XLM',
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────────────────────────────────────────
 

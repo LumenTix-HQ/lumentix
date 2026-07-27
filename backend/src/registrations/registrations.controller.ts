@@ -136,6 +136,24 @@ export class RegistrationsController {
     return this.service.listForUser(req.user.id, dto);
   }
 
+  @Post('registrations/:id/confirm-waitlist')
+  @ApiOperation({
+    summary: 'Confirm a waitlist promotion',
+    description:
+      'Authenticated. Confirms a waitlisted registration when a spot becomes available.',
+  })
+  @ApiParam({ name: 'id', description: 'Registration UUID' })
+  @ApiResponse({ status: 200, description: 'Registration confirmed from waitlist' })
+  @ApiResponse({ status: 400, description: 'Registration is not waitlisted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Registration not found' })
+  confirmWaitlist(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.service.confirmWaitlist(id, req.user.id);
+  }
+
   @Delete('registrations/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({

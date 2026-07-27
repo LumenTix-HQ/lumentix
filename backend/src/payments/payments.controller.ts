@@ -33,16 +33,20 @@ import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { PaymentsService } from './payments.service';
 import { RefundService } from './refunds/refund.service';
+import { EscrowService } from './services/escrow.service';
+import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @ApiTags('Payments')
 @ApiBearerAuth()
 @Controller('payments')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
+    private readonly escrowService: EscrowService,
   ) {}
 
   @Get('history')
@@ -172,5 +176,23 @@ export class PaymentsController {
       throw new ForbiddenException('You do not own this payment.');
     }
     return this.refundService.refundSinglePayment(id);
+  }
+
+  @Get('events/:eventId/escrow/balance')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Get escrow balance for an event',
+    description:
+      'Authenticated organizer-only. Returns the Stellar escrow account balance for the specified event, cached for 30 seconds.',
+  })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Escrow balance retrieved' })
+  @ApiResponse({ status: 400, description: 'No escrow found' })
+  @ApiResponse({ status: 403, description: 'Not event organizer' })
+  getEscrowBalance(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.escrowService.getEscrowBalance(eventId, req.user.id);
   }
 }
