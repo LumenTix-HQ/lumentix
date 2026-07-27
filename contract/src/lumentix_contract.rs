@@ -31,6 +31,7 @@ use crate::events::{
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
+    EventCertificateIssued, CertificationStandardUpdated,
 };
 use crate::storage;
 use crate::types::{
@@ -47,6 +48,7 @@ use crate::types::{
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
+    CertificationStandard,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
@@ -1297,6 +1299,201 @@ impl LumentixContract {
         }
         Self::resolve_price_tier(&env, event_id, &event)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Event Certification (Issue #654)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Issue a blockchain certificate attesting `event_id` meets `standard`.
+    /// Organizer-only, and the standard must first be enabled by the admin
+    /// via `manage_certification_standards`. Returns the new certificate ID.
+    pub fn issue_event_certificate(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        standard: CertificationStandard,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+        if !storage::is_certification_standard_enabled(&env, &standard) {
+            return Err(LumentixError::CertificationStandardNotFound);
+        }
+
+        let certificate_id = storage::get_next_certificate_id(&env);
+        storage::increment_certificate_id(&env);
+
+        let certificate = EventCertificate {
+            certificate_id,
+            event_id,
+            organizer: organizer.clone(),
+            standard,
+            issued_at: env.ledger().timestamp(),
+            revoked: false,
+        };
+        storage::set_certificate(&env, certificate_id, &certificate);
+        storage::set_event_active_certificate(&env, event_id, certificate_id);
+
+        EventCertificateIssued::emit(&env, certificate_id, event_id, organizer);
+
+        Ok(certificate_id)
+    }
+
+    /// Returns true if `event_id` currently has a valid (issued and not
+    /// revoked) certificate. No auth required — authenticity must be
+    /// publicly verifiable by anyone (e.g. a ticket marketplace or buyer).
+    pub fn verify_event_authenticity(env: Env, event_id: u64) -> Result<bool, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        match storage::get_event_active_certificate(&env, event_id) {
+            Some(certificate_id) => {
+                let certificate = storage::get_certificate(&env, certificate_id)?;
+                Ok(!certificate.revoked)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Enable or disable a certification standard platform-wide. Admin only.
+    /// Disabling a standard does not retroactively revoke certificates
+    /// already issued under it — use this to control which standards
+    /// `issue_event_certificate` will accept going forward.
+    pub fn manage_certification_standards(
+        env: Env,
+        admin: Address,
+        standard: CertificationStandard,
+        enabled: bool,
+    ) -> Result<(), LumentixError> {
+        admin.require_auth();
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        storage::set_certification_standard_enabled(&env, &standard, enabled);
+        CertificationStandardUpdated::emit(&env, standard, enabled);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Predictive Analytics (Issue #646)
+    //
+    // Soroban contracts are deterministic, gas-metered, and have no floating
+    // point or external data access, so a real statistical/ML model cannot
+    // run on-chain. The functions below are lightweight, fully deterministic
+    // heuristics over caller-supplied historical data — not machine learning.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Forecast next-period ticket demand as a weighted moving average of
+    /// `recent_period_sales` (one entry per past period, oldest first) —
+    /// more recent periods are weighted more heavily.
+    pub fn forecast_ticket_demand(
+        env: Env,
+        event_id: u64,
+        recent_period_sales: Vec<u32>,
+    ) -> Result<u32, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        if recent_period_sales.is_empty() {
+            return Err(LumentixError::InsufficientSalesHistory);
+        }
+
+        let mut weighted_sum: u64 = 0;
+        let mut weight_sum: u64 = 0;
+        let mut weight: u64 = 1;
+        for sales in recent_period_sales.iter() {
+            weighted_sum = weighted_sum.saturating_add((sales as u64).saturating_mul(weight));
+            weight_sum = weight_sum.saturating_add(weight);
+            weight = weight.saturating_add(1);
+        }
+
+        let forecast = if weight_sum == 0 {
+            0
+        } else {
+            weighted_sum / weight_sum
+        };
+        Ok(forecast as u32)
+    }
+
+    /// Suggest a price adjustment for `event_id` based on current demand
+    /// relative to remaining capacity, returning a suggested ticket price.
+    /// Builds on the same demand-multiplier concept as
+    /// `calculate_dynamic_price`, but framed around a demand/capacity ratio
+    /// rather than a sales-velocity window.
+    pub fn optimize_pricing_strategy(
+        env: Env,
+        event_id: u64,
+        current_demand: u32,
+        capacity_remaining: u32,
+    ) -> Result<i128, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+
+        if capacity_remaining == 0 {
+            return Ok(event.ticket_price);
+        }
+
+        // Demand relative to remaining capacity, in basis points (10000 = 1:1).
+        let demand_ratio_bps =
+            ((current_demand as u64).saturating_mul(10000)) / (capacity_remaining as u64);
+
+        let multiplier_bps: i128 = if demand_ratio_bps >= 20000 {
+            13000 // Demand at least 2x remaining capacity -- price up 30%.
+        } else if demand_ratio_bps >= 10000 {
+            11500
+        } else if demand_ratio_bps >= 5000 {
+            10500
+        } else {
+            9000 // Low relative demand -- suggest a modest discount.
+        };
+
+        let suggested_price = (event.ticket_price * multiplier_bps) / 10000;
+        if suggested_price <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        Ok(suggested_price)
+    }
+
+    /// Estimate the probability (0-100) that `event_id` sells out before
+    /// `days_remaining` elapses, by comparing the actual daily sales rate
+    /// so far (`current_sales` / `days_since_sales_started`) against the
+    /// rate required to sell the remaining capacity in time.
+    pub fn predict_sellout_probability(
+        env: Env,
+        event_id: u64,
+        current_sales: u32,
+        capacity: u32,
+        days_since_sales_started: u32,
+        days_remaining: u32,
+    ) -> Result<u32, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        if capacity == 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+        if current_sales >= capacity {
+            return Ok(100);
+        }
+        if days_remaining == 0 {
+            return Ok(0);
+        }
+
+        let remaining_capacity = (capacity - current_sales) as u64;
+        let required_daily_rate = remaining_capacity / (days_remaining as u64);
+        if required_daily_rate == 0 {
+            // Remaining capacity sells out even at a bare trickle of sales.
+            return Ok(100);
+        }
+
+        let actual_daily_rate = if days_since_sales_started == 0 {
+            current_sales as u64
+        } else {
+            (current_sales as u64) / (days_since_sales_started as u64)
+        };
+
+        let probability = ((actual_daily_rate.saturating_mul(100)) / required_daily_rate).min(100);
+        Ok(probability as u32)
+    }
+
     /// Join an event waitlist once capacity is exhausted.
     pub fn join_waitlist(env: Env, event_id: u64, buyer: Address) -> Result<u32, LumentixError> {
         buyer.require_auth();

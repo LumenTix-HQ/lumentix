@@ -638,7 +638,71 @@ export class EventsService {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');
     if (event.organizerId !== organizerId) throw new ForbiddenException();
-    await Promise.all(dto.images.map(({ id, order }) => this.eventImageRepo.update(id, { order })));
+
+    if (!dto.images?.length) {
+      throw new BadRequestException('At least one image order entry is required');
+    }
+
+    // #860: validate before writing anything. Previously the updates fired as
+    // independent queries via Promise.all, so a payload with duplicate or
+    // missing order values was applied verbatim — leaving the gallery with two
+    // images claiming position 1 and an ordering the UI could not render
+    // deterministically.
+    const ids = dto.images.map((i) => i.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException('Duplicate image id in order payload');
+    }
+
+    const orders = dto.images.map((i) => i.order);
+    if (new Set(orders).size !== orders.length) {
+      throw new BadRequestException('Duplicate order value in order payload');
+    }
+
+    // Contiguous from 0: gaps make "order + 1" insertion ambiguous and let the
+    // sequence drift further apart with every reorder.
+    const sorted = [...orders].sort((a, b) => a - b);
+    const hasGap = sorted.some((value, index) => value !== index);
+    if (hasGap) {
+      throw new BadRequestException(
+        `Order values must be contiguous starting at 0 (received: ${sorted.join(', ')})`,
+      );
+    }
+
+    // Every id must belong to this event — otherwise an organizer could reorder
+    // images on an event they do not own by passing foreign ids.
+    const owned = await this.eventImageRepo.find({ where: { eventId } });
+    const ownedIds = new Set(owned.map((i) => i.id));
+    const foreign = ids.filter((id) => !ownedIds.has(id));
+    if (foreign.length > 0) {
+      throw new BadRequestException(`Image(s) do not belong to this event: ${foreign.join(', ')}`);
+    }
+
+    if (ids.length !== owned.length) {
+      throw new BadRequestException(
+        `Order payload must cover every image (expected ${owned.length}, received ${ids.length})`,
+      );
+    }
+
+    // Atomic: a partially-applied reorder is worse than a rejected one, since
+    // it leaves the gallery in a state the client never asked for.
+    await this.eventImageRepo.manager.transaction(async (manager) => {
+      for (const { id, order } of dto.images) {
+        await manager.update(EventImage, { id, eventId }, { order });
+      }
+    });
+  }
+
+  /**
+   * #860: images for an event, ordered for display.
+   *
+   * Exposed so `GET /events/:id` can include the gallery — the acceptance
+   * criterion — without callers needing a second round trip.
+   */
+  async getEventImages(eventId: string): Promise<EventImage[]> {
+    return this.eventImageRepo.find({
+      where: { eventId },
+      order: { order: 'ASC', createdAt: 'ASC' },
+    });
   }
 
   async deleteEventImage(eventId: string, imageId: string, organizerId: string): Promise<void> {

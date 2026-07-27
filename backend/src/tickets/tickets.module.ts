@@ -18,6 +18,8 @@ import { TicketExpiryJob } from './jobs/ticket-expiry.job';
 import { AuditModule } from '../audit/audit.module';
 import { ResaleService } from './resale/resale.service';
 import { ResaleController } from './resale/resale.controller';
+import { ResaleMarketplaceController } from './resale/resale-marketplace.controller';
+import { RedisModule } from '../redis/redis.module';
 import { ResaleTransaction } from './resale/resale-transaction.entity';
 import { DynamicQrService } from './dynamic-qr/dynamic-qr.service';
 import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
@@ -30,9 +32,11 @@ import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
     StellarModule,
     NotificationModule,
     AuditModule,
+    // #861: provides CACHE_MANAGER for the marketplace listing cache.
+    RedisModule,
   ],
   providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob, ResaleService, DynamicQrService],
-  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController, DynamicQrController],
+  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController, ResaleMarketplaceController, DynamicQrController],
   exports: [TicketsService, ResaleService],
 })
 export class TicketsModule {}
