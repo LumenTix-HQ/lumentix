@@ -27,6 +27,8 @@ import {
 } from '@nestjs/swagger';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
@@ -172,5 +174,24 @@ export class PaymentsController {
       throw new ForbiddenException('You do not own this payment.');
     }
     return this.refundService.refundSinglePayment(id);
+  }
+
+  @Post('events/:eventId/merge-escrow')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Merge escrow to organizer after all refunds',
+    description:
+      'Organizer/admin endpoint. Merges the escrow account back to the organizer after all refunds are complete for a cancelled event.',
+  })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Escrow merged successfully' })
+  @ApiResponse({ status: 400, description: 'Refunds still pending or escrow already merged' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async mergeEscrow(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.mergeEscrowToOrganizer(eventId, req.user.id);
   }
 }

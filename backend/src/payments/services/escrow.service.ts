@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,6 +14,7 @@ import { Event, EventStatus } from 'src/events/entities/event.entity';
 import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
 import { StellarService } from 'src/stellar';
+import { Payment, PaymentStatus } from '../entities/payment.entity';
 
 /** System user ID used in audit logs for automated escrow actions */
 const SYSTEM_USER_ID = 'system';
@@ -25,6 +27,8 @@ export class EscrowService {
   constructor(
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
+    @InjectRepository(Payment)
+    private readonly paymentRepository: Repository<Payment>,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
@@ -251,6 +255,117 @@ export class EscrowService {
     );
 
     return { escrowPublicKey: event.escrowPublicKey, balance };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Merge escrow — called after all refunds are complete for cancelled events
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Merge the escrow account back to the organizer after all refunds are complete
+   * for a cancelled event. Validates that all payments have been refunded before
+   * performing the on-chain account merge.
+   *
+   * @param eventId          The cancelled event whose escrow to merge
+   * @param organizerWallet  The organizer's Stellar public key (destination)
+   * @returns                Transaction hash and remaining balance merged
+   */
+  async mergeEscrowToOrganizer(
+    eventId: string,
+    organizerWallet: string,
+  ): Promise<{ txHash: string; balance: string }> {
+    const event = await this.getEventWithEscrow(eventId);
+
+    if (event.status !== EventStatus.CANCELLED) {
+      throw new BadRequestException(
+        `Cannot merge escrow for event with status "${event.status}". Event must be cancelled.`,
+      );
+    }
+
+    if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
+      throw new BadRequestException(
+        `No escrow account found for event "${eventId}".`,
+      );
+    }
+
+    if (event.mergedAt) {
+      throw new BadRequestException(
+        `Escrow for event "${eventId}" was already merged at ${event.mergedAt.toISOString()}.`,
+      );
+    }
+
+    // Verify all confirmed payments have been refunded
+    const remainingConfirmed = await this.paymentRepository.count({
+      where: { eventId, status: PaymentStatus.CONFIRMED },
+    });
+
+    if (remainingConfirmed > 0) {
+      throw new BadRequestException(
+        `Cannot merge escrow: ${remainingConfirmed} confirmed payment(s) still await refund.`,
+      );
+    }
+
+    // Check balance
+    const balance = await this.stellarService.getXlmBalance(
+      event.escrowPublicKey,
+    );
+
+    this.logger.log(
+      `Merging escrow for event ${eventId}: balance=${balance} XLM → ${organizerWallet}`,
+    );
+
+    // Decrypt secret and perform account merge
+    let escrowSecret: string;
+    try {
+      escrowSecret = this.encryptionService.decrypt(
+        event.escrowSecretEncrypted,
+      );
+    } catch {
+      throw new InternalServerErrorException(
+        'Failed to decrypt escrow credentials.',
+      );
+    }
+
+    let txResponse: Awaited<ReturnType<StellarService['mergeAccount']>>;
+    try {
+      txResponse = await this.stellarService.mergeAccount(
+        escrowSecret,
+        organizerWallet,
+      );
+    } catch (err) {
+      this.logger.error(`Failed to merge escrow for event ${eventId}`, err);
+      throw new InternalServerErrorException(
+        'Failed to merge escrow account on the Stellar network.',
+      );
+    }
+
+    const txHash = String(txResponse.hash);
+
+    // Clear escrow credentials and record merge timestamp
+    await this.eventRepository
+      .createQueryBuilder()
+      .update(Event)
+      .set({ escrowSecretEncrypted: null, escrowPublicKey: null, mergedAt: new Date() })
+      .where('id = :id', { id: eventId })
+      .execute();
+
+    await this.auditService.log({
+      action: AuditAction.ESCROW_MERGED,
+      userId: SYSTEM_USER_ID,
+      resourceId: eventId,
+      meta: {
+        txHash,
+        balance,
+        escrowPublicKey: event.escrowPublicKey,
+        organizerWallet,
+      },
+    });
+
+    this.logger.log(
+      `Escrow merged for event ${eventId}: txHash=${txHash} → ${organizerWallet}`,
+    );
+
+    return { txHash, balance };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
