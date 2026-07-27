@@ -28,6 +28,7 @@ export class Payment {
   @Column({ nullable: true })
   eventId: string | null;
 
+  @Index()
   @Column({ nullable: true })
   seriesId: string | null;
 
