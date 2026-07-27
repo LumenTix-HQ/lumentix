@@ -310,4 +310,18 @@ pub enum LumentixError {
     InvalidZkp = 150,
     /// Staff member doesn't have the required role/permission
     StaffRoleNotFound = 151,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Event Certification errors (Issue #654)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// The requested certification standard has not been enabled by the platform admin
+    CertificationStandardNotFound = 200,
+    /// No certificate exists with the given ID
+    CertificateNotFound = 201,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Predictive Analytics errors (Issue #646)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Not enough historical sales data points were provided to produce a forecast
+    InsufficientSalesHistory = 202,
 }

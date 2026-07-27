@@ -4,10 +4,16 @@ import {
   InternalServerErrorException,
   Logger,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { InjectQueue } from '@nestjs/bull';
+import { Repository } from 'typeorm';
+import { Queue } from 'bull';
 import { UsersService } from '../users/users.service';
 import { InsufficientBalanceException } from '../common/exceptions/insufficient-balance.exception';
+import { Payment } from '../payments/entities/payment.entity';
 import {
   Horizon,
   Transaction,
@@ -31,6 +37,32 @@ export interface EscrowKeypair {
   secret: string;
 }
 
+/** Name of the Bull queue that retries a payment's persisted signed XDR after a Horizon timeout. */
+export const PAYMENT_RETRY_QUEUE = 'payment-retry';
+
+/**
+ * True for Horizon submission failures that are transient/network-level
+ * (timeout, connection reset, DNS failure, HTTP 408) rather than a
+ * definitive on-chain rejection (e.g. bad sequence number, insufficient
+ * balance) -- only these are worth retrying with the same signed XDR.
+ */
+export function isHorizonTimeoutError(err: unknown): boolean {
+  const e = err as {
+    code?: string;
+    message?: string;
+    response?: { status?: number };
+  } | null;
+  if (!e) return false;
+  if (e.response?.status === 408) return true;
+  if (e.code && ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN'].includes(e.code)) {
+    return true;
+  }
+  if (typeof e.message === 'string' && /timeout|timed out/i.test(e.message)) {
+    return true;
+  }
+  return false;
+}
+
 @Injectable()
 export class StellarService implements OnModuleDestroy {
   private readonly logger = new Logger(StellarService.name);
@@ -41,6 +73,12 @@ export class StellarService implements OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
+    @Optional()
+    @InjectRepository(Payment)
+    private readonly paymentsRepository?: Repository<Payment>,
+    @Optional()
+    @InjectQueue(PAYMENT_RETRY_QUEUE)
+    private readonly paymentRetryQueue?: Queue,
   ) {
     const horizonUrl =
       this.configService.get<string>('stellar.horizonUrl') ??
@@ -226,17 +264,18 @@ export class StellarService implements OnModuleDestroy {
     return this.server.submitTransaction(tx);
   }
 
-  async sendPayment(
+  /**
+   * Builds and signs a payment transaction without submitting it. Useful
+   * when the caller needs to persist the signed XDR (e.g. for retry-on-
+   * timeout) before calling submitTransaction() itself.
+   */
+  async buildSignedPaymentXdr(
     escrowSecret: string,
     destination: string,
     amount: string,
     assetCode: string = 'XLM',
     assetIssuer?: string,
-  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
-    this.logger.debug(
-      `sendPayment: destination=${destination} amount=${amount} asset=${assetCode}`,
-    );
-
+  ): Promise<string> {
     const escrowKeypair = Keypair.fromSecret(escrowSecret);
     const escrowAccount = await this.server.loadAccount(
       escrowKeypair.publicKey(),
@@ -262,7 +301,60 @@ export class StellarService implements OnModuleDestroy {
       .build();
 
     tx.sign(escrowKeypair);
-    return this.server.submitTransaction(tx);
+    return tx.toXDR();
+  }
+
+  /**
+   * Builds, signs, and submits a payment transaction.
+   *
+   * When `paymentId` is provided (and the payments repository / retry queue
+   * were injected — see StellarModule), the signed XDR is persisted to
+   * `payments.signedXdr` before submission. If submission then fails with a
+   * transient Horizon timeout/connection error, a retry job is enqueued
+   * (RetryPaymentJob, up to 3 attempts with exponential backoff) and this
+   * method rethrows so the caller does not mistake a scheduled retry for a
+   * completed submission — the payment is left in its current (PENDING)
+   * status rather than marked FAILED, since a retry is in flight.
+   */
+  async sendPayment(
+    escrowSecret: string,
+    destination: string,
+    amount: string,
+    assetCode: string = 'XLM',
+    assetIssuer?: string,
+    paymentId?: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    this.logger.debug(
+      `sendPayment: destination=${destination} amount=${amount} asset=${assetCode}`,
+    );
+
+    const xdr = await this.buildSignedPaymentXdr(
+      escrowSecret,
+      destination,
+      amount,
+      assetCode,
+      assetIssuer,
+    );
+
+    if (paymentId && this.paymentsRepository) {
+      await this.paymentsRepository.update({ id: paymentId }, { signedXdr: xdr });
+    }
+
+    try {
+      const response = await this.submitTransaction(xdr);
+      if (paymentId && this.paymentsRepository) {
+        await this.paymentsRepository.update({ id: paymentId }, { signedXdr: null });
+      }
+      return response;
+    } catch (err) {
+      if (paymentId && this.paymentRetryQueue && isHorizonTimeoutError(err)) {
+        this.logger.warn(
+          `sendPayment: Horizon timeout for payment ${paymentId}; enqueuing retry`,
+        );
+        await this.paymentRetryQueue.add('retry', { paymentId });
+      }
+      throw err;
+    }
   }
 
   /**
