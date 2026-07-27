@@ -892,6 +892,8 @@ export class RefundService {
         user.stellarPublicKey,
         String(amount),
         payment.currency,
+        undefined,
+        payment.id,
       );
 
       const txHash =
@@ -1006,6 +1008,8 @@ export class RefundService {
         user.stellarPublicKey,
         String(refundAmount),
         payment.currency,
+        undefined,
+        payment.id,
       );
 
       const txHash =
@@ -1112,6 +1116,8 @@ export class RefundService {
         user.stellarPublicKey,
         String(approvedAmount),
         dispute.currency,
+        undefined,
+        payment.id,
       );
 
       const txHash =

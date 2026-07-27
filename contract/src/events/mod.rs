@@ -1535,3 +1535,25 @@ impl SeatUpgradeBidRefunded {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event Certification (Issue #654)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct EventCertificateIssued;
+impl EventCertificateIssued {
+    pub fn emit(env: &Env, certificate_id: u64, event_id: u64, organizer: Address) {
+        env.events().publish(
+            (symbol_short!("certiss"),),
+            (certificate_id, event_id, organizer),
+        );
+    }
+}
+
+pub struct CertificationStandardUpdated;
+impl CertificationStandardUpdated {
+    pub fn emit(env: &Env, standard: crate::types::CertificationStandard, enabled: bool) {
+        env.events()
+            .publish((symbol_short!("certstd"),), (standard, enabled));
+    }
+}
