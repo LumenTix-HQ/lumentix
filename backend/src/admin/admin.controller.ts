@@ -190,4 +190,31 @@ export class AdminController {
   getPlatformBalance() {
     return this.stellarService.getPlatformBalanceInfo();
   }
+
+  @Get('stellar/dlq')
+  @ApiOperation({
+    summary: 'List unmatched Stellar Horizon events',
+    description:
+      'Admin-only. Returns all events in the dead-letter queue that could not ' +
+      'be matched to a pending payment or sponsor contribution.',
+  })
+  @ApiResponse({ status: 200, description: 'DLQ items retrieved' })
+  listStellarDlq() {
+    return this.adminService.listStellarDlq();
+  }
+
+  @Post('stellar/dlq/:id/retry')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Retry a specific dead-lettered Stellar event',
+    description:
+      'Admin-only. Re-attempts to match the DLQ item to a pending payment or ' +
+      'sponsor contribution.',
+  })
+  @ApiParam({ name: 'id', description: 'DLQ item UUID' })
+  @ApiResponse({ status: 200, description: 'DLQ item requeued' })
+  @ApiResponse({ status: 404, description: 'DLQ item not found' })
+  retryStellarDlqItem(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.retryStellarDlqItem(id);
+  }
 }
