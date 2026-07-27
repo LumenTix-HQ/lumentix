@@ -10,6 +10,7 @@ import Redis from 'ioredis';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
+import { CorrelationStore } from './common/correlation/correlation.store';
 import { LoggerService } from './common/logging/logger.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AppController } from './app.controller';
@@ -133,6 +134,7 @@ import { LoyaltyModule } from './loyalty/loyalty.module';
   providers: [
     AppService,
     LoggerService,
+    CorrelationStore,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
