@@ -30,9 +30,11 @@ export class Registration {
   @Column()
   userId: string;
 
+  @Index()
   @Column({ nullable: true })
   paymentId: string | null;
 
+  @Index()
   @Column({ nullable: true })
   ticketId: string | null;
 
