@@ -27,6 +27,8 @@ import {
 } from '@nestjs/swagger';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
@@ -87,6 +89,31 @@ export class PaymentsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.paymentsService.findPaymentPath(
+      (req.user as any).stellarPublicKey,
+      sourceAsset,
+      destAsset,
+      amount,
+    );
+  }
+
+  @Get('paths')
+  @SkipThrottle()
+  @ApiOperation({
+    summary: 'Find optimal payment paths',
+    description: 'Finds all available Stellar payment paths for multi-asset purchases. Returns ranked paths by cost.',
+  })
+  @ApiQuery({ name: 'sourceAsset', required: true })
+  @ApiQuery({ name: 'destAsset', required: true })
+  @ApiQuery({ name: 'amount', required: true })
+  @ApiResponse({ status: 200, description: 'Payment paths found' })
+  @ApiResponse({ status: 404, description: 'No paths found' })
+  getPaymentPaths(
+    @Query('sourceAsset') sourceAsset: string,
+    @Query('destAsset') destAsset: string,
+    @Query('amount') amount: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.findPaymentPaths(
       (req.user as any).stellarPublicKey,
       sourceAsset,
       destAsset,
@@ -178,21 +205,22 @@ export class PaymentsController {
     return this.refundService.refundSinglePayment(id);
   }
 
-  @Get('events/:eventId/escrow/balance')
-  @Roles(Role.ORGANIZER)
+  @Post('events/:eventId/merge-escrow')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
   @ApiOperation({
-    summary: 'Get escrow balance for an event',
+    summary: 'Merge escrow to organizer after all refunds',
     description:
-      'Authenticated organizer-only. Returns the Stellar escrow account balance for the specified event, cached for 30 seconds.',
+      'Organizer/admin endpoint. Merges the escrow account back to the organizer after all refunds are complete for a cancelled event.',
   })
   @ApiParam({ name: 'eventId', description: 'Event UUID' })
-  @ApiResponse({ status: 200, description: 'Escrow balance retrieved' })
-  @ApiResponse({ status: 400, description: 'No escrow found' })
-  @ApiResponse({ status: 403, description: 'Not event organizer' })
-  getEscrowBalance(
+  @ApiResponse({ status: 200, description: 'Escrow merged successfully' })
+  @ApiResponse({ status: 400, description: 'Refunds still pending or escrow already merged' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async mergeEscrow(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.escrowService.getEscrowBalance(eventId, req.user.id);
+    return this.paymentsService.mergeEscrowToOrganizer(eventId, req.user.id);
   }
 }

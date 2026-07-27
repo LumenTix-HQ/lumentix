@@ -10,6 +10,7 @@ use crate::types::{
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
+    CertificationStandard, EventCertificate,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -62,6 +63,10 @@ const ZKP_PARAMS: &str = "ZKP_PARAMS";
 const COMPLIANCE_RULES: &str = "COMP_RULES";
 const STAFF_ROLE_PREFIX: &str = "STAFF_";
 const VISUAL_LAYOUT_PREFIX: &str = "VISLAY_";
+const CERTIFICATE_PREFIX: &str = "CERT_";
+const CERTIFICATE_ID_COUNTER: &str = "CERT_CTR";
+const EVENT_CERTIFICATE_PREFIX: &str = "EVCERT_";
+const CERT_STANDARD_PREFIX: &str = "CERTSTD_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -185,6 +190,114 @@ pub fn get_event(env: &Env, event_id: u64) -> Result<Event, LumentixError> {
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(event)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event Certification (Issue #654)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Maps a certification standard to a small, stable discriminant used as a
+/// storage-key component (avoids relying on enum variants being usable
+/// directly as map/tuple keys).
+fn certification_standard_discriminant(standard: &CertificationStandard) -> u32 {
+    match standard {
+        CertificationStandard::AuthenticityVerified => 0,
+        CertificationStandard::QualityAssured => 1,
+        CertificationStandard::SafetyCompliant => 2,
+    }
+}
+
+/// Get next certificate ID
+pub fn get_next_certificate_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&CERTIFICATE_ID_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment certificate ID counter
+pub fn increment_certificate_id(env: &Env) {
+    let next_id = get_next_certificate_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&CERTIFICATE_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set certificate data
+pub fn set_certificate(env: &Env, certificate_id: u64, certificate: &EventCertificate) {
+    let key = (CERTIFICATE_PREFIX, certificate_id);
+    env.storage().persistent().set(&key, certificate);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get certificate data
+pub fn get_certificate(env: &Env, certificate_id: u64) -> Result<EventCertificate, LumentixError> {
+    let key = (CERTIFICATE_PREFIX, certificate_id);
+    let certificate = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::CertificateNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(certificate)
+}
+
+/// Record the currently-active certificate ID for an event (most recently issued).
+pub fn set_event_active_certificate(env: &Env, event_id: u64, certificate_id: u64) {
+    let key = (EVENT_CERTIFICATE_PREFIX, event_id);
+    env.storage().persistent().set(&key, &certificate_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get the currently-active certificate ID for an event, if any.
+pub fn get_event_active_certificate(env: &Env, event_id: u64) -> Option<u64> {
+    let key = (EVENT_CERTIFICATE_PREFIX, event_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    result
+}
+
+/// Enable/disable a certification standard platform-wide.
+pub fn set_certification_standard_enabled(
+    env: &Env,
+    standard: &CertificationStandard,
+    enabled: bool,
+) {
+    let key = (
+        CERT_STANDARD_PREFIX,
+        certification_standard_discriminant(standard),
+    );
+    env.storage().persistent().set(&key, &enabled);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether a certification standard is currently enabled platform-wide.
+pub fn is_certification_standard_enabled(env: &Env, standard: &CertificationStandard) -> bool {
+    let key = (
+        CERT_STANDARD_PREFIX,
+        certification_standard_discriminant(standard),
+    );
+    env.storage().persistent().get(&key).unwrap_or(false)
 }
 
 /// Set ticket data

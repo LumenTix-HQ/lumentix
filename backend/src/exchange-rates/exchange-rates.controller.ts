@@ -8,8 +8,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ExchangeRatesService } from './exchange-rates.service';
 import { CreateExchangeRateDto } from './dto/create-exchange-rate.dto';
@@ -53,6 +55,7 @@ export class ExchangeRatesController {
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('amount') amount: string,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<{ from: string; to: string; amount: number; converted: number; rate: number }> {
     if (!from || !to || !amount) {
       throw new BadRequestException('from, to, and amount are required');
@@ -62,10 +65,15 @@ export class ExchangeRatesController {
       throw new BadRequestException('Amount must be a positive number');
     }
 
-    const rate = await this.exchangeRatesService.getRate(
+    const { rate, isStale } = await this.exchangeRatesService.getRateWithStaleness(
       from.toUpperCase(),
       to.toUpperCase(),
     );
+
+    if (isStale) {
+      res.setHeader('X-Rate-Stale', 'true');
+    }
+
     return {
       from: from.toUpperCase(),
       to: to.toUpperCase(),

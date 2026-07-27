@@ -17,5 +17,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(data, { status: response.status });
   }
 
-  return NextResponse.json(data, { status: 200 });
+  const res = NextResponse.json({ ok: true }, { status: 200 });
+
+  if (data.access_token) {
+    res.cookies.set('lumentix_access_token', data.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7,
+    });
+  }
+
+  if (data.refresh_token) {
+    res.cookies.set('lumentix_refresh_token', data.refresh_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 30,
+    });
+  }
+
+  return res;
 }

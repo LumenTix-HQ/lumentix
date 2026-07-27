@@ -28,6 +28,7 @@ import { EventSeries } from '../events/entities/event-series.entity';
 import { StellarService } from '../stellar/stellar.service';
 import { NotificationService } from '../notifications/notification.service';
 import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
 
@@ -499,7 +500,7 @@ export class TicketsService {
     });
 
     await this.auditService.log({
-      action: 'TICKET_TRANSFERRED' as any,
+      action: AuditAction.TICKET_TRANSFERRED,
       userId: requesterId,
       resourceId: ticketId,
       meta: {

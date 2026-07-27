@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,6 +14,7 @@ import { Event, EventStatus } from 'src/events/entities/event.entity';
 import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
 import { StellarService } from 'src/stellar';
+import { Payment, PaymentStatus } from '../entities/payment.entity';
 
 /** System user ID used in audit logs for automated escrow actions */
 const SYSTEM_USER_ID = 'system';
@@ -25,6 +27,8 @@ export class EscrowService {
   constructor(
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
+    @InjectRepository(Payment)
+    private readonly paymentRepository: Repository<Payment>,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
@@ -68,7 +72,39 @@ export class EscrowService {
     const { publicKey, secret } = this.stellarService.generateEscrowKeypair();
 
     // 2. Pre-flight check: ensure platform account has enough XLM to fund
-    await this.stellarService.checkPlatformBalance();
+    const platformPublicKey =
+      this.configService.get<string>('stellar.platformPublicKey') ?? '';
+    if (!platformPublicKey) {
+      throw new InternalServerErrorException(
+        'Platform public key is not configured.',
+      );
+    }
+
+    const platformAccount = await this.stellarService.getAccount(
+      platformPublicKey,
+    );
+    const signerCount = platformAccount.signers.length;
+    const requiredXlm = 0.5 * (2 + signerCount);
+
+    const nativeBalance = platformAccount.balances.find(
+      (b) => b.asset_type === 'native',
+    );
+    const availableXlm = parseFloat(nativeBalance?.balance ?? '0');
+
+    if (availableXlm < requiredXlm) {
+      this.logger.error(
+        `Insufficient platform balance to create escrow: ` +
+          `available=${availableXlm.toFixed(7)} XLM, ` +
+          `required=${requiredXlm.toFixed(7)} XLM ` +
+          `(signers=${signerCount})`,
+      );
+      throw new InternalServerErrorException(
+        `Insufficient platform balance to create escrow. ` +
+          `Available: ${availableXlm.toFixed(7)} XLM, ` +
+          `Required: ${requiredXlm.toFixed(7)} XLM (${signerCount} signer(s)). ` +
+          `Fund the platform account or remove extra signers.`,
+      );
+    }
 
     // 3. Fund the new account on-chain via StellarService
     try {
@@ -254,29 +290,114 @@ export class EscrowService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Balance query — organizer view
+  // Merge escrow — called after all refunds are complete for cancelled events
   // ─────────────────────────────────────────────────────────────────────────
 
-  async getEscrowBalance(
+  /**
+   * Merge the escrow account back to the organizer after all refunds are complete
+   * for a cancelled event. Validates that all payments have been refunded before
+   * performing the on-chain account merge.
+   *
+   * @param eventId          The cancelled event whose escrow to merge
+   * @param organizerWallet  The organizer's Stellar public key (destination)
+   * @returns                Transaction hash and remaining balance merged
+   */
+  async mergeEscrowToOrganizer(
     eventId: string,
-    organizerId: string,
-  ): Promise<{ escrowPublicKey: string; balance: string; currency: string }> {
-    const event = await this.eventRepository.findOne({ where: { id: eventId } });
-    if (!event) throw new BadRequestException(`Event "${eventId}" not found.`);
-    if (event.organizerId !== organizerId) {
-      throw new BadRequestException('Only the event organizer can view escrow balance.');
-    }
-    if (!event.escrowPublicKey) {
-      throw new BadRequestException(`No escrow account found for event "${eventId}".`);
+    organizerWallet: string,
+  ): Promise<{ txHash: string; balance: string }> {
+    const event = await this.getEventWithEscrow(eventId);
+
+    if (event.status !== EventStatus.CANCELLED) {
+      throw new BadRequestException(
+        `Cannot merge escrow for event with status "${event.status}". Event must be cancelled.`,
+      );
     }
 
-    const balance = await this.stellarService.getXlmBalance(event.escrowPublicKey);
+    if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
+      throw new BadRequestException(
+        `No escrow account found for event "${eventId}".`,
+      );
+    }
 
-    return {
-      escrowPublicKey: event.escrowPublicKey,
-      balance,
-      currency: 'XLM',
-    };
+    if (event.mergedAt) {
+      throw new BadRequestException(
+        `Escrow for event "${eventId}" was already merged at ${event.mergedAt.toISOString()}.`,
+      );
+    }
+
+    // Verify all confirmed payments have been refunded
+    const remainingConfirmed = await this.paymentRepository.count({
+      where: { eventId, status: PaymentStatus.CONFIRMED },
+    });
+
+    if (remainingConfirmed > 0) {
+      throw new BadRequestException(
+        `Cannot merge escrow: ${remainingConfirmed} confirmed payment(s) still await refund.`,
+      );
+    }
+
+    // Check balance
+    const balance = await this.stellarService.getXlmBalance(
+      event.escrowPublicKey,
+    );
+
+    this.logger.log(
+      `Merging escrow for event ${eventId}: balance=${balance} XLM → ${organizerWallet}`,
+    );
+
+    // Decrypt secret and perform account merge
+    let escrowSecret: string;
+    try {
+      escrowSecret = this.encryptionService.decrypt(
+        event.escrowSecretEncrypted,
+      );
+    } catch {
+      throw new InternalServerErrorException(
+        'Failed to decrypt escrow credentials.',
+      );
+    }
+
+    let txResponse: Awaited<ReturnType<StellarService['mergeAccount']>>;
+    try {
+      txResponse = await this.stellarService.mergeAccount(
+        escrowSecret,
+        organizerWallet,
+      );
+    } catch (err) {
+      this.logger.error(`Failed to merge escrow for event ${eventId}`, err);
+      throw new InternalServerErrorException(
+        'Failed to merge escrow account on the Stellar network.',
+      );
+    }
+
+    const txHash = String(txResponse.hash);
+
+    // Clear escrow credentials and record merge timestamp
+    await this.eventRepository
+      .createQueryBuilder()
+      .update(Event)
+      .set({ escrowSecretEncrypted: null, escrowPublicKey: null, mergedAt: new Date() })
+      .where('id = :id', { id: eventId })
+      .execute();
+
+    await this.auditService.log({
+      action: AuditAction.ESCROW_MERGED,
+      userId: SYSTEM_USER_ID,
+      resourceId: eventId,
+      meta: {
+        txHash,
+        balance,
+        escrowPublicKey: event.escrowPublicKey,
+        organizerWallet,
+      },
+    });
+
+    this.logger.log(
+      `Escrow merged for event ${eventId}: txHash=${txHash} → ${organizerWallet}`,
+    );
+
+    return { txHash, balance };
   }
 
   // ─────────────────────────────────────────────────────────────────────────

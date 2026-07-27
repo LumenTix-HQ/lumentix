@@ -188,6 +188,27 @@ export class SponsorsController {
 export class EventSponsorsController {
   constructor(private readonly sponsorsService: SponsorsService) {}
 
+  @Get('leaderboard')
+  @ApiOperation({ summary: 'Sponsor leaderboard', description: 'Public. Returns sponsors ranked by contribution amount, cached for 5 minutes.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Sponsor leaderboard',
+    schema: {
+      example: [
+        {
+          rank: 1,
+          displayName: 'Sponsor A',
+          logoUrl: 'https://example.com/logo.png',
+          totalXlm: 500,
+          tierName: 'Gold',
+        },
+      ],
+    },
+  })
+  getLeaderboard(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.sponsorsService.getEventLeaderboard(eventId);
+  }
+
   @Get()
   @ApiOperation({ summary: 'Event sponsor leaderboard', description: 'Public. Returns sponsors sorted by total contribution.' })
   @ApiResponse({
