@@ -90,6 +90,31 @@ export class PaymentsController {
     );
   }
 
+  @Get('paths')
+  @SkipThrottle()
+  @ApiOperation({
+    summary: 'Find optimal payment paths',
+    description: 'Finds all available Stellar payment paths for multi-asset purchases. Returns ranked paths by cost.',
+  })
+  @ApiQuery({ name: 'sourceAsset', required: true })
+  @ApiQuery({ name: 'destAsset', required: true })
+  @ApiQuery({ name: 'amount', required: true })
+  @ApiResponse({ status: 200, description: 'Payment paths found' })
+  @ApiResponse({ status: 404, description: 'No paths found' })
+  getPaymentPaths(
+    @Query('sourceAsset') sourceAsset: string,
+    @Query('destAsset') destAsset: string,
+    @Query('amount') amount: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.findPaymentPaths(
+      (req.user as any).stellarPublicKey,
+      sourceAsset,
+      destAsset,
+      amount,
+    );
+  }
+
   @Get(':id/status')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({ summary: 'Get payment status with ticket data' })
