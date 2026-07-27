@@ -88,6 +88,12 @@ export class AuthService {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) return { message: 'If the email exists, password reset instructions have been sent.' };
 
+    // Invalidate all previous unused tokens for this user (single active token policy)
+    await this.passwordResetTokenRepository.update(
+      { userId: user.id, used: false },
+      { used: true },
+    );
+
     const rawSecret = crypto.randomBytes(32).toString('hex');
     const token = this.passwordResetTokenRepository.create({
       userId: user.id,

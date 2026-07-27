@@ -26,6 +26,7 @@ import {
   Memo,
 } from '@stellar/stellar-sdk';
 import * as crypto from 'crypto';
+import { PersistedXdr, XdrStatus } from './entities/persisted-xdr.entity';
 
 export type PaymentCallback = (
   payment: Horizon.ServerApi.PaymentOperationRecord,
@@ -114,6 +115,43 @@ export class StellarService implements OnModuleDestroy {
       this.networkPassphrase,
     );
     return this.server.submitTransaction(tx);
+  }
+
+  /**
+   * Persist the XDR to the database, then broadcast it to Horizon.
+   * On broadcast failure the persisted record enables later replay.
+   */
+  async persistAndSubmitTransaction(
+    xdr: string,
+    paymentId?: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    const record = this.xdrRepository.create({
+      xdr,
+      networkPassphrase: this.networkPassphrase,
+      status: XdrStatus.PENDING,
+      paymentId: paymentId ?? null,
+    });
+    const saved = await this.xdrRepository.save(record);
+
+    try {
+      const result = await this.submitTransaction(xdr);
+
+      saved.status = result.successful ? XdrStatus.CONFIRMED : XdrStatus.FAILED;
+      saved.transactionHash = result.hash ?? null;
+      if (!result.successful) {
+        saved.lastError =
+          (result as any).extras?.result_codes?.transaction ?? 'Submission failed';
+      }
+      await this.xdrRepository.save(saved);
+
+      return result;
+    } catch (err: unknown) {
+      saved.status = XdrStatus.FAILED;
+      saved.lastError = err instanceof Error ? err.message : String(err);
+      saved.nextRetryAt = new Date(Date.now() + 30_000); // first retry in 30s
+      await this.xdrRepository.save(saved);
+      throw err;
+    }
   }
 
   async getTransaction(

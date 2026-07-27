@@ -44,6 +44,8 @@ import { DecentralizedStorageModule } from './decentralized-storage/decentralize
 import { ChatModule } from './chat/chat.module';
 import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
+import { InternalModule } from './common/internal.module';
+import { InternalRoutingModule } from './internal/internal.module';
 
 
 @Module({
@@ -129,6 +131,8 @@ import { LoyaltyModule } from './loyalty/loyalty.module';
     ChatModule,
     ZkpModule,
     LoyaltyModule,
+    InternalModule,
+    InternalRoutingModule,
   ],
   controllers: [AppController],
   providers: [
