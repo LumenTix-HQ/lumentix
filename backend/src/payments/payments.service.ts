@@ -324,7 +324,7 @@ export class PaymentsService {
     const saved = await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
-      action: AuditAction.PAYMENT_INTENT_CREATED,
+      action: AuditAction.SEASON_PASS_INTENT_CREATED,
       userId,
       resourceId: saved.id,
       meta: {
@@ -394,6 +394,7 @@ export class PaymentsService {
     }
 
     let targetEscrowPublicKey: string | null = null;
+    let event: Event | null = null;
     if (payment.isSeasonPass) {
       const series = await this.eventSeriesRepository.findOne({
         where: { id: payment.seriesId as string },
@@ -403,7 +404,7 @@ export class PaymentsService {
       }
       targetEscrowPublicKey = series.escrowPublicKey;
     } else {
-      const event = await this.eventsService.getEventById(payment.eventId as string);
+      event = await this.eventsService.getEventById(payment.eventId as string);
       if (!event.escrowPublicKey) {
         throw new ConflictException('Escrow wallet is not configured for this event.');
       }
@@ -455,7 +456,7 @@ export class PaymentsService {
       },
     });
 
-    this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+    this.webhooksService.queueDelivery(event as Event, confirmed).catch(() => undefined);
 
     return confirmed;
   }

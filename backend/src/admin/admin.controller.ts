@@ -132,6 +132,13 @@ export class AdminController {
     return this.adminService.softDeleteUser(id);
   }
 
+  @Post('users/:id/restore')
+  @ApiOperation({ summary: 'Restore a soft-deleted user' })
+  @ApiResponse({ status: 200, description: 'User restored' })
+  restoreUser(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.restoreUser(id);
+  }
+
   @Patch('users/:id/unblock')
   @ApiOperation({ summary: 'Unblock a user' })
   @ApiResponse({ status: 200, description: 'User unblocked successfully' })
