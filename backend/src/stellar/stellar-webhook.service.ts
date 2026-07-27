@@ -105,8 +105,8 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
       );
 
       if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        this.logger.fatal(
-          '[STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
+        this.logger.error(
+          '[CRITICAL][STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
             `${this.reconnectAttempts} consecutive times and will no longer ` +
             'attempt to reconnect automatically. ' +
             'Use POST /admin/stellar/reconnect to restart manually.',
@@ -154,6 +154,39 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  // ─── Dead-letter queue public accessors ──────────────────────────────────
+
+  getDlq(): DlqItem[] {
+    return [...this.deadLetterQueue];
+  }
+
+  getDlqItem(id: string): DlqItem | undefined {
+    return this.deadLetterQueue.find((item) => item.id === id);
+  }
+
+  async retryDlqItem(id: string): Promise<void> {
+    const idx = this.deadLetterQueue.findIndex((item) => item.id === id);
+    if (idx === -1) return;
+
+    const [item] = this.deadLetterQueue.splice(idx, 1);
+    this.logger.log(`Retrying DLQ item ${id} (txHash=${item.transactionHash})`);
+
+    // Re-attempt payment / sponsor confirmation
+    const confirmed =
+      (await this.tryConfirmPayment(item.transactionHash)) ||
+      (await this.tryConfirmSponsor(item.transactionHash));
+
+    if (!confirmed) {
+      this.logger.debug(
+        `DLQ retry still unmatched for tx ${item.transactionHash}, re-enqueuing`,
+      );
+      item.retryCount += 1;
+      item.lastError = 'Retry still unmatched';
+      item.enqueuedAt = new Date().toISOString();
+      this.deadLetterQueue.push(item);
     }
   }
 

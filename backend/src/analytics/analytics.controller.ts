@@ -19,6 +19,7 @@ import { DemographicsReportDto } from './dto/demographic-report.dto';
 import { AttendancePatternDto } from './dto/attendance-pattern.dto';
 import { AnalyticsDashboardDto } from './dto/analytics-dashboard.dto';
 import { BiDashboardDto, BusinessOutcomePredictionDto, MarketTrendsDto } from './dto/bi-dashboard.dto';
+import { RevenueDashboardDto } from './dto/revenue-dashboard.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -125,6 +126,23 @@ export class AnalyticsController {
       eventId,
       req.user.id,
     );
+  }
+
+  @Get('events/:eventId/revenue')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Get revenue dashboard for an event',
+    description:
+      'Organizer-only. Returns total revenue, ticket count, average price, currency breakdown, and daily time-series.',
+  })
+  @ApiResponse({ status: 200, description: 'Revenue dashboard data', type: RevenueDashboardDto })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  async getRevenueDashboard(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<RevenueDashboardDto> {
+    return this.analyticsService.getRevenueDashboard(eventId, req.user.id);
   }
 
   @Get('organizers/me/bi-dashboard')

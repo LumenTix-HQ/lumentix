@@ -2,7 +2,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Horizon, Keypair } from '@stellar/stellar-sdk';
-import { StellarService } from './stellar.service';
+import { StellarService, isHorizonTimeoutError } from './stellar.service';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +61,10 @@ jest.mock('@stellar/stellar-sdk', () => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildService(): StellarService {
+function buildService(overrides?: {
+  paymentsRepository?: any;
+  paymentRetryQueue?: any;
+}): StellarService {
   const configService = {
     get: jest.fn((key: string) => {
       if (key === 'stellar.horizonUrl')
@@ -72,7 +75,14 @@ function buildService(): StellarService {
     }),
   } as unknown as ConfigService;
 
-  return new StellarService(configService);
+  const usersService = {} as any;
+
+  return new StellarService(
+    configService,
+    usersService,
+    overrides?.paymentsRepository,
+    overrides?.paymentRetryQueue,
+  );
 }
 
 /** Extract operations from the transaction passed to submitTransaction */
@@ -576,5 +586,138 @@ describe('StellarService', () => {
         );
       });
     });
+  });
+
+  describe('sendPayment — XDR persistence and retry on timeout (#449)', () => {
+    function buildPaymentsRepo() {
+      return { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    }
+    function buildRetryQueue() {
+      return { add: jest.fn().mockResolvedValue({}) };
+    }
+
+    beforeEach(() => {
+      mockLoadAccount.mockResolvedValue(makeMockAccount(makeBalances()));
+    });
+
+    it('does not touch the payments repository when no paymentId is given', async () => {
+      mockSubmitTransaction.mockResolvedValue({ hash: 'tx-hash' });
+      const paymentsRepository = buildPaymentsRepo();
+      const service = buildService({ paymentsRepository });
+
+      await service.sendPayment(ESCROW_SECRET, DESTINATION, '10');
+
+      expect(paymentsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('persists the signed XDR before submitting, and clears it on success', async () => {
+      mockSubmitTransaction.mockResolvedValue({ hash: 'tx-hash' });
+      const paymentsRepository = buildPaymentsRepo();
+      const service = buildService({ paymentsRepository });
+
+      const response = await service.sendPayment(
+        ESCROW_SECRET,
+        DESTINATION,
+        '10',
+        'XLM',
+        undefined,
+        'payment-1',
+      );
+
+      expect(response.hash).toBe('tx-hash');
+      expect(paymentsRepository.update).toHaveBeenNthCalledWith(
+        1,
+        { id: 'payment-1' },
+        { signedXdr: expect.any(String) },
+      );
+      expect(paymentsRepository.update).toHaveBeenNthCalledWith(
+        2,
+        { id: 'payment-1' },
+        { signedXdr: null },
+      );
+    });
+
+    it('enqueues a retry job and rethrows on a Horizon timeout, without clearing the persisted XDR', async () => {
+      const timeoutError = Object.assign(new Error('timeout of 30000ms exceeded'), {
+        code: 'ECONNABORTED',
+      });
+      mockSubmitTransaction.mockRejectedValue(timeoutError);
+      const paymentsRepository = buildPaymentsRepo();
+      const paymentRetryQueue = buildRetryQueue();
+      const service = buildService({ paymentsRepository, paymentRetryQueue });
+
+      await expect(
+        service.sendPayment(
+          ESCROW_SECRET,
+          DESTINATION,
+          '10',
+          'XLM',
+          undefined,
+          'payment-2',
+        ),
+      ).rejects.toThrow('timeout of 30000ms exceeded');
+
+      expect(paymentRetryQueue.add).toHaveBeenCalledWith('retry', {
+        paymentId: 'payment-2',
+      });
+      // Only the initial persist call -- never cleared, since submission didn't succeed.
+      expect(paymentsRepository.update).toHaveBeenCalledTimes(1);
+      expect(paymentsRepository.update).toHaveBeenCalledWith(
+        { id: 'payment-2' },
+        { signedXdr: expect.any(String) },
+      );
+    });
+
+    it('does not enqueue a retry for a non-timeout (definitive) submission failure', async () => {
+      mockSubmitTransaction.mockRejectedValue(
+        new Error('tx_bad_seq: sequence number mismatch'),
+      );
+      const paymentsRepository = buildPaymentsRepo();
+      const paymentRetryQueue = buildRetryQueue();
+      const service = buildService({ paymentsRepository, paymentRetryQueue });
+
+      await expect(
+        service.sendPayment(
+          ESCROW_SECRET,
+          DESTINATION,
+          '10',
+          'XLM',
+          undefined,
+          'payment-3',
+        ),
+      ).rejects.toThrow('tx_bad_seq');
+
+      expect(paymentRetryQueue.add).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('isHorizonTimeoutError', () => {
+  it('returns true for an HTTP 408 response', () => {
+    expect(isHorizonTimeoutError({ response: { status: 408 } })).toBe(true);
+  });
+
+  it('returns true for common connection-level error codes', () => {
+    for (const code of ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN']) {
+      expect(isHorizonTimeoutError({ code })).toBe(true);
+    }
+  });
+
+  it('returns true when the message mentions a timeout', () => {
+    expect(isHorizonTimeoutError({ message: 'timeout of 30000ms exceeded' })).toBe(true);
+  });
+
+  it('returns false for a definitive on-chain rejection', () => {
+    expect(
+      isHorizonTimeoutError({
+        response: { status: 400 },
+        message: 'tx_bad_seq',
+      }),
+    ).toBe(false);
+  });
+
+  it('returns false for null/undefined', () => {
+    expect(isHorizonTimeoutError(null)).toBe(false);
+    expect(isHorizonTimeoutError(undefined)).toBe(false);
   });
 });

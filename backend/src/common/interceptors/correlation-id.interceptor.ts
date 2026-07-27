@@ -7,11 +7,15 @@ import {
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { Request, Response } from 'express';
+import { CorrelationStore } from '../correlation/correlation.store';
 import { LoggerService } from '../logging/logger.service';
 
 @Injectable()
 export class CorrelationIdInterceptor implements NestInterceptor {
-  constructor(private readonly loggerService: LoggerService) {}
+  constructor(
+    private readonly correlationStore: CorrelationStore,
+    private readonly loggerService: LoggerService,
+  ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const ctx = context.switchToHttp();
@@ -24,11 +28,13 @@ export class CorrelationIdInterceptor implements NestInterceptor {
 
     (request as any)['correlationId'] = correlationId;
 
-    return this.loggerService.runWithCorrelationId(correlationId, () =>
-      next.handle().pipe(
-        tap(() => {
-          response.setHeader('X-Correlation-ID', correlationId);
-        }),
+    return this.correlationStore.run(correlationId, () =>
+      this.loggerService.runWithCorrelationId(correlationId, () =>
+        next.handle().pipe(
+          tap(() => {
+            response.setHeader('X-Correlation-ID', correlationId);
+          }),
+        ),
       ),
     );
   }

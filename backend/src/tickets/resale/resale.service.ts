@@ -6,6 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Inject } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
+import {
+  MarketplaceQueryDto,
+  MarketplaceResponseDto,
+} from './dto/marketplace-query.dto';
 import { Repository } from 'typeorm';
 import { TicketEntity } from '../entities/ticket.entity';
 import { Event } from '../../events/entities/event.entity';
@@ -27,6 +34,9 @@ import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto'
 const DEFAULT_DEFAULT_MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
 const ORGANIZER_FEE_BPS = 500; // 5% = 500 basis points
 
+/** #861: marketplace cache lifetime. The issue specifies 60s. */
+const MARKETPLACE_CACHE_TTL_MS = 60_000;
+
 @Injectable()
 export class ResaleService {
   private readonly logger = new Logger(ResaleService.name);
@@ -43,6 +53,8 @@ export class ResaleService {
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
+    @Inject(CACHE_MANAGER)
+    private readonly cache: Cache,
   ) {}
 
   async listTicketForResale(
@@ -81,6 +93,10 @@ export class ResaleService {
       resourceId: ticketId,
       meta: { price: dto.price, currency: dto.currency, originalPrice },
     });
+
+    // #861: listing state changed — drop cached marketplace pages so a sold
+    // or withdrawn ticket stops appearing as available.
+    await this.invalidateMarketplaceCache();
 
     return {
       isListed: true,
@@ -190,6 +206,10 @@ export class ResaleService {
       });
     }
 
+    // #861: listing state changed — drop cached marketplace pages so a sold
+    // or withdrawn ticket stops appearing as available.
+    await this.invalidateMarketplaceCache();
+
     return {
       ticket: savedTicket,
       salePrice,
@@ -219,7 +239,105 @@ export class ResaleService {
       resourceId: ticketId,
     });
 
+    // #861: listing state changed — drop cached marketplace pages so a sold
+    // or withdrawn ticket stops appearing as available.
+    await this.invalidateMarketplaceCache();
+
     return { cancelled: true };
+  }
+
+  /**
+   * #861: public marketplace listing of every active resale ticket.
+   *
+   * Reads from `tickets` rather than `resale_transactions`: a transaction row
+   * records a completed or cancelled sale, whereas an *active listing* is a
+   * ticket with `isListed = true`. Querying transactions would return sold
+   * inventory and miss everything currently for sale.
+   *
+   * Unauthenticated, so it returns only what a buyer needs to decide — no
+   * seller identifiers beyond a display name, no ticket secrets.
+   */
+  async getMarketplaceListings(query: MarketplaceQueryDto): Promise<MarketplaceResponseDto> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const cacheKey = `resale:marketplace:${query.eventId ?? 'all'}:${page}:${limit}`;
+    const cached = await this.cache.get<MarketplaceResponseDto>(cacheKey);
+    if (cached) return cached;
+
+    const qb = this.ticketRepo
+      .createQueryBuilder('ticket')
+      .innerJoin(Event, 'event', 'event.id = ticket.eventId')
+      .leftJoin(User, 'seller', 'seller.id = ticket.ownerId')
+      .where('ticket.isListed = :isListed', { isListed: true })
+      .select([
+        'ticket.id AS "ticketId"',
+        'ticket.eventId AS "eventId"',
+        'ticket.listingPrice AS "askPrice"',
+        'ticket.listingCurrency AS "currency"',
+        'ticket.listedAt AS "listedAt"',
+        'event.title AS "eventTitle"',
+        'event.startDate AS "eventDate"',
+        'seller.displayName AS "sellerDisplayName"',
+      ]);
+
+    if (query.eventId) {
+      qb.andWhere('ticket.eventId = :eventId', { eventId: query.eventId });
+    }
+
+    // Count before pagination so `total` reflects the filter, not the page.
+    const total = await qb.getCount();
+
+    const rows = await qb
+      .orderBy('ticket.listedAt', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit)
+      .getRawMany();
+
+    const response: MarketplaceResponseDto = {
+      data: rows.map((r) => ({
+        ticketId: r.ticketId,
+        eventId: r.eventId,
+        eventTitle: r.eventTitle,
+        eventDate: r.eventDate ?? null,
+        // Postgres returns DECIMAL as a string; without this the client gets
+        // "12.5000000" where it expects a number.
+        askPrice: r.askPrice === null ? 0 : Number(r.askPrice),
+        currency: r.currency ?? 'XLM',
+        sellerDisplayName: r.sellerDisplayName ?? 'Anonymous',
+        listedAt: r.listedAt,
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
+
+    await this.cache.set(cacheKey, response, MARKETPLACE_CACHE_TTL_MS);
+    return response;
+  }
+
+  /**
+   * #861: drop every cached marketplace page.
+   *
+   * Called after any listing or sale. Invalidating by prefix rather than by
+   * key because the same listing appears on an unknown number of paginated and
+   * filtered variants — evicting only the obvious key would leave stale pages
+   * serving tickets that are already sold.
+   */
+  async invalidateMarketplaceCache(): Promise<void> {
+    const store: any = (this.cache as any).store;
+    try {
+      if (typeof store?.keys === 'function') {
+        const keys: string[] = await store.keys('resale:marketplace:*');
+        await Promise.all(keys.map((k) => this.cache.del(k)));
+        return;
+      }
+    } catch (err) {
+      this.logger.warn(`Marketplace cache invalidation failed: ${String(err)}`);
+    }
+    // A cache that cannot be swept is not a correctness failure — entries
+    // expire in 60s regardless, which is the bound the issue asks for.
   }
 
   async getResaleHistory(

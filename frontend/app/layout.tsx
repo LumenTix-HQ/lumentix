@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import { WalletProvider } from "@/contexts/WalletContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import ToastContainer from "@/components/Toast";
 import { Providers } from "./providers";
@@ -16,14 +17,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="antialiased">
-        <WalletProvider>
-          <NetworkMismatchBanner />
-        <Providers>
-          <Navbar />
-          {children}
-          <ToastContainer />
-          <ServiceWorkerRegister />
-        </Providers>
+        <AuthProvider>
+          <WalletProvider>
+            <NetworkMismatchBanner />
+            <Providers>
+              <Navbar />
+              {children}
+              <ToastContainer />
+              <ServiceWorkerRegister />
+            </Providers>
+          </WalletProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -254,7 +254,7 @@ export class SponsorsService {
       totalXlm: Number(c.totalXlm),
     }));
 
-    await this.cacheManager.set(cacheKey, leaderboard, 120);
+    await this.cacheManager.set(cacheKey, leaderboard, 300);
     return leaderboard;
   }
 
