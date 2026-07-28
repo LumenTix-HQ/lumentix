@@ -30,6 +30,7 @@ import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { SocialModule } from './social/social.module';
+import { InsuranceModule } from './insurance/insurance.module';
 
 @Module({
   imports: [
@@ -109,6 +110,7 @@ import { SocialModule } from './social/social.module';
     RegistrationsModule,
     LoyaltyModule,
     SocialModule,
+    InsuranceModule,
   ],
   controllers: [AppController],
   providers: [
