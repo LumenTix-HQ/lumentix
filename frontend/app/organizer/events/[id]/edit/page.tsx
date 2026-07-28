@@ -7,6 +7,8 @@ import {
     type CreateEventFormInput,
     type CreateEventFormValues,
 } from "@/lib/schemas/create-event.schema";
+import { apiGet, apiPatch } from "@/lib/api-client";
+import { useWallet } from "@/contexts/WalletContext";
 
 type EventRecord = {
     id: string;
@@ -20,7 +22,6 @@ type EventRecord = {
     status: "draft" | "published" | "completed" | "cancelled";
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 const EDITABLE_STATUSES = new Set(["draft", "published"]);
 
 function toLocalDateTime(value: string): string {
@@ -31,13 +32,6 @@ function toLocalDateTime(value: string): string {
 
 function toApiDate(value: string): string {
     return new Date(value).toISOString();
-}
-
-async function parseApiError(response: Response): Promise<string> {
-    const payload = await response.json().catch(() => null);
-    if (typeof payload?.message === "string") return payload.message;
-    if (Array.isArray(payload?.message)) return payload.message.join(", ");
-    return `Request failed with status ${response.status}`;
 }
 
 function buildDiffs(event: EventRecord, values: CreateEventFormValues): EventFormDiff[] {
@@ -56,23 +50,17 @@ function buildDiffs(event: EventRecord, values: CreateEventFormValues): EventFor
 }
 
 export default function EditEventPage({ params }: { params: { id: string } }) {
+    const { publicKey } = useWallet();
     const [event, setEvent] = useState<EventRecord | null>(null);
-    const [authToken, setAuthToken] = useState("");
-    const [walletPublicKey, setWalletPublicKey] = useState("");
     const [loadError, setLoadError] = useState<string | null>(null);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
     useEffect(() => {
-        setAuthToken(window.localStorage.getItem("lumentix_access_token") ?? "");
-        setWalletPublicKey(window.localStorage.getItem("lumentix_wallet_public_key") ?? "");
-
         const loadEvent = async () => {
             setLoadError(null);
             try {
-                const response = await fetch(`${API_BASE_URL}/events/${params.id}`, { cache: "no-store" });
-                if (!response.ok) throw new Error(await parseApiError(response));
-                setEvent((await response.json()) as EventRecord);
+                setEvent(await apiGet<EventRecord>(`events/${params.id}`));
             } catch (error) {
                 setLoadError(error instanceof Error ? error.message : "Could not load event");
             }
@@ -82,7 +70,7 @@ export default function EditEventPage({ params }: { params: { id: string } }) {
     }, [params.id]);
 
     const initialValues = useMemo<CreateEventFormInput>(() => {
-        if (!event) return { ...defaultCreateEventValues, authToken, walletPublicKey };
+        if (!event) return defaultCreateEventValues;
         return {
             title: event.title ?? "",
             description: event.description ?? "",
@@ -92,41 +80,30 @@ export default function EditEventPage({ params }: { params: { id: string } }) {
             ticketPrice: Number(event.ticketPrice ?? 0),
             currency: event.currency ?? "USD",
             status: event.status,
-            authToken,
-            walletPublicKey,
             sponsorshipEnabled: false,
             sponsorTiers: [],
         };
-    }, [authToken, event, walletPublicKey]);
+    }, [event]);
 
     const handleSubmit = async (values: CreateEventFormValues) => {
         setSubmitError(null);
         setSubmitSuccess(null);
 
         try {
-            window.localStorage.setItem("lumentix_access_token", values.authToken);
-            window.localStorage.setItem("lumentix_wallet_public_key", values.walletPublicKey);
-
-            const response = await fetch(`${API_BASE_URL}/events/${params.id}`, {
-                method: "PATCH",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${values.authToken}`,
-                },
-                body: JSON.stringify({
-                    title: values.title,
-                    description: values.description || undefined,
-                    location: values.location || undefined,
-                    startDate: toApiDate(values.startDate),
-                    endDate: toApiDate(values.endDate),
-                    ticketPrice: values.ticketPrice,
-                    currency: values.currency,
-                    status: values.status,
-                }),
+            if (!publicKey) {
+                throw new Error("Connect your wallet before editing an event.");
+            }
+            const updated = await apiPatch<EventRecord>(`events/${params.id}`, {
+                title: values.title,
+                description: values.description || undefined,
+                location: values.location || undefined,
+                startDate: toApiDate(values.startDate),
+                endDate: toApiDate(values.endDate),
+                ticketPrice: values.ticketPrice,
+                currency: values.currency,
+                status: values.status,
             });
-
-            if (!response.ok) throw new Error(await parseApiError(response));
-            setEvent((await response.json()) as EventRecord);
+            setEvent(updated);
             setSubmitSuccess("Event updated successfully.");
         } catch (error) {
             setSubmitError(error instanceof Error ? error.message : "Event update failed");

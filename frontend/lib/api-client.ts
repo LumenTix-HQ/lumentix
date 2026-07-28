@@ -73,6 +73,17 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return request<T>(path, { method: "DELETE" });
 }
 
+export async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken, refreshToken }),
+  });
+  if (!response.ok) {
+    throw new ApiProxyError(response.status, "Unable to create authenticated session");
+  }
+}
+
 export const apiClient = {
   login: (body: { email: string; password: string }) =>
     request<{ ok: boolean }>("/auth/login", {

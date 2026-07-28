@@ -41,6 +41,9 @@ import { RejectRoleRequestDto } from './dto/reject-role-request.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 @Controller('admin')
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Admin resource not found' })
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,

@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
@@ -31,20 +31,33 @@ export class MarketplaceQueryDto {
 
 /** A single row in the public marketplace listing. */
 export class MarketplaceListingDto {
+  @ApiProperty({ format: 'uuid' })
   ticketId: string;
+  @ApiProperty({ format: 'uuid' })
   eventId: string;
+  @ApiProperty()
   eventTitle: string;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
   eventDate: Date | null;
+  @ApiProperty()
   askPrice: number;
+  @ApiProperty()
   currency: string;
+  @ApiProperty()
   sellerDisplayName: string;
+  @ApiProperty({ type: String, format: 'date-time' })
   listedAt: Date;
 }
 
 export class MarketplaceResponseDto {
+  @ApiProperty({ type: [MarketplaceListingDto] })
   data: MarketplaceListingDto[];
+  @ApiProperty()
   total: number;
+  @ApiProperty()
   page: number;
+  @ApiProperty()
   limit: number;
+  @ApiProperty()
   totalPages: number;
 }

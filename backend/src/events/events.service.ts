@@ -11,7 +11,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder, In } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Event, EventStatus, EventCategory, EventAgeRestriction } from './entities/event.entity';
 import { EventSeries } from './entities/event-series.entity';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -40,13 +40,13 @@ import { CurrenciesService } from '../currencies/currencies.service';
 import { EventImage } from './entities/event-image.entity';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
+import { buildListEventsOptions } from './build-list-events-options';
 
 export interface PaginatedResult<T> {
   data: T[];
   total: number;
   page: number;
   limit: number;
-  totalPages: number;
 }
 
 export type EventWithCapacity = Event & {
@@ -257,11 +257,10 @@ export class EventsService {
       where: { eventId: id, status: 'valid' },
     });
 
-    const result = {
     const remainingCapacity =
       event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
 
-    return {
+    const result = {
       ...event,
       soldTickets,
       remainingCapacity,
@@ -273,69 +272,20 @@ export class EventsService {
   }
 
   async listEvents(filterDto: ListEventsDto): Promise<PaginatedResult<EventWithCapacity>> {
-    const { status, organizerId, search, category, showAvailableOnly, page = 1, limit = 10 } = filterDto;
-    const qb: SelectQueryBuilder<Event> = this.eventRepository
-      .createQueryBuilder('event')
-      .leftJoin(
-        (subQb) =>
-          subQb
-            .select('t.eventId', 'eventId')
-            .addSelect('COUNT(*)', 'soldCount')
-            .from(TicketEntity, 't')
-            .where("t.status = 'valid'")
-            .groupBy('t.eventId'),
-        'ticket_counts',
-        'ticket_counts."eventId" = event.id',
-      )
-      .addSelect('COALESCE(ticket_counts."soldCount"::int, 0)', 'soldTickets');
-    if (status) qb.andWhere('event.status = :status', { status });
-    if (organizerId)
-      qb.andWhere('event.organizerId = :organizerId', { organizerId });
-    if (search) {
-      qb.andWhere('event.search_vector @@ plainto_tsquery(:search)', { search });
-      qb.addSelect(
-        "ts_rank(event.search_vector, plainto_tsquery(:search))",
-        'rank',
-      );
-      qb.orderBy('rank', 'DESC');
-    } else {
-      qb.orderBy('event.createdAt', 'DESC');
-    }
-    if (category) qb.andWhere('event.category = :category', { category });
-    if (filterDto.categoryIds) {
-      const ids = filterDto.categoryIds.split(',').filter(Boolean);
-      if (ids.length) {
-        qb.innerJoin('event.categories', 'cat', 'cat.id IN (:...ids)', { ids });
-      }
-    }
-    if (showAvailableOnly) {
-      qb.andWhere(
-        '(event.maxAttendees IS NULL OR COALESCE(ticket_counts."soldCount"::int, 0) < event.maxAttendees)',
-      );
-    }
-
-    if (search) {
-      // Rank by full-text relevance when a search term is present
-      qb.orderBy(
-        `ts_rank(to_tsvector('english', event.title || ' ' || COALESCE(event.description, '')), plainto_tsquery('english', :search2))`,
-        'DESC',
-      ).addOrderBy('event.createdAt', 'DESC');
-      qb.setParameter('search2', search);
-    } else {
-      qb.orderBy('event.createdAt', 'DESC');
-    }
-
-    qb.skip((page - 1) * limit).take(limit);
-
-    const [rawEvents, total] = await Promise.all([
-      qb.getRawAndEntities(),
-      qb.getCount(),
-    ]);
-
-    qb.orderBy('event.createdAt', 'DESC').skip((page - 1) * limit).take(limit);
-    const [rawEvents, total] = await Promise.all([qb.getRawAndEntities(), qb.getCount()]);
-    const data: EventWithCapacity[] = rawEvents.entities.map((event, i) => {
-      const soldTickets = Number(rawEvents.raw[i]?.soldTickets ?? 0);
+    const page = filterDto.page ?? 1;
+    const limit = filterDto.limit ?? 20;
+    const [events, total] = await this.eventRepository.findAndCount(
+      buildListEventsOptions(filterDto),
+    );
+    const soldCounts = await Promise.all(
+      events.map((event) =>
+        this.ticketRepository.count({
+          where: { eventId: event.id, status: 'valid' },
+        }),
+      ),
+    );
+    const data: EventWithCapacity[] = events.map((event, i) => {
+      const soldTickets = soldCounts[i];
       const remainingCapacity =
         event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
       return {
@@ -345,7 +295,7 @@ export class EventsService {
         availableSpots: remainingCapacity,
       };
     });
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return { data, total, page, limit };
   }
 
   async getEventStats(id: string, callerId: string): Promise<EventStatsResponseDto> {
@@ -622,6 +572,8 @@ export class EventsService {
 
     const saved = await this.eventRepository.save(targetEvents);
     return { updatedEvents: saved };
+  }
+
   async addEventImage(eventId: string, organizerId: string, dto: AddEventImageDto): Promise<EventImage> {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');

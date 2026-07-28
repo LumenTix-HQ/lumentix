@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { loginUser } from "@/lib/auth/register";
+import { setTokens } from "@/lib/api-client";
+import { useToast } from "@/contexts/ToastContext";
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -16,8 +19,25 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const { toast } = useToast();
   const showPasswordResetBanner = searchParams.get("message") === "password_reset";
+  const requestedRedirect = searchParams.get("redirect");
+  const redirectTarget =
+    requestedRedirect?.startsWith("/") && !requestedRedirect.startsWith("//")
+      ? requestedRedirect
+      : "/events";
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/proxy/users/me", { cache: "no-store" })
+      .then((response) => {
+        if (active && response.ok) router.replace(redirectTarget);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [redirectTarget, router]);
 
   const {
     register,
@@ -28,31 +48,19 @@ export default function LoginPage() {
   });
 
   const onSubmit = async (values: LoginFormValues) => {
-    setErrorMessage(null);
-
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-
-      const data = await response.json();
-
-      if (response.status === 401) {
-        setErrorMessage("Invalid email or password.");
-        return;
-      }
-
-      if (!response.ok) {
-        setErrorMessage(data?.message ?? "An error occurred. Please try again.");
-        return;
-      }
-
-      const redirect = searchParams.get("redirect") ?? "/";
-      router.push(redirect);
-    } catch {
-      setErrorMessage("Network error. Please check your connection.");
+      const tokens = await loginUser(values.email, values.password);
+      await setTokens(tokens.accessToken, tokens.refreshToken);
+      router.replace(redirectTarget);
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      toast.error(
+        status === 401
+          ? "Invalid email or password."
+          : error instanceof Error
+            ? error.message
+            : "Unable to sign in. Please try again.",
+      );
     }
   };
 
@@ -72,12 +80,6 @@ export default function LoginPage() {
           {showPasswordResetBanner && (
             <p className="text-sm text-green-400 bg-green-900/30 border border-green-800 rounded-lg px-4 py-3">
               Your password has been reset. Sign in with your new password.
-            </p>
-          )}
-
-          {errorMessage && (
-            <p className="text-sm text-red-400 bg-red-900/30 border border-red-800 rounded-lg px-4 py-3">
-              {errorMessage}
             </p>
           )}
 

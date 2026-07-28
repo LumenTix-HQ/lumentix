@@ -49,7 +49,7 @@ export default function EventForm({
     onSubmit,
     onPreviewSubmit,
 }: EventFormProps) {
-    const [pendingValues, setPendingValues] = useState<CreateEventFormValues | null>(null);
+    const [pendingValues, setPendingValues] = useState<EventFormSubmitValues | null>(null);
     const [diffs, setDiffs] = useState<EventFormDiff[]>([]);
 
     // Drag-and-drop state
@@ -130,20 +130,6 @@ export default function EventForm({
     return (
         <>
             <form className="space-y-5" onSubmit={handleSubmit(submitHandler)} noValidate>
-                {/* Auth token */}
-                <div>
-                    <label className="mb-2 block text-sm text-gray-300">Organizer Access Token</label>
-                    <input type="password" placeholder="Paste your bearer token" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("authToken")} />
-                    {errors.authToken ? <p className="mt-1 text-xs text-red-300">{errors.authToken.message}</p> : null}
-                </div>
-
-                {/* Wallet */}
-                <div>
-                    <label className="mb-2 block text-sm text-gray-300">Wallet Public Key</label>
-                    <input type="text" placeholder="G..." className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("walletPublicKey")} />
-                    {errors.walletPublicKey ? <p className="mt-1 text-xs text-red-300">{errors.walletPublicKey.message}</p> : null}
-                </div>
-
                 {/* Title */}
                 <div>
                     <label className="mb-2 block text-sm text-gray-300">Event Title</label>
