@@ -7,8 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/contexts/ToastContext';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+import { apiPost } from '@/lib/api-client';
 
 const resetPasswordSchema = z
   .object({
@@ -47,10 +46,11 @@ export default function ResetPasswordPage() {
     if (!token) {
       setIsValidToken(false);
       toast.error('Invalid or missing reset token. Please request a new password reset link.');
+      router.replace('/forgot-password');
     } else {
       setIsValidToken(true);
     }
-  }, [token, toast]);
+  }, [token, toast, router]);
 
   const onSubmit = async (values: ResetPasswordFormValues) => {
     setServerError(null);
@@ -61,35 +61,23 @@ export default function ResetPasswordPage() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: token,
-          newPassword: values.password,
-        }),
+      await apiPost('/auth/reset-password', {
+        token: token,
+        newPassword: values.password,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        // Handle specific error cases
-        const errorMessage = data?.message ?? 'Failed to reset password. Please try again.';
-        
-        if (errorMessage.includes('expired') || errorMessage.includes('expired')) {
-          setServerError('This password reset link has expired. Please request a new one.');
-        } else if (errorMessage.includes('invalid') || errorMessage.includes('Invalid')) {
-          setServerError('This password reset link is invalid or has already been used.');
-        } else {
-          setServerError(errorMessage);
-        }
-        return;
-      }
 
       // Success
       toast.success('Your password has been reset successfully!');
-      router.push('/login?reset=success');
-    } catch {
+      router.push('/login?message=password_reset');
+    } catch (error) {
+      // A rejected or already-consumed token comes back as 400 or 410
+      const status = (error as { status?: number })?.status;
+
+      if (status === 400 || status === 410) {
+        setServerError('This link has expired');
+        return;
+      }
+
       setServerError('Network error. Please check your connection and try again.');
     }
   };
