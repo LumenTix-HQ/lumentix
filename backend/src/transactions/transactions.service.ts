@@ -5,8 +5,11 @@ import { Transaction } from './entities/transaction.entity';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { TransactionResponseDto } from './dto/transaction-response.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { StellarTransactionDto } from './dto/stellar-transaction.dto';
 import { paginate } from '../common/pagination/pagination.helper';
 import { PaginatedResult } from '../common/pagination/interfaces/paginated-result.interface';
+import { StellarService } from '../stellar/stellar.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class TransactionsService {
@@ -14,6 +17,8 @@ export class TransactionsService {
     @InjectRepository(Transaction)
     private readonly transactionsRepository: Repository<Transaction>,
     private readonly currenciesService: CurrenciesService,
+    private readonly stellarService: StellarService,
+    private readonly usersService: UsersService,
   ) {}
 
   async findAllByUser(
@@ -27,8 +32,8 @@ export class TransactionsService {
     if (dto.type) {
       qb.andWhere('tx.type = :type', { type: dto.type });
     }
-    if (dto.txStatus) {
-      qb.andWhere('tx.status = :status', { status: dto.txStatus });
+    if (dto.status) {
+      qb.andWhere('tx.status = :status', { status: dto.status });
     }
     if (dto.from) {
       qb.andWhere('tx.createdAt >= :from', { from: dto.from });
@@ -88,6 +93,59 @@ export class TransactionsService {
       transactionHash: tx.transactionHash,
       createdAt: tx.createdAt,
     };
+  }
+
+  async getStellarTransactions(
+    userId: string,
+    cursor?: string,
+    limit = 20,
+  ): Promise<{ data: StellarTransactionDto[]; nextCursor: string | null }> {
+    const user = await this.usersService.findById(userId);
+    if (!(user as any).stellarPublicKey) {
+      return { data: [], nextCursor: null };
+    }
+
+    const safeLimit = Math.min(limit, 200);
+    const { records } = await this.stellarService.getAccountTransactions(
+      (user as any).stellarPublicKey,
+      cursor,
+      safeLimit,
+    );
+
+    const data: StellarTransactionDto[] = records.map((tx: any) => ({
+      id: tx.id,
+      hash: tx.hash,
+      ledger: tx.ledger_attr,
+      type: this.deriveTxType(tx),
+      amount: this.extractAmount(tx),
+      status: tx.successful ? 'confirmed' : 'failed',
+      timestamp: tx.created_at,
+      fee: tx.fee_charged,
+      memo: tx.memo ?? null,
+    }));
+
+    const nextCursor =
+      records.length === safeLimit
+        ? records[records.length - 1]?.paging_token ?? null
+        : null;
+
+    return { data, nextCursor };
+  }
+
+  private deriveTxType(tx: any): string {
+    const memo = typeof tx.memo === 'string' ? tx.memo.toLowerCase() : '';
+    if (memo.includes('refund')) return 'refund';
+    if (memo.includes('contribution') || memo.includes('sponsor')) return 'contribution';
+    return 'payment';
+  }
+
+  private extractAmount(tx: any): number | null {
+    try {
+      const ops = tx._links?.operations?.href;
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   async getAllForExport(

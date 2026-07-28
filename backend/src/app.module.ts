@@ -9,6 +9,9 @@ import { ThrottlerStorageRedisService } from 'nestjs-throttler-storage-redis';
 import Redis from 'ioredis';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
+import { CorrelationStore } from './common/correlation/correlation.store';
+import { LoggerService } from './common/logging/logger.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -28,9 +31,22 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
-import { LoyaltyModule } from './loyalty/loyalty.module';
-import { SocialModule } from './social/social.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { InsuranceModule } from './insurance/insurance.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { VenuesModule } from './venues/venues.module';
+import { GamificationModule } from './gamification/gamification.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
+import { CategoriesModule } from './categories/categories.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { StreamingModule } from './streaming/streaming.module';
+import { DecentralizedStorageModule } from './decentralized-storage/decentralized-storage.module';
+import { ChatModule } from './chat/chat.module';
+import { ZkpModule } from './zkp/zkp.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
+import { InternalModule } from './common/internal.module';
+import { InternalRoutingModule } from './internal/internal.module';
+
 
 @Module({
   imports: [
@@ -47,9 +63,7 @@ import { InsuranceModule } from './insurance/insurance.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         throttlers: [
-          { name: 'short', ttl: seconds(1), limit: 3 }, // 3 req/sec
-          { name: 'medium', ttl: seconds(10), limit: 20 }, // 20 req/10sec
-          { name: 'long', ttl: seconds(60), limit: 100 }, // 100 req/min
+          { name: 'global', ttl: seconds(60), limit: 100 },
         ],
         storage: new ThrottlerStorageRedisService(
           new Redis({
@@ -72,7 +86,7 @@ import { InsuranceModule } from './insurance/insurance.module';
         password: config.get<string>('DB_PASSWORD'),
         database: config.get<string>('DB_NAME'),
         autoLoadEntities: true,
-        synchronize: config.get<string>('NODE_ENV') !== 'production',
+        synchronize: false,
         logging: config.get<string>('NODE_ENV') === 'development',
       }),
     }),
@@ -108,16 +122,30 @@ import { InsuranceModule } from './insurance/insurance.module';
     TicketsModule,
     AdminModule,
     RegistrationsModule,
+    AnalyticsModule,
+    SchedulingModule,
+    CategoriesModule,
+    WebhooksModule,
+    StreamingModule,
+    DecentralizedStorageModule,
+    ChatModule,
+    ZkpModule,
     LoyaltyModule,
-    SocialModule,
-    InsuranceModule,
+    InternalModule,
+    InternalRoutingModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    LoggerService,
+    CorrelationStore,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CorrelationIdInterceptor,
     },
     {
       provide: APP_INTERCEPTOR,

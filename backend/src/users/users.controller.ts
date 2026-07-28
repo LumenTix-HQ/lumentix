@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -13,7 +14,9 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
@@ -52,6 +55,8 @@ export class UsersController {
   @Get('me')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user profile' })
+  @ApiResponse({ status: 200, description: 'User profile returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getProfile(@Req() req: AuthenticatedRequest) {
     return this.usersService.findById(req.user.id);
   }
@@ -59,6 +64,10 @@ export class UsersController {
   @Patch('me')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update current user profile' })
+  @ApiBody({ type: UpdateProfileDto })
+  @ApiResponse({ status: 200, description: 'Profile updated' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async updateProfile(
     @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateProfileDto,
@@ -70,6 +79,8 @@ export class UsersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Soft delete current user account' })
+  @ApiResponse({ status: 204, description: 'Account deleted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async deleteProfile(@Req() req: AuthenticatedRequest) {
     await this.usersService.deleteMyAccount(req.user.id);
     return;
@@ -78,6 +89,9 @@ export class UsersController {
   @Patch('me/notification-preferences')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update notification preferences' })
+  @ApiBody({ type: UpdateNotificationPreferencesDto })
+  @ApiResponse({ status: 200, description: 'Notification preferences updated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async updateNotificationPreferences(
     @Req() req: AuthenticatedRequest,
     @Body() updateDto: UpdateNotificationPreferencesDto,
@@ -127,12 +141,32 @@ export class UsersController {
     return this.usersService.getPortfolioValue(req.user.id, baseCurrency);
   }
 
+  @Get('wallet/transactions')
+  @ApiOperation({
+    summary: 'Get paginated on-chain transaction history for the authenticated user',
+  })
+  @ApiQuery({ name: 'cursor', required: false, description: 'Pagination cursor' })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiQuery({ name: 'order', required: false, enum: ['asc', 'desc'] })
+  @ApiResponse({ status: 200, description: 'Transaction history retrieved.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  async getWalletTransactions(
+    @Req() req: AuthenticatedRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit = 20,
+    @Query('order') order: 'asc' | 'desc' = 'desc',
+  ) {
+    return this.usersService.getWalletTransactions(req.user.id, { cursor, limit: Number(limit), order });
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Find a user by ID',
     description: 'Retrieves user details.',
   })
+  @ApiParam({ name: 'id', description: 'User UUID' })
   @ApiResponse({ status: 200, description: 'User found.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found.' })
   async findOne(@Param('id') id: string) {
     return this.usersService.findById(id);

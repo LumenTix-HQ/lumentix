@@ -6,6 +6,7 @@ import { TicketEntity } from './entities/ticket.entity';
 import { TicketSigningService } from './ticket-signing.service';
 import { TicketPdfService } from './ticket-pdf.service';
 import { Event } from '../events/entities/event.entity';
+import { EventSeries } from '../events/entities/event-series.entity';
 import { User } from '../users/entities/user.entity';
 import { TicketsService } from './tickets.service';
 import { TicketsController, TicketsPublicController } from './tickets.controller';
@@ -15,18 +16,27 @@ import { NotificationModule } from '../notifications/notification.module';
 import { VerificationController } from './verification/verification.controller';
 import { TicketExpiryJob } from './jobs/ticket-expiry.job';
 import { AuditModule } from '../audit/audit.module';
+import { ResaleService } from './resale/resale.service';
+import { ResaleController } from './resale/resale.controller';
+import { ResaleMarketplaceController } from './resale/resale-marketplace.controller';
+import { RedisModule } from '../redis/redis.module';
+import { ResaleTransaction } from './resale/resale-transaction.entity';
+import { DynamicQrService } from './dynamic-qr/dynamic-qr.service';
+import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([TicketEntity, Event, User]),
+    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction]),
     forwardRef(() => PaymentsModule),
     StellarModule,
     NotificationModule,
     AuditModule,
+    // #861: provides CACHE_MANAGER for the marketplace listing cache.
+    RedisModule,
   ],
-  providers: [TicketsService, TicketSigningService, TicketExpiryJob],
-  controllers: [TicketsController, TicketsPublicController, VerificationController],
-  exports: [TicketsService],
+  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob, ResaleService, DynamicQrService],
+  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController, ResaleMarketplaceController, DynamicQrController],
+  exports: [TicketsService, ResaleService],
 })
 export class TicketsModule {}

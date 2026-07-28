@@ -10,5 +10,5 @@ export class ListAdminEventsDto extends PaginationDto {
   })
   @IsOptional()
   @IsEnum(EventStatus)
-  status?: EventStatus;
+  status?: EventStatus = undefined;
 }

@@ -1,3 +1,4 @@
+#![allow(warnings)]
 //! Boundary and edge-case tests for [`withdraw_platform_fees`](crate::lumentix_contract::LumentixContract::withdraw_platform_fees).
 //!
 //! Product/issue language sometimes refers to this operation as **withdrawing protocol funds** from the platform
@@ -23,11 +24,7 @@ fn setup(env: &Env) -> (Address, Address, LumentixContractClient<'_>) {
     (admin, contract_id, client)
 }
 
-fn publish_event(
-    env: &Env,
-    client: &LumentixContractClient,
-    organizer: &Address,
-) -> u64 {
+fn publish_event(env: &Env, client: &LumentixContractClient, organizer: &Address) -> u64 {
     let event_id = client.create_event(
         organizer,
         &String::from_str(env, "Withdraw boundary event"),

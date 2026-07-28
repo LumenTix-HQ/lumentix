@@ -1,68 +1,110 @@
 import {
-  Injectable,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
-import { Payment } from './entities/payment.entity';
-import { PaymentStatus } from './enums/payment-status.enum';
-import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
-import { PaginationDto } from '../common/pagination/pagination.dto';
+import { Repository, LessThan, In } from 'typeorm';
+import { Payment, PaymentStatus } from './entities/payment.entity';
+import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { paginate } from '../common/pagination/pagination.helper';
-import { CurrenciesService } from '../currencies/currencies.service';
-import { EventsService } from '../events/events.service';
-import { StellarService } from '../stellar/stellar.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { AuditService } from '../audit/audit.service';
-import { NotificationService } from '../notification/notification.service';
+import { CurrenciesService } from '../currencies/currencies.service';
+import { EventStatus, Event } from '../events/entities/event.entity';
+import { EventsService } from '../events/events.service';
+import { EventSeries } from '../events/entities/event-series.entity';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { NotificationService } from '../notifications/notification.service';
+import { StellarService } from '../stellar/stellar.service';
+import { User } from '../users/entities/user.entity';
+import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
+import { EscrowService } from './services/escrow.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
 
 @Injectable()
 export class PaymentsService {
   constructor(
     @InjectRepository(Payment)
     private readonly paymentsRepository: Repository<Payment>,
-    private readonly currenciesService: CurrenciesService,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(EventSeries)
+    private readonly eventSeriesRepository: Repository<EventSeries>,
+    @InjectRepository(Event)
+    private readonly eventRepository: Repository<Event>,
+    @InjectRepository(TicketEntity)
+    private readonly ticketRepository: Repository<TicketEntity>,
     private readonly eventsService: EventsService,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
-  ) { }
+    private readonly currenciesService: CurrenciesService,
+    private readonly escrowService: EscrowService,
+    private readonly webhooksService: WebhooksService,
+    
+  ) {}
 
-  // ----------------------------------------------------------------
-  // Issue #126 – getPaymentById (used by controller status endpoint)
-  // ----------------------------------------------------------------
   async getPaymentById(id: string): Promise<Payment> {
     const payment = await this.paymentsRepository.findOne({ where: { id } });
-    if (!payment) {
-      throw new NotFoundException(`Payment ${id} not found`);
-    }
+    if (!payment) throw new NotFoundException(`Payment ${id} not found`);
     return payment;
   }
 
-  // Issue #126 – paginated payment history for a user
+  async getPaymentStatus(paymentId: string) {
+    const payment = await this.getPaymentById(paymentId);
+
+    let ticket: {
+      id: string;
+      status: string;
+      pdfUrl: string | null;
+      qrCodeDataUrl: string | null;
+    } | null = null;
+
+    if (payment.status === PaymentStatus.CONFIRMED && payment.eventId) {
+      const ticketRecord = await this.ticketRepository.findOne({
+        where: { eventId: payment.eventId, ownerId: payment.userId },
+      });
+      if (ticketRecord) {
+        ticket = {
+          id: ticketRecord.id,
+          status: ticketRecord.status,
+          pdfUrl: ticketRecord.pdfUrl,
+          qrCodeDataUrl: null,
+        };
+      }
+    }
+
+    return {
+      paymentId: payment.id,
+      status: payment.status,
+      transactionHash: payment.transactionHash,
+      confirmedAt: payment.status === PaymentStatus.CONFIRMED ? payment.updatedAt : null,
+      ticket,
+    };
+  }
+
   async getHistory(userId: string, dto: PaginationDto) {
     const qb = this.paymentsRepository
       .createQueryBuilder('payment')
       .where('payment.userId = :userId', { userId })
       .orderBy('payment.createdAt', 'DESC');
+
     return paginate(qb, dto, 'payment');
   }
 
-  // Issue #126 – paginated PENDING payments for a user
   async getPending(userId: string, dto: PaginationDto) {
     const qb = this.paymentsRepository
       .createQueryBuilder('payment')
       .where('payment.userId = :userId', { userId })
       .andWhere('payment.status = :status', { status: PaymentStatus.PENDING })
       .orderBy('payment.createdAt', 'DESC');
+
     return paginate(qb, dto, 'payment');
   }
 
-  // ----------------------------------------------------------------
-  // Issue #128 – createPaymentIntent with optional currency validation
-  // Issue #129 – optional path payment support
-  // ----------------------------------------------------------------
   async createPaymentIntent(
     eventId: string,
     userId: string,
@@ -71,88 +113,354 @@ export class PaymentsService {
     sourceAsset?: string,
   ) {
     const event = await this.eventsService.getEventById(eventId);
-    const selectedCurrency = currency ?? event.currency;
 
-    // Issue #128 – validate currency against supported assets
-    const supportedCodes = await this.currenciesService.findActiveCodes();
-    if (!supportedCodes.includes(selectedCurrency.toUpperCase())) {
-      throw new BadRequestException(
-        `Currency "${selectedCurrency}" is not supported.`,
+    if (event.status === EventStatus.CANCELLED) {
+      throw new BadRequestException('This event is suspended.');
+    }
+
+    if (event.status !== EventStatus.PUBLISHED) {
+      throw new BadRequestException('This event is not available for purchase.');
+    }
+
+    if (!event.escrowPublicKey) {
+      throw new ConflictException(
+        'This event does not have an escrow wallet configured.',
       );
     }
 
-    // Issue #129 – if path payment requested, validate sourceAsset too
-    if (usePathPayment && sourceAsset) {
-      if (!supportedCodes.includes(sourceAsset.toUpperCase())) {
-        throw new BadRequestException(
-          `Source asset "${sourceAsset}" is not supported.`,
-        );
+    const selectedCurrency = currency?.toUpperCase() ?? event.currency;
+    const activeCodes = await this.currenciesService.findActiveCodes();
+
+    if (!activeCodes.includes(selectedCurrency)) {
+      throw new BadRequestException(
+        `Currency "${selectedCurrency}" is not supported. Supported: ${activeCodes.join(', ')}`,
+      );
+    }
+
+    // Capacity check
+    if (event.maxAttendees !== null) {
+      const sold = await this.ticketRepository.count({
+        where: { eventId, status: 'valid' },
+      });
+      if (sold >= event.maxAttendees) {
+        throw new BadRequestException('Event has reached maximum capacity');
+      }
+    }
+
+    const existing = await this.paymentsRepository.findOne({
+      where: { eventId, userId, status: PaymentStatus.PENDING },
+    });
+
+    if (existing) {
+      if (existing.expiresAt && existing.expiresAt > new Date()) {
+        return {
+          paymentId: existing.id,
+          memo: existing.id,
+          amount: Number(existing.amount),
+          currency: existing.currency,
+          escrowWallet: event.escrowPublicKey,
+          expiresAt: existing.expiresAt,
+        };
+      }
+      existing.status = PaymentStatus.FAILED;
+      await this.paymentsRepository.save(existing);
+    }
+
+    let finalPrice = Number(event.ticketPrice);
+
+    // Apply series discount if user owns another ticket in the series
+    if (event.seriesId) {
+      const series = await this.eventSeriesRepository.findOne({
+        where: { id: event.seriesId },
+      });
+      if (series && series.discountPercentage && series.discountPercentage > 0) {
+        const ownedTicketsCount = await this.ticketRepository.count({
+          where: { ownerId: userId, eventId: In(
+            await this.eventRepository.find({
+              select: ['id'],
+              where: { seriesId: event.seriesId },
+            }).then((evs) => evs.map((e) => e.id))
+          ), status: 'valid' },
+        });
+
+        if (ownedTicketsCount > 0) {
+          finalPrice = finalPrice * (1 - Number(series.discountPercentage) / 100);
+        }
       }
     }
 
     const payment = this.paymentsRepository.create({
-      userId,
       eventId,
-      currency: selectedCurrency.toUpperCase(),
+      userId,
+      amount: finalPrice,
+      currency: selectedCurrency,
       status: PaymentStatus.PENDING,
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 min expiry
-      // Issue #129 – store source asset for path payment
-      sourceAsset: usePathPayment && sourceAsset
-        ? sourceAsset.toUpperCase()
-        : null,
-      isPathPayment: usePathPayment ?? false,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes TTL
+      transactionHash: null,
+      seriesId: event.seriesId,
+      isSeasonPass: false,
+    });
+    const saved = await this.paymentsRepository.save(payment);
+
+    await this.auditService.log({
+      action: AuditAction.PAYMENT_INTENT_CREATED,
+      userId,
+      resourceId: saved.id,
+      meta: {
+        eventId,
+        amount: Number(saved.amount),
+        currency: saved.currency,
+      },
     });
 
-    const saved = await this.paymentsRepository.save(payment);
+    // Include path payment info for non-XLM currencies
+    let pathPayment: {
+      sendAsset: string;
+      sendAmount: string;
+      path: string[];
+    } | null = null;
+
+    if (
+      (usePathPayment || selectedCurrency !== 'XLM') &&
+      sourceAsset &&
+      sourceAsset !== selectedCurrency
+    ) {
+      try {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        const userPublicKey = (user as any)?.stellarPublicKey;
+        if (userPublicKey) {
+          const pathResult = await this.stellarService.findPaymentPath(
+            userPublicKey,
+            sourceAsset,
+            selectedCurrency,
+            String(finalPrice),
+          );
+          if (pathResult) {
+            pathPayment = {
+              sendAsset: sourceAsset,
+              sendAmount: (pathResult as any).source_amount ?? String(finalPrice),
+              path: (pathResult as any).path ?? [],
+            };
+          }
+        }
+      } catch {
+        // Path payment info is optional; proceed without it
+      }
+    }
 
     return {
       paymentId: saved.id,
+      memo: saved.id,
+      amount: Number(saved.amount),
       currency: saved.currency,
-      sourceAsset: saved.sourceAsset,
-      isPathPayment: saved.isPathPayment,
+      escrowWallet: event.escrowPublicKey,
       expiresAt: saved.expiresAt,
-      stellarAddress: event.stellarAddress,
+      ...(pathPayment && { pathPayment }),
     };
   }
 
-  // ----------------------------------------------------------------
-  // Existing – confirmPayment updated for Issue #128 & #129
-  // ----------------------------------------------------------------
-  async confirmPayment(dto: ConfirmPaymentDto, userId: string) {
-    const payment = await this.getPaymentById(dto.paymentId);
+  async createSeasonPassIntent(
+    seriesId: string,
+    userId: string,
+    currency?: string,
+  ) {
+    const series = await this.eventSeriesRepository.findOne({
+      where: { id: seriesId },
+    });
 
-    if (payment.userId !== userId) {
-      throw new ForbiddenException('You do not own this payment');
+    if (!series) {
+      throw new NotFoundException('Event series not found');
     }
 
-    if (payment.status !== PaymentStatus.PENDING) {
-      throw new BadRequestException(
-        `Payment is already ${payment.status.toLowerCase()}`,
+    if (!series.seasonPassPrice) {
+      throw new BadRequestException('This series does not offer a season pass.');
+    }
+
+    if (!series.escrowPublicKey) {
+      throw new ConflictException(
+        'This series does not have an escrow wallet configured.',
       );
+    }
+
+    const selectedCurrency = currency?.toUpperCase() ?? series.currency;
+    const activeCodes = await this.currenciesService.findActiveCodes();
+
+    if (!activeCodes.includes(selectedCurrency)) {
+      throw new BadRequestException(
+        `Currency "${selectedCurrency}" is not supported. Supported: ${activeCodes.join(', ')}`,
+      );
+    }
+
+    const existing = await this.paymentsRepository.findOne({
+      where: { seriesId, userId, status: PaymentStatus.PENDING, isSeasonPass: true },
+    });
+
+    if (existing) {
+      if (existing.expiresAt && existing.expiresAt > new Date()) {
+        return {
+          paymentId: existing.id,
+          memo: existing.id,
+          amount: Number(existing.amount),
+          currency: existing.currency,
+          escrowWallet: series.escrowPublicKey,
+          expiresAt: existing.expiresAt,
+        };
+      }
+      existing.status = PaymentStatus.FAILED;
+      await this.paymentsRepository.save(existing);
+    }
+
+    const payment = this.paymentsRepository.create({
+      eventId: null,
+      seriesId,
+      isSeasonPass: true,
+      userId,
+      amount: Number(series.seasonPassPrice),
+      currency: selectedCurrency,
+      status: PaymentStatus.PENDING,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 mins
+      transactionHash: null,
+    });
+    const saved = await this.paymentsRepository.save(payment);
+
+    await this.auditService.log({
+      action: AuditAction.SEASON_PASS_INTENT_CREATED,
+      userId,
+      resourceId: saved.id,
+      meta: {
+        seriesId,
+        amount: Number(saved.amount),
+        currency: saved.currency,
+        isSeasonPass: true,
+      },
+    });
+
+    return {
+      paymentId: saved.id,
+      memo: saved.id,
+      amount: Number(saved.amount),
+      currency: saved.currency,
+      escrowWallet: series.escrowPublicKey,
+      expiresAt: saved.expiresAt,
+    };
+  }
+
+  async confirmPayment(
+    { transactionHash }: ConfirmPaymentDto,
+    userId: string,
+  ): Promise<Payment> {
+
+    let txRecord: any;
+    try {
+      txRecord = await this.stellarService.getTransaction(transactionHash);
+    } catch {
+      throw new BadRequestException(
+        `Transaction "${transactionHash}" not found on the Stellar network.`,
+      );
+    }
+
+    // Reject duplicate transaction hash submissions (replay attack prevention)
+    const existingByHash = await this.paymentsRepository.findOne({
+      where: { transactionHash },
+    });
+    if (existingByHash) {
+      throw new ConflictException(
+        'This transaction has already been used to confirm a payment.',
+      );
+    }
+
+    const memoValue = this.stellarService.extractAndValidateMemo(txRecord);
+    const payment = await this.paymentsRepository.findOne({
+      where: {
+        id: memoValue,
+        status: PaymentStatus.PENDING,
+      },
+    });
+
+    if (!payment) {
+      throw new NotFoundException(
+        `No pending payment found for memo "${memoValue}".`,
+      );
+    }
+
+    if (userId !== 'system' && payment.userId !== userId) {
+      throw new ForbiddenException('You are not authorised to confirm this payment.');
     }
 
     if (payment.expiresAt && payment.expiresAt < new Date()) {
       payment.status = PaymentStatus.FAILED;
       await this.paymentsRepository.save(payment);
-      throw new BadRequestException('Payment has expired');
+      throw new BadRequestException('Payment has expired.');
     }
 
-    // Issue #128 – verify on-chain asset matches stored currency
-    const txAsset = await this.stellarService.getTransactionAsset(dto.txHash);
-    if (txAsset.toUpperCase() !== payment.currency.toUpperCase()) {
+    let targetEscrowPublicKey: string | null = null;
+    let event: Event | null = null;
+    if (payment.isSeasonPass) {
+      const series = await this.eventSeriesRepository.findOne({
+        where: { id: payment.seriesId as string },
+      });
+      if (!series || !series.escrowPublicKey) {
+        throw new ConflictException('Escrow wallet is not configured for this series.');
+      }
+      targetEscrowPublicKey = series.escrowPublicKey;
+    } else {
+      event = await this.eventsService.getEventById(payment.eventId as string);
+      if (!event.escrowPublicKey) {
+        throw new ConflictException('Escrow wallet is not configured for this event.');
+      }
+      targetEscrowPublicKey = event.escrowPublicKey;
+    }
+
+    const operations = await this.resolvePaymentOperations(txRecord);
+    if (operations.length === 0) {
+      throw new BadRequestException('Transaction contains no payment operations.');
+    }
+
+    const matchingOperation = operations.find(
+      (operation) => operation.to === targetEscrowPublicKey,
+    );
+
+    if (!matchingOperation) {
       throw new BadRequestException(
-        `Transaction asset "${txAsset}" does not match expected "${payment.currency}"`,
+        'Payment destination does not match the escrow wallet.',
+      );
+    }
+
+    const assetCode = this.extractAssetCode(matchingOperation);
+    if (assetCode !== payment.currency.toUpperCase()) {
+      throw new BadRequestException(
+        'Payment asset does not match expected currency',
+      );
+    }
+
+    const onChainAmount = parseFloat(matchingOperation.amount);
+    const expectedAmount = Number(payment.amount);
+    if (Math.abs(onChainAmount - expectedAmount) > 0.0000001) {
+      throw new BadRequestException(
+        `Incorrect payment amount. Expected ${expectedAmount}, received ${onChainAmount}.`,
       );
     }
 
     payment.status = PaymentStatus.CONFIRMED;
-    payment.txHash = dto.txHash;
-    return this.paymentsRepository.save(payment);
+    payment.transactionHash = transactionHash;
+    const confirmed = await this.paymentsRepository.save(payment);
+
+    await this.auditService.log({
+      action: AuditAction.PAYMENT_CONFIRMED,
+      userId: payment.userId,
+      resourceId: payment.id,
+      meta: {
+        transactionHash,
+        currency: payment.currency,
+        amount: Number(payment.amount),
+      },
+    });
+
+    this.webhooksService.queueDelivery(event as Event, confirmed).catch(() => undefined);
+
+    return confirmed;
   }
 
-  // ----------------------------------------------------------------
-  // Issue #129 – find Stellar payment path
-  // ----------------------------------------------------------------
   async findPaymentPath(
     sourcePublicKey: string,
     sourceAsset: string,
@@ -167,9 +475,31 @@ export class PaymentsService {
     );
   }
 
-  // ----------------------------------------------------------------
-  // Issue #127 – expire stale payments (called by scheduled job)
-  // ----------------------------------------------------------------
+  async findPaymentPaths(
+    sourcePublicKey: string,
+    sourceAsset: string,
+    destAsset: string,
+    destAmount: string,
+  ) {
+    const records = await this.stellarService.findPaymentPath(
+      sourcePublicKey,
+      sourceAsset,
+      destAsset,
+      destAmount,
+    );
+
+    return records.map((record: any, index: number) => ({
+      rank: index + 1,
+      sourceAmount: record.source_amount,
+      sourceAsset: sourceAsset,
+      destinationAmount: record.destination_amount,
+      destinationAsset: destAsset,
+      path: (record.path ?? []).map((a: any) =>
+        a.asset_code ? `${a.asset_code}:${a.asset_issuer}` : 'native',
+      ),
+    }));
+  }
+
   async expireStalePayments(): Promise<void> {
     const expired = await this.paymentsRepository.find({
       where: {
@@ -183,31 +513,84 @@ export class PaymentsService {
     }
   }
 
+  async mergeEscrowToOrganizer(eventId: string, organizerId: string) {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+    return this.escrowService.mergeEscrowToOrganizer(eventId, event.organizerId);
+  }
+
+  private async resolvePaymentOperations(txRecord: any): Promise<PaymentOperation[]> {
+    try {
+      const operationsHref = txRecord._links.operations?.href;
+      if (!operationsHref) {
+        return [];
+      }
+
+      const response = await fetch(operationsHref);
+      if (!response.ok) {
+        return [];
+      }
+
+      const payload = (await response.json()) as {
+        _embedded?: { records?: PaymentOperation[] };
+      };
+
+      return (payload._embedded?.records ?? []).filter(
+        (operation) => operation.type === 'payment',
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  private extractAssetCode(operation: PaymentOperation): string {
+    if (operation.asset_type === 'native') {
+      return 'XLM';
+    }
+
+    return (operation.asset_code ?? '').toUpperCase();
+  }
+
   private async markFailed(payment: Payment, reason: string): Promise<void> {
     payment.status = PaymentStatus.FAILED;
-    await this.paymentsRepository.save(payment);
+    const saved = await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
-      action: 'PAYMENT_FAILED',
-      entityId: payment.id,
-      entityType: 'Payment',
+      action: AuditAction.PAYMENT_FAILED,
       userId: payment.userId,
-      metadata: { reason, currency: payment.currency },
+      resourceId: payment.id,
+      meta: { reason, currency: payment.currency },
     });
 
     try {
-      const event = await this.eventsService.getEventById(payment.eventId);
-      await this.notificationService.queuePaymentFailedEmail({
-        userId: payment.userId,
-        email: '', // Handled by processor
-        eventTitle: event.title,
-        amount: Number(payment.amount),
-        currency: payment.currency,
-        reason,
-      });
+      if (payment.eventId) {
+        const event = await this.eventsService.getEventById(payment.eventId);
+        await this.notificationService.queuePaymentFailedEmail({
+          userId: payment.userId,
+          email: '',
+          eventTitle: event.title,
+          amount: Number(payment.amount),
+          currency: payment.currency,
+          reason,
+        });
+        this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
+      }
     } catch (error) {
-      // Log error but don't fail the marking process
-      console.error(`Failed to queue payment failure email for ${payment.id}:`, error);
+      console.error(
+        `Failed to queue payment failure email for ${payment.id}:`,
+        error,
+      );
     }
   }
+}
+
+interface PaymentOperation {
+  type: string;
+  to: string;
+  amount: string;
+  asset_type: string;
+  asset_code?: string;
 }

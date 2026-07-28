@@ -17,7 +17,7 @@ export class UploadService {
     fs.mkdirSync(this.uploadPath, { recursive: true });
   }
 
-  async saveFile(file: Express.Multer.File): Promise<string> {
+  async saveFile(file: any): Promise<string> {
     if (!ALLOWED_MIME.includes(file.mimetype)) {
       throw new BadRequestException(
         `Invalid file type. Allowed: ${ALLOWED_MIME.join(', ')}`,

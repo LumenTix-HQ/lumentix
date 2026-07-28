@@ -8,7 +8,7 @@ import {
   IsInt,
   Min,
 } from 'class-validator';
-import { EventStatus, EventCategory } from '../entities/event.entity';
+import { EventStatus, EventCategory, EventAgeRestriction } from '../entities/event.entity';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateEventDto {
@@ -65,4 +65,9 @@ export class CreateEventDto {
   @IsOptional()
   @IsEnum(EventCategory)
   category?: EventCategory;
+
+  @ApiPropertyOptional({ enum: EventAgeRestriction, description: 'Age restriction for the event' })
+  @IsOptional()
+  @IsEnum(EventAgeRestriction)
+  ageRestriction?: EventAgeRestriction;
 }

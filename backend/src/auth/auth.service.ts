@@ -1,143 +1,409 @@
-import {
-  BadRequestException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThan, Repository } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { UsersService } from '../users/users.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { WalletChallenge } from './entities/wallet-challenge.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from '../mailer/mailer.service';
+import { StellarService } from '../stellar/stellar.service';
 
-const BCRYPT_SALT_ROUNDS = 10;
+const SALT = 10;
+const REFRESH_TTL_DAYS = 30;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly mailerService: MailerService,
+    private readonly auditService: AuditService,
+    private readonly stellarService: StellarService,
     @InjectRepository(PasswordResetToken)
     private readonly passwordResetTokenRepository: Repository<PasswordResetToken>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
+    @InjectRepository(WalletChallenge)
+    private readonly walletChallengeRepository: Repository<WalletChallenge>,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
-  async register(dto: RegisterDto): Promise<{ access_token: string }> {
+  async register(dto: RegisterDto): Promise<{ access_token: string; refresh_token: string }> {
     const user = await this.usersService.createUser({
       email: dto.email,
       password: dto.password,
       role: dto.role,
     });
-
-    return this.signToken(user.id, user.role);
+    const { access_token } = this.signToken((user as any).id, (user as any).role);
+    const refresh_token = await this.issueRefreshToken((user as any).id);
+    return { access_token, refresh_token };
   }
 
-  async login(dto: LoginDto): Promise<{ access_token: string }> {
-    const user = await this.usersService.findByEmail(dto.email);
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+  async login(
+    user: any,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    if (user.googleId) {
+      return this.findOrCreateGoogleUser(user);
     }
+    const { access_token } = this.signToken(user.id, user.role);
+    const refresh_token = await this.issueRefreshToken(user.id);
+    return { access_token, refresh_token };
+  }
 
-    const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!passwordMatch) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+  async refresh(rawToken: string): Promise<{ access_token: string; refresh_token: string }> {
+    const record = await this.findValidRefreshToken(rawToken);
+    record.revoked = true;
+    await this.refreshTokenRepository.save(record);
+    const user = await this.usersService.findById(record.userId);
+    const { access_token } = this.signToken(record.userId, (user as any).role);
+    const refresh_token = await this.issueRefreshToken(record.userId);
+    return { access_token, refresh_token };
+  }
 
-    return this.signToken(user.id, user.role);
+  async logout(userId: string, rawToken: string): Promise<{ message: string }> {
+    const record = await this.findValidRefreshToken(rawToken);
+    if (record.userId !== userId) throw new UnauthorizedException();
+    record.revoked = true;
+    await this.refreshTokenRepository.save(record);
+    return { message: 'Logged out successfully.' };
   }
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
     const user = await this.usersService.findByEmail(dto.email);
-    if (!user) {
-      // Always respond 200 to avoid user enumeration.
-      return {
-        message:
-          'If the email exists, password reset instructions have been sent.',
-      };
-    }
+    if (!user) return { message: 'If the email exists, password reset instructions have been sent.' };
+
+    // Invalidate all previous unused tokens for this user (single active token policy)
+    await this.passwordResetTokenRepository.update(
+      { userId: user.id, used: false },
+      { used: true },
+    );
 
     const rawSecret = crypto.randomBytes(32).toString('hex');
     const token = this.passwordResetTokenRepository.create({
       userId: user.id,
       tokenHash: '',
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 3600000),
       used: false,
     });
+    const saved = await this.passwordResetTokenRepository.save(token);
+    saved.tokenHash = await bcrypt.hash(rawSecret, SALT);
+    await this.passwordResetTokenRepository.save(saved);
 
-    const savedToken = await this.passwordResetTokenRepository.save(token);
-
-    const hashedSecret = await bcrypt.hash(rawSecret, BCRYPT_SALT_ROUNDS);
-    savedToken.tokenHash = hashedSecret;
-    await this.passwordResetTokenRepository.save(savedToken);
-
-    const rawToken = `${savedToken.id}:${rawSecret}`;
-
-    const frontendBaseUrl = this.configService.get<string>(
-      'FRONTEND_URL',
-      'http://localhost:3000',
-    );
-    const resetUrl = `${frontendBaseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
-
-    const html = `
-      <p>You requested a password reset. Click below to set a new password:</p>
-      <p><a href="${resetUrl}">Reset your password</a></p>
-      <p>If you did not request this, please ignore this email.</p>
-    `;
-
-    await this.mailerService.send(user.email, 'Lumentix Password Reset', html);
-
-    return {
-      message:
-        'If the email exists, password reset instructions have been sent.',
-    };
+    const rawToken = `${saved.id}:${rawSecret}`;
+    const base = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+    const resetUrl = `${base}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    await this.mailerService.send({
+      to: user.email,
+      subject: 'Lumentix Password Reset',
+      template: 'password-reset',
+      context: { resetUrl },
+    });
+    return { message: 'If the email exists, password reset instructions have been sent.' };
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
     const [tokenId, secret] = dto.token.split(':');
-    if (!tokenId || !secret) {
-      throw new BadRequestException('Invalid password reset token.');
-    }
-
-    const tokenRecord = await this.passwordResetTokenRepository.findOne({
-      where: { id: tokenId },
-    });
-    if (!tokenRecord) {
-      throw new BadRequestException('Invalid password reset token.');
-    }
-
-    if (tokenRecord.used) {
-      throw new BadRequestException(
-        'Password reset token has already been used.',
-      );
-    }
-
-    if (tokenRecord.expiresAt.getTime() <= Date.now()) {
-      throw new BadRequestException('Password reset token has expired.');
-    }
-
-    const match = await bcrypt.compare(secret, tokenRecord.tokenHash);
-    if (!match) {
-      throw new BadRequestException('Invalid password reset token.');
-    }
-
-    await this.usersService.updatePassword(tokenRecord.userId, dto.newPassword);
-
-    tokenRecord.used = true;
-    await this.passwordResetTokenRepository.save(tokenRecord);
-
+    if (!tokenId || !secret) throw new BadRequestException('Invalid password reset token.');
+    const record = await this.passwordResetTokenRepository.findOne({ where: { id: tokenId } });
+    if (!record) throw new BadRequestException('Invalid password reset token.');
+    if (record.used) throw new BadRequestException('Password reset token has already been used.');
+    if (record.expiresAt.getTime() <= Date.now()) throw new BadRequestException('Password reset token has expired.');
+    if (!await bcrypt.compare(secret, record.tokenHash)) throw new BadRequestException('Invalid password reset token.');
+    await this.usersService.updatePassword(record.userId, dto.newPassword);
+    record.used = true;
+    await this.passwordResetTokenRepository.save(record);
     return { message: 'Password has been reset successfully.' };
   }
 
+  async findOrCreateGoogleUser(googleUser: {
+    googleId: string;
+    email: string;
+    displayName?: string;
+  }): Promise<{ access_token: string; refresh_token: string }> {
+    let user = await this.usersService.findByGoogleId(googleUser.googleId);
+    if (!user) {
+      user = await this.usersService.findByEmail(googleUser.email);
+      if (user) {
+        await this.usersService.updateGoogleId(user.id, googleUser.googleId);
+      } else {
+        user = await this.usersService.createGoogleUser({
+          email: googleUser.email,
+          googleId: googleUser.googleId,
+          displayName: googleUser.displayName,
+        });
+      }
+    }
+    const { access_token } = this.signToken((user as any).id, (user as any).role);
+    const refresh_token = await this.issueRefreshToken((user as any).id);
+    return { access_token, refresh_token };
+  }
+
+  // ─── Wallet Challenge ──────────────────────────────────────────────────────
+
+  async generateWalletChallenge(userId: string): Promise<{ nonce: string; message: string }> {
+    const nonce = this.stellarService.generateNonce();
+    const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
+
+    const challenge = this.walletChallengeRepository.create({
+      userId,
+      nonce,
+      used: false,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+    });
+    await this.walletChallengeRepository.save(challenge);
+
+    await this.cacheManager.set(`wallet-challenge:${userId}`, nonce, 300);
+    return { nonce, message };
+  }
+
+  async verifyWalletChallenge(
+    userId: string,
+    nonce: string,
+    signature: string,
+    publicKey: string,
+  ): Promise<{ linked: boolean; stellarPublicKey: string }> {
+    const storedNonce = await this.cacheManager.get<string>(`wallet-challenge:${userId}`);
+    if (storedNonce !== nonce) {
+      throw new BadRequestException('Invalid or expired nonce. Please request a new one.');
+    }
+
+    // Check for nonce reuse via the WalletChallenge entity
+    const challenge = await this.walletChallengeRepository.findOne({
+      where: { userId, nonce },
+    });
+
+    if (!challenge) {
+      throw new BadRequestException('Invalid or expired nonce. Please request a new one.');
+    }
+
+    if (challenge.used) {
+      await this.auditService.log({
+        action: AuditAction.WALLET_NONCE_REPLAY,
+        userId,
+        resourceId: challenge.id,
+        meta: {
+          reason: 'Nonce reuse attempt detected',
+          publicKey,
+          nonce,
+        },
+      });
+      throw new BadRequestException(
+        'This nonce has already been used. Please request a new challenge.',
+      );
+    }
+
+    const message = `Sign this message to link your Stellar wallet to Lumentix.\nNonce: ${nonce}`;
+    const isValid = this.stellarService.verifySignature(publicKey, signature, message);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid signature. Please try again.');
+    }
+
+    // Mark the nonce as used to prevent replay
+    challenge.used = true;
+    await this.walletChallengeRepository.save(challenge);
+
+    await this.usersService.updateWallet(userId, publicKey);
+    await this.cacheManager.del(`wallet-challenge:${userId}`);
+
+    await this.auditService.log({
+      action: AuditAction.WALLET_LINKED,
+      userId,
+      resourceId: userId,
+      meta: { publicKey },
+    });
+
+    return { linked: true, stellarPublicKey: publicKey };
+  }
+
+  // ─── Wallet-based login (unauthenticated) ─────────────────────────────────
+
+  async requestWalletChallenge(publicKey: string): Promise<{ nonce: string; accountAddress: string }> {
+    const nonce = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+    await this.walletChallengeRepository.save(
+      this.walletChallengeRepository.create({
+        userId: publicKey,
+        nonce,
+        expiresAt,
+        used: false,
+      }),
+    );
+
+    return { nonce, accountAddress: publicKey };
+  }
+
+  async walletLogin(
+    publicKey: string,
+    nonce: string,
+    signature: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
+    const challenge = await this.walletChallengeRepository.findOne({
+      where: { nonce, used: false },
+    });
+    if (!challenge) throw new BadRequestException('Invalid or expired challenge. Please request a new one.');
+    if (challenge.expiresAt.getTime() <= Date.now()) throw new BadRequestException('Challenge has expired.');
+
+    const message = nonce;
+    const isValid = this.stellarService.verifySignature(publicKey, signature, message);
+    if (!isValid) throw new UnauthorizedException('Invalid Stellar signature.');
+
+    challenge.used = true;
+    await this.walletChallengeRepository.save(challenge);
+
+    let user = await this.usersService.findByStellarPublicKey(publicKey);
+    if (!user) {
+      user = await this.usersService.createWalletUser(publicKey);
+    }
+
+    const { access_token } = this.signToken((user as any).id, (user as any).role);
+    const refresh_token = await this.issueRefreshToken((user as any).id);
+    return { access_token, refresh_token };
+  }
+
+  // ─── Password reset token cleanup ──────────────────────────────────────────
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async cleanupExpiredPasswordResetTokens(): Promise<void> {
+    const result = await this.passwordResetTokenRepository.delete({
+      used: true,
+    });
+    const expiredResult = await this.passwordResetTokenRepository.delete({
+      expiresAt: LessThan(new Date()),
+    });
+    const total = (result.affected ?? 0) + (expiredResult.affected ?? 0);
+    if (total > 0) {
+      this.logger.log(`Cleaned up ${total} password-reset tokens`);
+    }
+  }
+
+  // ─── Email Verification ─────────────────────────────────────────────────────
+
+  async sendVerificationEmail(userId: string): Promise<void> {
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new BadRequestException('User not found');
+    if (user.emailVerified) throw new BadRequestException('Email is already verified');
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = await bcrypt.hash(rawToken, SALT);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await this.usersService.update(userId, {
+      emailVerificationToken: tokenHash,
+      emailVerificationTokenExpiresAt: expiresAt,
+    });
+
+    const baseUrl = this.configService.get<string>('FRONTEND_URL', 'http://localhost:3000');
+    const verifyUrl = `${baseUrl}/verify-email?token=${encodeURIComponent(rawToken)}&userId=${encodeURIComponent(userId)}`;
+
+    await this.mailerService.send({
+      to: user.email,
+      subject: 'Verify your Lumentix email address',
+      template: 'email-verification',
+      context: { verifyUrl },
+    });
+  }
+
+  async verifyEmail(userId: string, rawToken: string): Promise<{ verified: boolean }> {
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new BadRequestException('User not found');
+    if (user.emailVerified) return { verified: true };
+
+    if (!user.emailVerificationToken || !user.emailVerificationTokenExpiresAt) {
+      throw new BadRequestException('No verification token found. Request a new one.');
+    }
+    if (user.emailVerificationTokenExpiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Verification token has expired. Request a new one.');
+    }
+
+    const isValid = await bcrypt.compare(rawToken, user.emailVerificationToken);
+    if (!isValid) throw new BadRequestException('Invalid verification token.');
+
+    await this.usersService.update(userId, {
+      emailVerified: true,
+      emailVerificationToken: null,
+      emailVerificationTokenExpiresAt: null,
+    });
+
+    return { verified: true };
+  }
+
+  async resendVerificationEmail(userId: string): Promise<void> {
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new BadRequestException('User not found');
+    if (user.emailVerified) throw new BadRequestException('Email is already verified');
+    await this.sendVerificationEmail(userId);
+  }
+
+  // ─── Private helpers ────────────────────────────────────────────────────────
+
   private signToken(userId: string, role: string): { access_token: string } {
-    const payload: { sub: string; role: string } = { sub: userId, role };
-    return { access_token: this.jwtService.sign(payload) };
+    return { access_token: this.jwtService.sign({ sub: userId, role }) };
+  }
+
+  private async issueRefreshToken(userId: string): Promise<string> {
+    const raw = crypto.randomBytes(48).toString('hex');
+    const tokenHash = await bcrypt.hash(raw, SALT);
+    const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 86400000);
+    const saved = await this.refreshTokenRepository.save(
+      this.refreshTokenRepository.create({ userId, tokenHash, expiresAt, revoked: false }),
+    );
+    return `${saved.id}:${raw}`;
+  }
+
+  /**
+   * Parses an `id:secret` refresh token, verifies it is not revoked or expired.
+   *
+   * Replay attack detection: if the token is already marked revoked, all active
+   * sessions for that user are revoked and an audit record is written before
+   * throwing — this limits the blast radius of a stolen refresh token.
+   */
+  private async findValidRefreshToken(rawToken: string): Promise<RefreshToken> {
+    const [tokenId, secret] = rawToken.split(':');
+    if (!tokenId || !secret) throw new UnauthorizedException('Invalid refresh token.');
+
+    const record = await this.refreshTokenRepository.findOne({ where: { id: tokenId } });
+    if (!record) throw new UnauthorizedException('Invalid refresh token.');
+
+    if (record.revoked) {
+      await this.refreshTokenRepository.update(
+        { userId: record.userId, revoked: false },
+        { revoked: true },
+      );
+      await this.auditService.log({
+        action: AuditAction.SUSPICIOUS_REFRESH_REPLAY,
+        userId: record.userId,
+        resourceId: tokenId,
+        meta: { reason: 'Revoked refresh token was replayed' },
+      });
+      throw new UnauthorizedException(
+        'Session invalidated due to suspicious activity. Please log in again.',
+      );
+    }
+
+    if (record.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedException('Refresh token has expired.');
+    }
+
+    const isValid = await bcrypt.compare(secret, record.tokenHash);
+    if (!isValid) throw new UnauthorizedException('Invalid refresh token.');
+
+    return record;
   }
 }

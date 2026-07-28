@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SponsorTier } from './entities/sponsor-tier.entity';
 import { SponsorContribution, ContributionStatus } from './entities/sponsor-contribution.entity';
+import { Sponsor } from './entities/sponsor.entity';
 import { ContributionsService } from './contributions.service';
 import { EventsService } from '../events/events.service';
 import { CreateSponsorTierDto } from './dto/create-sponsor-tier.dto';
@@ -18,6 +19,9 @@ import { EscrowService } from '../payments/services/escrow.service';
 import { StellarService } from '../stellar/stellar.service';
 import { AuditService } from '../audit/audit.service';
 import { Role } from '../common/decorators/roles.decorator';
+
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 
 @Injectable()
 export class SponsorsService {
@@ -30,11 +34,14 @@ export class SponsorsService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
+    @InjectRepository(Sponsor)
+    private readonly sponsorRepo: Repository<Sponsor>,
     private readonly eventsService: EventsService,
     private readonly contributionsService: ContributionsService,
     private readonly escrowService: EscrowService,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async confirmSponsorPayment(transactionHash: string): Promise<boolean> {
@@ -214,5 +221,63 @@ export class SponsorsService {
       .getRawOne<{ total: string | null }>();
 
     return Number(result?.total ?? 0);
+  }
+
+  async getEventLeaderboard(eventId: string): Promise<any[]> {
+    const cacheKey = `leaderboard:${eventId}`;
+    const cached = await this.cacheManager.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const contributions = await this.contributionRepository
+      .createQueryBuilder('contribution')
+      .innerJoin('contribution.tier', 'tier')
+      .innerJoinAndSelect('contribution.sponsor', 'sponsor')
+      .select([
+        'sponsor.displayName as "displayName"',
+        'sponsor.logoUrl as "logoUrl"',
+        'tier.name as "tierName"',
+        'SUM(contribution.amount) as "totalXlm"',
+      ])
+      .where('tier.eventId = :eventId', { eventId })
+      .andWhere('contribution.status = :status', {
+        status: ContributionStatus.CONFIRMED,
+      })
+      .groupBy(
+        'sponsor.displayName, sponsor.logoUrl, tier.name',
+      )
+      .orderBy('"totalXlm"', 'DESC')
+      .getRawMany();
+
+    const leaderboard = contributions.map((c, i) => ({
+      rank: i + 1,
+      ...c,
+      totalXlm: Number(c.totalXlm),
+    }));
+
+    await this.cacheManager.set(cacheKey, leaderboard, 300);
+    return leaderboard;
+  }
+
+  async getSponsorProfile(userId: string): Promise<any> {
+    const contributions = await this.sponsorRepo.find({
+      where: { userId },
+      relations: ['event'],
+      order: { createdAt: 'DESC' },
+    });
+    if (!contributions.length) return { userId, events: [] };
+    const latest = contributions[0];
+    return {
+      userId,
+      displayName: latest.displayName,
+      logoUrl: latest.logoUrl,
+      websiteUrl: latest.websiteUrl,
+      totalContributed: contributions.reduce((sum, c) => sum + Number(c.amount), 0),
+      events: contributions.map((c) => ({
+        eventId: c.eventId,
+        title: c.event?.title,
+        amount: c.amount,
+        date: c.createdAt,
+      })),
+    };
   }
 }

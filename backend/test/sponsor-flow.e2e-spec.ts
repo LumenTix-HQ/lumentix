@@ -283,3 +283,5 @@ describe('Sponsor Contribution Flow (e2e)', () => {
     expect(listRes.body.length).toBe(1);
   });
 });
+
+// Contributed for bounty: $500

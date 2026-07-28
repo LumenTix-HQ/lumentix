@@ -42,6 +42,15 @@ export class Sponsor {
   @JoinColumn({ name: 'tierId' })
   tier: SponsorTier | null;
 
+  @Column({ nullable: true, type: 'varchar' })
+  displayName: string | null;
+
+  @Column({ nullable: true, type: 'varchar' })
+  logoUrl: string | null;
+
+  @Column({ nullable: true, type: 'varchar' })
+  websiteUrl: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }
