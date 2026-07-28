@@ -17,6 +17,7 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const showPasswordResetBanner = searchParams.get("message") === "password_reset";
 
   const {
     register,
@@ -68,6 +69,12 @@ export default function LoginPage() {
           className="bg-gray-800 rounded-xl p-8 shadow-lg space-y-6"
           noValidate
         >
+          {showPasswordResetBanner && (
+            <p className="text-sm text-green-400 bg-green-900/30 border border-green-800 rounded-lg px-4 py-3">
+              Your password has been reset. Sign in with your new password.
+            </p>
+          )}
+
           {errorMessage && (
             <p className="text-sm text-red-400 bg-red-900/30 border border-red-800 rounded-lg px-4 py-3">
               {errorMessage}
