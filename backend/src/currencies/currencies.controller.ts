@@ -28,6 +28,9 @@ export class CurrenciesController {
   constructor(private readonly currenciesService: CurrenciesService) {}
 
     @Get('rates')
+  @ApiOperation({ summary: 'Get current currency exchange rates' })
+  @ApiResponse({ status: 200, description: 'Exchange rates returned' })
+  @ApiResponse({ status: 503, description: 'Exchange rates unavailable' })
   async getRates(
     @Res({ passthrough: true })
     response: Response,

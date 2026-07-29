@@ -34,6 +34,9 @@ import { IdempotencyInterceptor } from '../common/interceptors/idempotency.inter
 @ApiBearerAuth()
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Resource not found' })
 export class RegistrationsController {
   constructor(private readonly service: RegistrationsService) {}
 

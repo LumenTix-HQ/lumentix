@@ -44,5 +44,10 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
     throw err;
   }
 
-  return { accessToken: '', refreshToken: '' };
+  const body = await res.json();
+  return {
+    accessToken: body.accessToken,
+    refreshToken: body.refreshToken,
+    user: body.user,
+  };
 }

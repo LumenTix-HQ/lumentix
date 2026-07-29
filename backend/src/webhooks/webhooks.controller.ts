@@ -11,6 +11,9 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Event not found' })
 export class WebhooksController {
   constructor(private readonly webhooksService: WebhooksService) {}
 
