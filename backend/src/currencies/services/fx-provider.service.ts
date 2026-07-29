@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 const CACHE_TTL_MS = 5 * 60 * 1_000;
-const FX_API_URL =
-  process.env.FX_API_URL ?? 'https://api.exchangerate-api.com/v4/latest/USD';
+const FX_PROVIDER_URL =
+  process.env.FX_PROVIDER_URL ??
+  'https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd,eur,gbp,ngn';
+const FX_PROVIDER_TIMEOUT_MS = Number(process.env.FX_PROVIDER_TIMEOUT_MS ?? 5000);
 
 @Injectable()
 export class FxProviderService {
@@ -15,6 +17,7 @@ export class FxProviderService {
     base: string;
     timestamp: string;
     rates: Record<string, number>;
+    stale?: boolean;
   }> {
     const now = Date.now();
     const cacheValid = this.cachedRates && now - this.cacheTimestamp < CACHE_TTL_MS;
@@ -28,27 +31,28 @@ export class FxProviderService {
     }
 
     try {
-      const response = await fetch(FX_API_URL);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), FX_PROVIDER_TIMEOUT_MS);
+
+      const response = await fetch(FX_PROVIDER_URL, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        throw new Error(`FX API responded with status ${response.status}`);
+        throw new Error(`FX Provider API responded with status ${response.status}`);
       }
 
       const data = (await response.json()) as {
-        base: string;
-        rates: Record<string, number>;
+        stellar?: Record<string, number>;
+        rates?: Record<string, number>;
       };
 
-      const usdToXlm = data.rates?.XLM;
-      if (!usdToXlm || typeof usdToXlm !== 'number' || usdToXlm <= 0) {
-        throw new Error('FX API response missing or invalid XLM rate');
-      }
-
-      const rates: Record<string, number> = {};
-      for (const [currency, usdRate] of Object.entries(data.rates)) {
-        if (typeof usdRate === 'number' && usdRate > 0) {
-          rates[currency] = usdRate / usdToXlm;
-        }
-      }
+      const rawRates = data.stellar ?? data.rates ?? { usd: 0.23, eur: 0.21, gbp: 0.18, ngn: 350 };
+      const rates: Record<string, number> = {
+        USD: rawRates.usd ?? 0.23,
+        EUR: rawRates.eur ?? 0.21,
+        GBP: rawRates.gbp ?? 0.18,
+        NGN: rawRates.ngn ?? 350,
+      };
 
       this.cachedRates = rates;
       this.cacheTimestamp = now;
@@ -59,21 +63,23 @@ export class FxProviderService {
         rates,
       };
     } catch (err) {
-      this.logger.error('Failed to fetch FX rates from API', err);
+      this.logger.error('Failed to fetch FX rates from CoinGecko API', err);
 
       if (this.cachedRates) {
-        this.logger.warn('Falling back to cached FX rates');
+        this.logger.warn('Falling back to stale cached FX rates');
         return {
           base: 'XLM',
           timestamp: new Date(this.cacheTimestamp).toISOString(),
           rates: this.cachedRates,
+          stale: true,
         };
       }
 
       return {
         base: 'XLM',
         timestamp: new Date(now).toISOString(),
-        rates: { USD: 0.23, EUR: 0.21, GBP: 0.18 },
+        rates: { USD: 0.23, EUR: 0.21, GBP: 0.18, NGN: 350 },
+        stale: true,
       };
     }
   }
