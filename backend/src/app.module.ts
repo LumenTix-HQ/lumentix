@@ -44,6 +44,10 @@ import { DecentralizedStorageModule } from './decentralized-storage/decentralize
 import { ChatModule } from './chat/chat.module';
 import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
+import { TelemetryModule } from './telemetry/telemetry.module';
+import { MerchModule } from './merch/merch.module';
+import { TicketDesignModule } from './ticket-design/ticket-design.module';
+import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
 
@@ -131,6 +135,10 @@ import { InternalRoutingModule } from './internal/internal.module';
     ChatModule,
     ZkpModule,
     LoyaltyModule,
+    TelemetryModule,
+    MerchModule,
+    TicketDesignModule,
+    ScanAnalyticsModule,
     InternalModule,
     InternalRoutingModule,
   ],
