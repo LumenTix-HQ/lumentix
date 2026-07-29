@@ -45,6 +45,7 @@ import { ChatModule } from './chat/chat.module';
 import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { TelemetryModule } from './telemetry/telemetry.module';
+import { MerchModule } from './merch/merch.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
 
@@ -133,6 +134,7 @@ import { InternalRoutingModule } from './internal/internal.module';
     ZkpModule,
     LoyaltyModule,
     TelemetryModule,
+    MerchModule,
     InternalModule,
     InternalRoutingModule,
   ],
