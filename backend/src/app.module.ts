@@ -46,6 +46,7 @@ import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { MerchModule } from './merch/merch.module';
+import { TicketDesignModule } from './ticket-design/ticket-design.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
 
@@ -135,6 +136,7 @@ import { InternalRoutingModule } from './internal/internal.module';
     LoyaltyModule,
     TelemetryModule,
     MerchModule,
+    TicketDesignModule,
     InternalModule,
     InternalRoutingModule,
   ],
