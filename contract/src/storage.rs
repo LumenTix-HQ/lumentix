@@ -1,6 +1,7 @@
 use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
     IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
@@ -67,6 +68,10 @@ const CERTIFICATE_PREFIX: &str = "CERT_";
 const CERTIFICATE_ID_COUNTER: &str = "CERT_CTR";
 const EVENT_CERTIFICATE_PREFIX: &str = "EVCERT_";
 const CERT_STANDARD_PREFIX: &str = "CERTSTD_";
+const SURVEY_ID_COUNTER: &str = "SURVEY_CTR";
+const SURVEY_PREFIX: &str = "SURVEY_";
+const SURVEY_EVENT_INDEX_PREFIX: &str = "SUREVT_";
+const SURVEY_NULLIFIER_PREFIX: &str = "SURNULL_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -1983,5 +1988,103 @@ pub fn get_visual_layout(env: &Env, event_id: u64) -> Option<String> {
             .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     }
     layout
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANONYMOUS SURVEY STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the next survey response ID
+pub fn get_next_survey_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&SURVEY_ID_COUNTER)
+        .unwrap_or(1u64);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment the survey response ID counter
+pub fn increment_survey_id(env: &Env) {
+    let next_id = get_next_survey_id(env) + 1;
+    env.storage().instance().set(&SURVEY_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist an anonymous survey response
+pub fn set_survey_response(env: &Env, survey_id: u64, response: &AnonymousSurveyResponse) {
+    let key = (SURVEY_PREFIX, survey_id);
+    env.storage().persistent().set(&key, response);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch an anonymous survey response by ID
+pub fn get_survey_response(
+    env: &Env,
+    survey_id: u64,
+) -> Result<AnonymousSurveyResponse, LumentixError> {
+    let key = (SURVEY_PREFIX, survey_id);
+    let response = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::NoSurveyResponses)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(response)
+}
+
+/// Append a survey response ID to the index of responses recorded for an event
+pub fn add_survey_to_event(env: &Env, event_id: u64, survey_id: u64) {
+    let key = (SURVEY_EVENT_INDEX_PREFIX, event_id);
+    let mut ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    ids.push_back(survey_id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get all survey response IDs recorded for an event
+pub fn get_survey_ids_for_event(env: &Env, event_id: u64) -> Vec<u64> {
+    let key = (SURVEY_EVENT_INDEX_PREFIX, event_id);
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    ids
+}
+
+/// Check whether a survey nullifier has already been used (duplicate-submission guard)
+pub fn has_survey_nullifier(env: &Env, event_id: u64, nullifier: &BytesN<32>) -> bool {
+    let key = (SURVEY_NULLIFIER_PREFIX, event_id, nullifier.clone());
+    env.storage().persistent().has(&key)
+}
+
+/// Mark a survey nullifier as used
+pub fn mark_survey_nullifier_used(env: &Env, event_id: u64, nullifier: &BytesN<32>) {
+    let key = (SURVEY_NULLIFIER_PREFIX, event_id, nullifier.clone());
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 

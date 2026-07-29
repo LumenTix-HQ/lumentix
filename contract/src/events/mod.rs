@@ -1557,3 +1557,31 @@ impl CertificationStandardUpdated {
             .publish((symbol_short!("certstd"),), (standard, enabled));
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anonymous Event Feedback Surveys
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an anonymous survey response is submitted. Intentionally
+/// carries no respondent identity — only the aggregate shape of the
+/// response — to preserve the anonymity of the on-chain record.
+pub struct AnonymousSurveySubmitted;
+impl AnonymousSurveySubmitted {
+    pub fn emit(env: &Env, survey_id: u64, event_id: u64, question_count: u32, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("survsubm"),),
+            (survey_id, event_id, question_count, timestamp),
+        );
+    }
+}
+
+/// Emitted when aggregated survey results are compiled for an event
+pub struct SurveyResultsCompiled;
+impl SurveyResultsCompiled {
+    pub fn emit(env: &Env, event_id: u64, total_responses: u32, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("survcomp"),),
+            (event_id, total_responses, timestamp),
+        );
+    }
+}

@@ -324,4 +324,16 @@ pub enum LumentixError {
     // ═══════════════════════════════════════════════════════════════════════
     /// Not enough historical sales data points were provided to produce a forecast
     InsufficientSalesHistory = 202,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Anonymous Event Feedback Survey errors (203–206)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// This ticket has already submitted a survey response for this event
+    SurveyAlreadySubmitted = 203,
+    /// No survey responses exist yet for this event
+    NoSurveyResponses = 204,
+    /// Survey submission must include at least one rating
+    EmptySurveyAnswers = 205,
+    /// Every survey rating must be between 1 and 5
+    InvalidSurveyRating = 206,
 }

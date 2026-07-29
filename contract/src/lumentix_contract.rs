@@ -2,7 +2,8 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AttendanceMemorabiliaMinted,
+    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AnonymousSurveySubmitted,
+    AttendanceMemorabiliaMinted,
     AttendanceVerificationFailed,
     AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
@@ -21,6 +22,7 @@ use crate::events::{
     ReferralLinkGenerated, ReferralPurchaseProcessed, ReferralRewardsCredited, ReputationUpdated,
     ResaleComplianceEnforced, ResalePriceVerified, ReviewSubmitted, SeatHoldReleased, SeatSelected,
     SeatUpgradeBidPlaced, SeatUpgradeBidRefunded, SeatUpgradeBidResolved,
+    SurveyResultsCompiled,
     TicketDidLinked, TicketDidRevoked, TicketPurchased, TicketRefunded,
     TicketRevoked, TicketTransferred, TicketUsed, TransferBlackoutUpdated, TransferLockBypassed,
     UpgradeExecuted,
@@ -35,12 +37,13 @@ use crate::events::{
 };
 use crate::storage;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CancellationReason,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    CancellationReason,
     CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
     CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
     EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
     MemorabiliaClaim, MerchVoucher, NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord,
-    ResalePriceCeiling, Seat, SeatUpgradeBid, Ticket,
+    ResalePriceCeiling, Seat, SeatUpgradeBid, SurveyResults, Ticket,
     TicketDidAssociation, TicketTransferRecord, TransferBlackout, UpgradeGovernanceConfig,
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
@@ -51,7 +54,7 @@ use crate::types::{
     CertificationStandard,
 };
 use crate::validation;
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Map, String, Vec};
 
 #[contract]
 pub struct LumentixContract;
@@ -6110,7 +6113,173 @@ impl LumentixContract {
         seat.x = Some(x);
         seat.y = Some(y);
         storage::set_seat(&env, event_id, &seat_id, &seat);
-        
+
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ANONYMOUS EVENT FEEDBACK SURVEYS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Verify that `owner` attended `event_id` via `ticket_id`, without
+    /// persisting the link anywhere. Shared by `submit_anonymous_survey` and
+    /// available standalone for other flows that need the same proof.
+    ///
+    /// Checks:
+    ///  a) The event exists and has completed.
+    ///  b) The ticket exists, belongs to `owner`, and belongs to `event_id`.
+    ///  c) The ticket was used (checked in) — the attendance proof.
+    ///  d) `signature` is a non-empty attendance authorization proof.
+    pub fn verify_attendance_proof(
+        env: Env,
+        event_id: u64,
+        ticket_id: u64,
+        owner: Address,
+        signature: BytesN<64>,
+    ) -> Result<bool, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Completed {
+            return Err(LumentixError::EventNotCompleted);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != owner {
+            return Err(LumentixError::ReviewerNotTicketOwner);
+        }
+        if ticket.event_id != event_id {
+            return Err(LumentixError::TicketEventMismatch);
+        }
+        if !ticket.used {
+            return Err(LumentixError::AttendanceNotVerified);
+        }
+
+        // Signature must be a non-zero attendance authorization proof.
+        let mut sig_valid = false;
+        for i in 0..64 {
+            if signature.get(i) != Some(0) {
+                sig_valid = true;
+                break;
+            }
+        }
+        if !sig_valid {
+            return Err(LumentixError::AttendanceNotVerified);
+        }
+
+        Ok(true)
+    }
+
+    /// Submit an anonymous event feedback survey.
+    ///
+    /// Attendance is proven via [`Self::verify_attendance_proof`], but the
+    /// stored [`AnonymousSurveyResponse`] never records the respondent's
+    /// wallet address or ticket ID. Instead, a one-way `nullifier` hash
+    /// derived from `(event_id, ticket_id)` is checked against previously
+    /// used nullifiers to reject a second submission from the same ticket,
+    /// without the stored response ever revealing which ticket it was.
+    pub fn submit_anonymous_survey(
+        env: Env,
+        event_id: u64,
+        ticket_id: u64,
+        owner: Address,
+        signature: BytesN<64>,
+        ratings: Vec<u32>,
+        comment: String,
+    ) -> Result<u64, LumentixError> {
+        owner.require_auth();
+
+        Self::verify_attendance_proof(env.clone(), event_id, ticket_id, owner.clone(), signature)?;
+
+        if ratings.len() == 0 {
+            return Err(LumentixError::EmptySurveyAnswers);
+        }
+        for rating in ratings.iter() {
+            if rating < 1 || rating > 5 {
+                return Err(LumentixError::InvalidSurveyRating);
+            }
+        }
+
+        // Derive a one-way nullifier from (event_id, ticket_id) so the same
+        // ticket cannot submit twice, without ever storing the ticket_id.
+        let mut buf = Bytes::new(&env);
+        buf.extend_from_array(&event_id.to_be_bytes());
+        buf.extend_from_array(&ticket_id.to_be_bytes());
+        let nullifier: BytesN<32> = env.crypto().sha256(&buf).to_bytes();
+
+        if storage::has_survey_nullifier(&env, event_id, &nullifier) {
+            return Err(LumentixError::SurveyAlreadySubmitted);
+        }
+
+        let survey_id = storage::get_next_survey_id(&env);
+        storage::increment_survey_id(&env);
+
+        let now = env.ledger().timestamp();
+        let response_len = ratings.len();
+        let response = AnonymousSurveyResponse {
+            id: survey_id,
+            event_id,
+            ratings,
+            comment,
+            submitted_at: now,
+        };
+
+        storage::set_survey_response(&env, survey_id, &response);
+        storage::add_survey_to_event(&env, event_id, survey_id);
+        storage::mark_survey_nullifier_used(&env, event_id, &nullifier);
+
+        AnonymousSurveySubmitted::emit(&env, survey_id, event_id, response_len, now);
+
+        Ok(survey_id)
+    }
+
+    /// Compile aggregated results across every anonymous survey response
+    /// recorded for an event. Returns per-question average ratings (×100)
+    /// without exposing any individual response or respondent.
+    pub fn compile_survey_results(env: Env, event_id: u64) -> Result<SurveyResults, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+
+        let survey_ids = storage::get_survey_ids_for_event(&env, event_id);
+        if survey_ids.len() == 0 {
+            return Err(LumentixError::NoSurveyResponses);
+        }
+
+        let mut totals: Vec<u64> = Vec::new(&env);
+        let mut question_count: u32 = 0;
+        let mut total_responses: u32 = 0;
+
+        for survey_id in survey_ids.iter() {
+            let response = storage::get_survey_response(&env, survey_id)?;
+
+            if total_responses == 0 {
+                question_count = response.ratings.len();
+                for _ in 0..question_count {
+                    totals.push_back(0);
+                }
+            }
+
+            for (i, rating) in response.ratings.iter().enumerate() {
+                if (i as u32) < question_count {
+                    let current = totals.get(i as u32).unwrap_or(0);
+                    totals.set(i as u32, current + rating as u64);
+                }
+            }
+
+            total_responses += 1;
+        }
+
+        let mut average_ratings_x100: Vec<u32> = Vec::new(&env);
+        for i in 0..question_count {
+            let sum = totals.get(i).unwrap_or(0);
+            let avg_x100 = (sum * 100) / total_responses as u64;
+            average_ratings_x100.push_back(avg_x100 as u32);
+        }
+
+        let now = env.ledger().timestamp();
+        SurveyResultsCompiled::emit(&env, event_id, total_responses, now);
+
+        Ok(SurveyResults {
+            event_id,
+            total_responses,
+            average_ratings_x100,
+        })
     }
 }
