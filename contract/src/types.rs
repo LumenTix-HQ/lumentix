@@ -815,3 +815,35 @@ pub struct SurveyResults {
     /// Average rating × 100 per question index (parallel to `ratings`).
     pub average_ratings_x100: Vec<u32>,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A community vote to decide which candidate (artist, track, speaker, etc.)
+/// fills a specific schedule slot at an event. Open to any ticket holder of
+/// the event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVote {
+    pub vote_id: u64,
+    pub event_id: u64,
+    pub slot_name: String,
+    /// Candidate names, e.g. artists/tracks/speakers competing for the slot.
+    pub candidates: Vec<String>,
+    /// Vote tally, parallel to `candidates`.
+    pub vote_counts: Vec<u32>,
+    pub voting_deadline: u64,
+    pub finalized: bool,
+    pub winning_candidate: Option<String>,
+}
+
+/// A single ticket holder's vote on a schedule slot (duplicate-vote guard).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVoteCastRecord {
+    pub vote_id: u64,
+    pub voter: Address,
+    pub candidate_index: u32,
+    pub timestamp: u64,
+}

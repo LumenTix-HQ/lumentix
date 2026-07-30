@@ -5,7 +5,7 @@ use crate::types::{
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
     IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
-    OrganizerReputation, ResalePriceCeiling, Seat, SeatUpgradeBid,
+    OrganizerReputation, ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid,
     Ticket, TicketDidAssociation, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
@@ -72,6 +72,9 @@ const SURVEY_ID_COUNTER: &str = "SURVEY_CTR";
 const SURVEY_PREFIX: &str = "SURVEY_";
 const SURVEY_EVENT_INDEX_PREFIX: &str = "SUREVT_";
 const SURVEY_NULLIFIER_PREFIX: &str = "SURNULL_";
+const SCHEDULE_VOTE_ID_COUNTER: &str = "SCHVOTE_CTR";
+const SCHEDULE_VOTE_PREFIX: &str = "SCHVOTE_";
+const SCHEDULE_VOTE_CAST_PREFIX: &str = "SCHCAST_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -2086,5 +2089,76 @@ pub fn mark_survey_nullifier_used(env: &Env, event_id: u64, nullifier: &BytesN<3
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULE VOTE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the next schedule vote ID
+pub fn get_next_schedule_vote_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&SCHEDULE_VOTE_ID_COUNTER)
+        .unwrap_or(1u64);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment the schedule vote ID counter
+pub fn increment_schedule_vote_id(env: &Env) {
+    let next_id = get_next_schedule_vote_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&SCHEDULE_VOTE_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist a schedule vote
+pub fn set_schedule_vote(env: &Env, vote_id: u64, vote: &ScheduleVote) {
+    let key = (SCHEDULE_VOTE_PREFIX, vote_id);
+    env.storage().persistent().set(&key, vote);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a schedule vote by ID
+pub fn get_schedule_vote(env: &Env, vote_id: u64) -> Result<ScheduleVote, LumentixError> {
+    let key = (SCHEDULE_VOTE_PREFIX, vote_id);
+    let vote = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::ScheduleVoteNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(vote)
+}
+
+/// Persist a voter's cast record for a schedule vote (duplicate-vote guard)
+pub fn set_schedule_vote_cast(
+    env: &Env,
+    vote_id: u64,
+    voter: &Address,
+    record: &ScheduleVoteCastRecord,
+) {
+    let key = (SCHEDULE_VOTE_CAST_PREFIX, vote_id, voter.clone());
+    env.storage().persistent().set(&key, record);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Check whether a voter has already cast a vote for this schedule vote
+pub fn has_cast_schedule_vote(env: &Env, vote_id: u64, voter: &Address) -> bool {
+    let key = (SCHEDULE_VOTE_CAST_PREFIX, vote_id, voter.clone());
+    env.storage().persistent().has(&key)
 }
 

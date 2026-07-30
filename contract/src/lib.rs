@@ -257,6 +257,7 @@ pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
     AnonymousSurveySubmitted, SurveyResultsCompiled,
+    ScheduleVoteCast, ScheduleVoteFinalized, ScheduleVoteInitialized,
     AttendanceMemorabiliaMinted, AttendanceVerificationFailed, AttendanceVerified,
     BlockchainIdentityVerified,
     BridgeTransactionValidated, CarbonFootprintCalculated, CarbonOffsetPurchased,
@@ -282,6 +283,7 @@ pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
 pub use types::{
     AnonymousSurveyResponse, SurveyResults,
+    ScheduleVote, ScheduleVoteCastRecord,
     BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
     CollectibleInventory, CrossChainTransfer, CrossChainTransferStatus, EnvironmentalImpact,
     Event, EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,

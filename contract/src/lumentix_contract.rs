@@ -21,6 +21,7 @@ use crate::events::{
     ProtocolFeeQueried,
     ReferralLinkGenerated, ReferralPurchaseProcessed, ReferralRewardsCredited, ReputationUpdated,
     ResaleComplianceEnforced, ResalePriceVerified, ReviewSubmitted, SeatHoldReleased, SeatSelected,
+    ScheduleVoteCast, ScheduleVoteFinalized, ScheduleVoteInitialized,
     SeatUpgradeBidPlaced, SeatUpgradeBidRefunded, SeatUpgradeBidResolved,
     SurveyResultsCompiled,
     TicketDidLinked, TicketDidRevoked, TicketPurchased, TicketRefunded,
@@ -43,7 +44,7 @@ use crate::types::{
     CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
     EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
     MemorabiliaClaim, MerchVoucher, NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord,
-    ResalePriceCeiling, Seat, SeatUpgradeBid, SurveyResults, Ticket,
+    ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid, SurveyResults, Ticket,
     TicketDidAssociation, TicketTransferRecord, TransferBlackout, UpgradeGovernanceConfig,
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
@@ -6281,5 +6282,179 @@ impl LumentixContract {
             total_responses,
             average_ratings_x100,
         })
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DECENTRALIZED COMMUNITY VOTING FOR EVENT SCHEDULES
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Open a community vote for a schedule slot (e.g. "Main Stage — 8PM"),
+    /// letting ticket holders decide which candidate (artist, track,
+    /// speaker, etc.) fills it. Only the event organizer can open a vote.
+    pub fn initialize_schedule_vote(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        slot_name: String,
+        candidates: Vec<String>,
+        voting_deadline: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_string_not_empty(&slot_name)?;
+
+        if candidates.len() < 2 {
+            return Err(LumentixError::InsufficientScheduleCandidates);
+        }
+
+        if voting_deadline <= env.ledger().timestamp() {
+            return Err(LumentixError::InvalidTimeRange);
+        }
+
+        let mut vote_counts: Vec<u32> = Vec::new(&env);
+        for _ in candidates.iter() {
+            vote_counts.push_back(0);
+        }
+
+        let vote_id = storage::get_next_schedule_vote_id(&env);
+        storage::increment_schedule_vote_id(&env);
+
+        let candidate_count = candidates.len();
+        let vote = ScheduleVote {
+            vote_id,
+            event_id,
+            slot_name: slot_name.clone(),
+            candidates,
+            vote_counts,
+            voting_deadline,
+            finalized: false,
+            winning_candidate: None,
+        };
+
+        storage::set_schedule_vote(&env, vote_id, &vote);
+
+        ScheduleVoteInitialized::emit(
+            &env,
+            vote_id,
+            event_id,
+            slot_name,
+            candidate_count,
+            voting_deadline,
+        );
+
+        Ok(vote_id)
+    }
+
+    /// Cast a vote for a candidate in an open schedule slot vote. Only
+    /// holders of a ticket for the event being voted on may participate,
+    /// and each ticket holder may vote once per slot.
+    pub fn cast_schedule_vote(
+        env: Env,
+        voter: Address,
+        vote_id: u64,
+        candidate_index: u32,
+    ) -> Result<(), LumentixError> {
+        voter.require_auth();
+
+        let mut vote = storage::get_schedule_vote(&env, vote_id)?;
+
+        if vote.finalized {
+            return Err(LumentixError::ScheduleVotingClosed);
+        }
+
+        let now = env.ledger().timestamp();
+        if now > vote.voting_deadline {
+            return Err(LumentixError::ScheduleVotingClosed);
+        }
+
+        if candidate_index >= vote.candidates.len() {
+            return Err(LumentixError::InvalidScheduleCandidateIndex);
+        }
+
+        // Voter must hold a ticket for the event this slot belongs to.
+        let mut is_ticket_holder = false;
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.owner == voter && ticket.event_id == vote.event_id {
+                    is_ticket_holder = true;
+                    break;
+                }
+            }
+            ticket_id += 1;
+        }
+        if !is_ticket_holder {
+            return Err(LumentixError::ScheduleVoterNotTicketHolder);
+        }
+
+        if storage::has_cast_schedule_vote(&env, vote_id, &voter) {
+            return Err(LumentixError::ScheduleVoteAlreadyCast);
+        }
+
+        let current_count = vote.vote_counts.get(candidate_index).unwrap_or(0);
+        let new_count = current_count + 1;
+        vote.vote_counts.set(candidate_index, new_count);
+        storage::set_schedule_vote(&env, vote_id, &vote);
+
+        let cast_record = ScheduleVoteCastRecord {
+            vote_id,
+            voter: voter.clone(),
+            candidate_index,
+            timestamp: now,
+        };
+        storage::set_schedule_vote_cast(&env, vote_id, &voter, &cast_record);
+
+        ScheduleVoteCast::emit(&env, vote_id, voter, candidate_index, new_count);
+
+        Ok(())
+    }
+
+    /// Tally and finalize a schedule vote once its voting deadline has
+    /// passed. Idempotent — calling it again after finalization simply
+    /// returns the already-finalized result. Ties are broken in favor of
+    /// the lowest candidate index.
+    pub fn tally_vote_results(env: Env, vote_id: u64) -> Result<ScheduleVote, LumentixError> {
+        let mut vote = storage::get_schedule_vote(&env, vote_id)?;
+
+        if vote.finalized {
+            return Ok(vote);
+        }
+
+        let now = env.ledger().timestamp();
+        if now <= vote.voting_deadline {
+            return Err(LumentixError::ScheduleVotingStillActive);
+        }
+
+        let mut winner_index: u32 = 0;
+        let mut winner_votes: u32 = 0;
+        for i in 0..vote.vote_counts.len() {
+            let count = vote.vote_counts.get(i).unwrap_or(0);
+            if count > winner_votes {
+                winner_votes = count;
+                winner_index = i;
+            }
+        }
+
+        let winning_candidate = vote.candidates.get(winner_index).unwrap();
+
+        vote.finalized = true;
+        vote.winning_candidate = Some(winning_candidate.clone());
+        storage::set_schedule_vote(&env, vote_id, &vote);
+
+        ScheduleVoteFinalized::emit(
+            &env,
+            vote_id,
+            vote.event_id,
+            winning_candidate,
+            winner_votes,
+        );
+
+        Ok(vote)
     }
 }

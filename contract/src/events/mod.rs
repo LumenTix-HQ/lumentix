@@ -1585,3 +1585,47 @@ impl SurveyResultsCompiled {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a new schedule slot vote is opened for an event
+pub struct ScheduleVoteInitialized;
+impl ScheduleVoteInitialized {
+    pub fn emit(
+        env: &Env,
+        vote_id: u64,
+        event_id: u64,
+        slot_name: String,
+        candidate_count: u32,
+        voting_deadline: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("schedinit"),),
+            (vote_id, event_id, slot_name, candidate_count, voting_deadline),
+        );
+    }
+}
+
+/// Emitted when a ticket holder casts a vote on a schedule slot
+pub struct ScheduleVoteCast;
+impl ScheduleVoteCast {
+    pub fn emit(env: &Env, vote_id: u64, voter: Address, candidate_index: u32, new_count: u32) {
+        env.events().publish(
+            (symbol_short!("schedcast"),),
+            (vote_id, voter, candidate_index, new_count),
+        );
+    }
+}
+
+/// Emitted when a schedule vote is finalized and a winning candidate is set
+pub struct ScheduleVoteFinalized;
+impl ScheduleVoteFinalized {
+    pub fn emit(env: &Env, vote_id: u64, event_id: u64, winning_candidate: String, votes: u32) {
+        env.events().publish(
+            (symbol_short!("schedfin"),),
+            (vote_id, event_id, winning_candidate, votes),
+        );
+    }
+}

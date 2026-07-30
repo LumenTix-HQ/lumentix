@@ -336,4 +336,22 @@ pub enum LumentixError {
     EmptySurveyAnswers = 205,
     /// Every survey rating must be between 1 and 5
     InvalidSurveyRating = 206,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Decentralized Schedule Voting errors (207–213)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// A schedule vote needs at least two candidates to be meaningful
+    InsufficientScheduleCandidates = 207,
+    /// Schedule vote with the given ID does not exist
+    ScheduleVoteNotFound = 208,
+    /// Voting deadline for this schedule vote has passed
+    ScheduleVotingClosed = 209,
+    /// Schedule vote cannot be tallied before its voting deadline
+    ScheduleVotingStillActive = 210,
+    /// This ticket holder has already voted on this schedule slot
+    ScheduleVoteAlreadyCast = 211,
+    /// Caller does not hold a ticket for the event being voted on
+    ScheduleVoterNotTicketHolder = 212,
+    /// Candidate index is out of range for this schedule vote
+    InvalidScheduleCandidateIndex = 213,
 }
