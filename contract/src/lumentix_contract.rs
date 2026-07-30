@@ -18,6 +18,7 @@ use crate::events::{
     MerchandisePurchased, NftMinted, NftTraded,
     OraclePriceUpdated,
     PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, PriceCeilingSet,
+    PromoCodeApplied, PromoCodeCreated,
     ProtocolFeeQueried,
     ReferralLinkGenerated, ReferralPurchaseProcessed, ReferralRewardsCredited, ReputationUpdated,
     ResaleComplianceEnforced, ResalePriceVerified, ReviewSubmitted, SeatHoldReleased, SeatSelected,
@@ -43,7 +44,7 @@ use crate::types::{
     CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
     CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
     EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
-    MemorabiliaClaim, MerchVoucher, NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord,
+    MemorabiliaClaim, MerchVoucher, NftCollectible, OrganizerReputation, PromoCode, RarityTier, ReferralLinkRecord,
     ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid, SurveyResults, Ticket,
     TicketDidAssociation, TicketTransferRecord, TransferBlackout, UpgradeGovernanceConfig,
     UpgradeProposal,
@@ -6456,5 +6457,137 @@ impl LumentixContract {
         );
 
         Ok(vote)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PROMO CODES WITH COMPLEX USAGE LIMITS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Create a promo code for an event. Only the event organizer can
+    /// create promo codes. `max_global_uses` and `max_uses_per_user` of `0`
+    /// mean "unlimited" for that dimension.
+    pub fn create_promo_code(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        code: String,
+        discount_bps: u32,
+        expires_at: u64,
+        max_global_uses: u32,
+        max_uses_per_user: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_string_not_empty(&code)?;
+
+        if discount_bps == 0 || discount_bps > 10_000 {
+            return Err(LumentixError::InvalidPromoDiscount);
+        }
+
+        if expires_at <= env.ledger().timestamp() {
+            return Err(LumentixError::InvalidTimeRange);
+        }
+
+        if storage::has_promo_code(&env, event_id, &code) {
+            return Err(LumentixError::PromoCodeAlreadyExists);
+        }
+
+        let promo = PromoCode {
+            event_id,
+            code: code.clone(),
+            discount_bps,
+            expires_at,
+            max_global_uses,
+            max_uses_per_user,
+            total_uses: 0,
+            active: true,
+            created_by: organizer,
+        };
+
+        storage::set_promo_code(&env, event_id, &code, &promo);
+
+        PromoCodeCreated::emit(
+            &env,
+            event_id,
+            code,
+            discount_bps,
+            expires_at,
+            max_global_uses,
+            max_uses_per_user,
+        );
+
+        Ok(())
+    }
+
+    /// Validate that a promo code can currently be redeemed by `user`:
+    /// it must be active, not expired, under its global use limit, and
+    /// under that user's individual use limit.
+    pub fn validate_promo_code_limits(
+        env: Env,
+        event_id: u64,
+        code: String,
+        user: Address,
+    ) -> Result<(), LumentixError> {
+        let promo = storage::get_promo_code(&env, event_id, &code)?;
+
+        if !promo.active {
+            return Err(LumentixError::PromoCodeInactive);
+        }
+
+        if env.ledger().timestamp() > promo.expires_at {
+            return Err(LumentixError::PromoCodeExpired);
+        }
+
+        if promo.max_global_uses > 0 && promo.total_uses >= promo.max_global_uses {
+            return Err(LumentixError::PromoCodeGlobalLimitReached);
+        }
+
+        if promo.max_uses_per_user > 0 {
+            let user_uses = storage::get_promo_user_usage(&env, event_id, &code, &user);
+            if user_uses >= promo.max_uses_per_user {
+                return Err(LumentixError::PromoCodeUserLimitReached);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Apply a promo code's discount to `amount`, enforcing its expiration,
+    /// global limit, and per-user limit. Records the redemption and returns
+    /// the discounted amount.
+    pub fn apply_promo_code_discount(
+        env: Env,
+        event_id: u64,
+        code: String,
+        user: Address,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        user.require_auth();
+
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        Self::validate_promo_code_limits(env.clone(), event_id, code.clone(), user.clone())?;
+
+        let mut promo = storage::get_promo_code(&env, event_id, &code)?;
+
+        let discount = (amount * promo.discount_bps as i128) / 10_000;
+        let discounted_amount = amount - discount;
+
+        promo.total_uses += 1;
+        storage::set_promo_code(&env, event_id, &code, &promo);
+
+        let user_uses = storage::get_promo_user_usage(&env, event_id, &code, &user);
+        storage::set_promo_user_usage(&env, event_id, &code, &user, user_uses + 1);
+
+        PromoCodeApplied::emit(&env, event_id, code, user, amount, discounted_amount);
+
+        Ok(discounted_amount)
     }
 }

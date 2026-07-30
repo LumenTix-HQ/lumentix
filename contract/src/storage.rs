@@ -5,7 +5,7 @@ use crate::types::{
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
     IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
-    OrganizerReputation, ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid,
+    OrganizerReputation, PromoCode, ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid,
     Ticket, TicketDidAssociation, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
@@ -75,6 +75,8 @@ const SURVEY_NULLIFIER_PREFIX: &str = "SURNULL_";
 const SCHEDULE_VOTE_ID_COUNTER: &str = "SCHVOTE_CTR";
 const SCHEDULE_VOTE_PREFIX: &str = "SCHVOTE_";
 const SCHEDULE_VOTE_CAST_PREFIX: &str = "SCHCAST_";
+const PROMO_CODE_PREFIX: &str = "PROMO_";
+const PROMO_USER_USAGE_PREFIX: &str = "PROMOUSR_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -2160,5 +2162,59 @@ pub fn set_schedule_vote_cast(
 pub fn has_cast_schedule_vote(env: &Env, vote_id: u64, voter: &Address) -> bool {
     let key = (SCHEDULE_VOTE_CAST_PREFIX, vote_id, voter.clone());
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROMO CODE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Persist a promo code, scoped to a single event
+pub fn set_promo_code(env: &Env, event_id: u64, code: &String, promo: &PromoCode) {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    env.storage().persistent().set(&key, promo);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a promo code by event and code name
+pub fn get_promo_code(env: &Env, event_id: u64, code: &String) -> Result<PromoCode, LumentixError> {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    let promo = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::PromoCodeNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(promo)
+}
+
+/// Check whether a promo code already exists for an event
+pub fn has_promo_code(env: &Env, event_id: u64, code: &String) -> bool {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    env.storage().persistent().has(&key)
+}
+
+/// Get how many times a specific user has redeemed a promo code
+pub fn get_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Address) -> u32 {
+    let key = (PROMO_USER_USAGE_PREFIX, event_id, code.clone(), user.clone());
+    let usage = env.storage().persistent().get(&key).unwrap_or(0u32);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    usage
+}
+
+/// Persist a user's redemption count for a promo code
+pub fn set_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Address, usage: u32) {
+    let key = (PROMO_USER_USAGE_PREFIX, event_id, code.clone(), user.clone());
+    env.storage().persistent().set(&key, &usage);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 

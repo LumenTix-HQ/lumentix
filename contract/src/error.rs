@@ -354,4 +354,22 @@ pub enum LumentixError {
     ScheduleVoterNotTicketHolder = 212,
     /// Candidate index is out of range for this schedule vote
     InvalidScheduleCandidateIndex = 213,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Promo Code errors (214–220)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Promo code does not exist for this event
+    PromoCodeNotFound = 214,
+    /// A promo code with this name already exists for this event
+    PromoCodeAlreadyExists = 215,
+    /// Promo code's expiration date has passed
+    PromoCodeExpired = 216,
+    /// Promo code has been deactivated by the organizer
+    PromoCodeInactive = 217,
+    /// Promo code has reached its maximum total number of uses
+    PromoCodeGlobalLimitReached = 218,
+    /// Caller has already used this promo code the maximum number of times
+    PromoCodeUserLimitReached = 219,
+    /// Discount basis points must be between 1 and 10000
+    InvalidPromoDiscount = 220,
 }

@@ -1629,3 +1629,51 @@ impl ScheduleVoteFinalized {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer creates a new promo code for an event
+pub struct PromoCodeCreated;
+impl PromoCodeCreated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        code: String,
+        discount_bps: u32,
+        expires_at: u64,
+        max_global_uses: u32,
+        max_uses_per_user: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("promocrea"),),
+            (
+                event_id,
+                code,
+                discount_bps,
+                expires_at,
+                max_global_uses,
+                max_uses_per_user,
+            ),
+        );
+    }
+}
+
+/// Emitted when a promo code discount is applied to a purchase
+pub struct PromoCodeApplied;
+impl PromoCodeApplied {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        code: String,
+        user: Address,
+        original_amount: i128,
+        discounted_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("promoappl"),),
+            (event_id, code, user, original_amount, discounted_amount),
+        );
+    }
+}

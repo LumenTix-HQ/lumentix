@@ -847,3 +847,23 @@ pub struct ScheduleVoteCastRecord {
     pub candidate_index: u32,
     pub timestamp: u64,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A discount code scoped to a single event, with an expiration date and
+/// both a global and a per-user usage limit (0 means unlimited).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromoCode {
+    pub event_id: u64,
+    pub code: String,
+    pub discount_bps: u32,
+    pub expires_at: u64,
+    pub max_global_uses: u32,
+    pub max_uses_per_user: u32,
+    pub total_uses: u32,
+    pub active: bool,
+    pub created_by: Address,
+}
