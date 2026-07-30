@@ -783,3 +783,87 @@ pub struct EventCertificate {
     pub issued_at: u64,
     pub revoked: bool,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anonymous Event Feedback Surveys
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A single anonymous survey response.
+///
+/// Deliberately does **not** store the respondent's wallet address or ticket
+/// ID — only a one-way `nullifier` hash derived from the ticket is kept, so
+/// double-submission from the same ticket can be rejected without the stored
+/// record ever revealing which ticket (and therefore which wallet) answered.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnonymousSurveyResponse {
+    pub id: u64,
+    pub event_id: u64,
+    /// One rating (1–5) per survey question.
+    pub ratings: Vec<u32>,
+    pub comment: String,
+    pub submitted_at: u64,
+}
+
+/// Aggregated, privacy-preserving results compiled from all anonymous
+/// responses recorded for an event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SurveyResults {
+    pub event_id: u64,
+    pub total_responses: u32,
+    /// Average rating × 100 per question index (parallel to `ratings`).
+    pub average_ratings_x100: Vec<u32>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A community vote to decide which candidate (artist, track, speaker, etc.)
+/// fills a specific schedule slot at an event. Open to any ticket holder of
+/// the event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVote {
+    pub vote_id: u64,
+    pub event_id: u64,
+    pub slot_name: String,
+    /// Candidate names, e.g. artists/tracks/speakers competing for the slot.
+    pub candidates: Vec<String>,
+    /// Vote tally, parallel to `candidates`.
+    pub vote_counts: Vec<u32>,
+    pub voting_deadline: u64,
+    pub finalized: bool,
+    pub winning_candidate: Option<String>,
+}
+
+/// A single ticket holder's vote on a schedule slot (duplicate-vote guard).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVoteCastRecord {
+    pub vote_id: u64,
+    pub voter: Address,
+    pub candidate_index: u32,
+    pub timestamp: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A discount code scoped to a single event, with an expiration date and
+/// both a global and a per-user usage limit (0 means unlimited).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromoCode {
+    pub event_id: u64,
+    pub code: String,
+    pub discount_bps: u32,
+    pub expires_at: u64,
+    pub max_global_uses: u32,
+    pub max_uses_per_user: u32,
+    pub total_uses: u32,
+    pub active: bool,
+    pub created_by: Address,
+}
