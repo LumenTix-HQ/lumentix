@@ -4,6 +4,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { ExchangeRate } from './entities/exchange-rate.entity';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class ExchangeRatesService {
   private readonly logger = new Logger(ExchangeRatesService.name);
   private readonly providerBaseUrl: string;
   private readonly apiKey: string | undefined;
+  private readonly staleRateThresholdHours: number;
 
   constructor(
     @InjectRepository(ExchangeRate)
@@ -20,6 +22,8 @@ export class ExchangeRatesService {
     this.providerBaseUrl =
       this.config.get<string>('EXCHANGE_RATES_PROVIDER_BASE_URL') ?? '';
     this.apiKey = this.config.get<string>('EXCHANGE_RATES_PROVIDER_API_KEY');
+    this.staleRateThresholdHours =
+      this.config.get<number>('STALE_RATE_THRESHOLD_HOURS') ?? 2;
   }
 
   /**
@@ -122,5 +126,48 @@ export class ExchangeRatesService {
 
   async remove(id: string): Promise<void> {
     await this.ratesRepository.delete(id);
+  }
+
+  @Cron(CronExpression.EVERY_15_MINUTES)
+  async markStaleRates() {
+    const threshold = new Date(
+      Date.now() - this.staleRateThresholdHours * 60 * 60 * 1000,
+    );
+
+    const result = await this.ratesRepository
+      .createQueryBuilder()
+      .update(ExchangeRate)
+      .set({ isStale: true })
+      .where('fetchedAt < :threshold AND isStale = false', { threshold })
+      .execute();
+
+    if (result.affected && result.affected > 0) {
+      this.logger.warn(
+        `Marked ${result.affected} exchange rate(s) as stale (threshold: ${this.staleRateThresholdHours}h)`,
+      );
+    }
+  }
+
+  async getRateWithStaleness(
+    fromCode: string,
+    toCode: string,
+  ): Promise<{ rate: number; isStale: boolean }> {
+    const rate = await this.getRate(fromCode, toCode);
+
+    const threshold = new Date(
+      Date.now() - this.staleRateThresholdHours * 60 * 60 * 1000,
+    );
+
+    const cached = await this.ratesRepository
+      .createQueryBuilder('r')
+      .where('r.fromCode = :from AND r.toCode = :to AND r.fetchedAt > :since', {
+        from: fromCode,
+        to: toCode,
+        since: threshold,
+      })
+      .orderBy('r.fetchedAt', 'DESC')
+      .getOne();
+
+    return { rate, isStale: !cached };
   }
 }

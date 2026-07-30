@@ -33,7 +33,7 @@ export class TransactionsController {
   @ApiOperation({
     summary: 'Export transactions as CSV',
     description:
-      'Authenticated. Downloads the current user’s transactions as a CSV file, optionally filtered by date range.',
+      'Authenticated. Downloads the current user\'s transactions as a CSV file, optionally filtered by date range.',
   })
   @ApiQuery({ name: 'from', required: false, description: 'Start date (ISO string)' })
   @ApiQuery({ name: 'to', required: false, description: 'End date (ISO string)' })
@@ -87,6 +87,25 @@ export class TransactionsController {
       `attachment; filename="transactions-${Date.now()}.csv"`,
     );
     res.send(csv);
+  }
+
+  @Get('stellar')
+  @ApiOperation({
+    summary: 'List Stellar Horizon transactions',
+    description:
+      'Authenticated. Returns the current user\'s Stellar account transaction history synced from Horizon.',
+  })
+  @ApiQuery({ name: 'cursor', required: false, description: 'Pagination cursor from previous response' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Max records per page (1-200, default 20)' })
+  @ApiResponse({ status: 200, description: 'Stellar transactions retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async findStellar(
+    @Req() req: AuthenticatedRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit ? Math.min(Math.max(parseInt(limit, 10) || 20, 1), 200) : 20;
+    return this.transactionsService.getStellarTransactions(req.user.id, cursor, parsedLimit);
   }
 
   @Get(':id')

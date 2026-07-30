@@ -28,6 +28,7 @@ import { EventSeries } from '../events/entities/event-series.entity';
 import { StellarService } from '../stellar/stellar.service';
 import { NotificationService } from '../notifications/notification.service';
 import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
 
@@ -499,7 +500,7 @@ export class TicketsService {
     });
 
     await this.auditService.log({
-      action: 'TICKET_TRANSFERRED' as any,
+      action: AuditAction.TICKET_TRANSFERRED,
       userId: requesterId,
       resourceId: ticketId,
       meta: {
@@ -551,6 +552,61 @@ export class TicketsService {
 
     ticket.status = 'used';
     return this.ticketRepo.save(ticket);
+  }
+
+  async verifyQrCheckIn(qrData: string): Promise<{
+    ticketId: string;
+    status: string;
+    eventId: string;
+    attendeeName: string;
+    attendeeEmail: string;
+    ticketType: string;
+  }> {
+    let parsed: { ticketId: string; signature: string };
+    try {
+      parsed = JSON.parse(qrData);
+    } catch {
+      throw new BadRequestException('Invalid QR code data');
+    }
+
+    if (!parsed.ticketId || !parsed.signature) {
+      throw new BadRequestException('QR code missing ticketId or signature');
+    }
+
+    if (!this.ticketSigningService.verify(parsed.ticketId, parsed.signature)) {
+      throw new UnauthorizedException('Invalid ticket signature');
+    }
+
+    const ticket = await this.ticketRepo.findOne({ where: { id: parsed.ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.status === 'used') {
+      throw new BadRequestException('Ticket has already been checked in');
+    }
+    if (ticket.status !== 'valid') {
+      throw new BadRequestException('Ticket is no longer valid');
+    }
+
+    ticket.status = 'used';
+    await this.ticketRepo.save(ticket);
+
+    await this.auditService.log({
+      action: 'TICKET_CHECKED_IN' as any,
+      userId: ticket.ownerId,
+      resourceId: ticket.id,
+      meta: { eventId: ticket.eventId, method: 'qr_scan' },
+    });
+
+    const user = await this.userRepo.findOne({ where: { id: ticket.ownerId } });
+
+    return {
+      ticketId: ticket.id,
+      status: 'checked_in',
+      eventId: ticket.eventId,
+      attendeeName: (user as any)?.displayName ?? 'Unknown',
+      attendeeEmail: (user as any)?.email ?? '',
+      ticketType: ticket.assetCode ?? 'general',
+    };
   }
 
   // ── Resale / marketplace ──────────────────────────────────────────────────

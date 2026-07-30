@@ -27,22 +27,28 @@ import {
 } from '@nestjs/swagger';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { PaymentsService } from './payments.service';
 import { RefundService } from './refunds/refund.service';
+import { EscrowService } from './services/escrow.service';
+import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @ApiTags('Payments')
 @ApiBearerAuth()
 @Controller('payments')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
+    private readonly escrowService: EscrowService,
   ) {}
 
   @Get('history')
@@ -83,6 +89,31 @@ export class PaymentsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.paymentsService.findPaymentPath(
+      (req.user as any).stellarPublicKey,
+      sourceAsset,
+      destAsset,
+      amount,
+    );
+  }
+
+  @Get('paths')
+  @SkipThrottle()
+  @ApiOperation({
+    summary: 'Find optimal payment paths',
+    description: 'Finds all available Stellar payment paths for multi-asset purchases. Returns ranked paths by cost.',
+  })
+  @ApiQuery({ name: 'sourceAsset', required: true })
+  @ApiQuery({ name: 'destAsset', required: true })
+  @ApiQuery({ name: 'amount', required: true })
+  @ApiResponse({ status: 200, description: 'Payment paths found' })
+  @ApiResponse({ status: 404, description: 'No paths found' })
+  getPaymentPaths(
+    @Query('sourceAsset') sourceAsset: string,
+    @Query('destAsset') destAsset: string,
+    @Query('amount') amount: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.findPaymentPaths(
       (req.user as any).stellarPublicKey,
       sourceAsset,
       destAsset,
@@ -172,5 +203,24 @@ export class PaymentsController {
       throw new ForbiddenException('You do not own this payment.');
     }
     return this.refundService.refundSinglePayment(id);
+  }
+
+  @Post('events/:eventId/merge-escrow')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Merge escrow to organizer after all refunds',
+    description:
+      'Organizer/admin endpoint. Merges the escrow account back to the organizer after all refunds are complete for a cancelled event.',
+  })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Escrow merged successfully' })
+  @ApiResponse({ status: 400, description: 'Refunds still pending or escrow already merged' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async mergeEscrow(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.mergeEscrowToOrganizer(eventId, req.user.id);
   }
 }

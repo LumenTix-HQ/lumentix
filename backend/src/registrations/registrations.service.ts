@@ -289,6 +289,37 @@ export class RegistrationsService {
     await this.repo.save(reg);
   }
 
+  // ── Confirm waitlist promotion ───────────────────────────────────────────
+
+  async confirmWaitlist(registrationId: string, userId: string): Promise<Registration> {
+    const reg = await this.findById(registrationId);
+    if (reg.userId !== userId) throw new ForbiddenException();
+    if (reg.status !== RegistrationStatus.WAITLISTED) {
+      throw new BadRequestException('Registration is not waitlisted');
+    }
+
+    const event = await this.eventsService.getEventById(reg.eventId);
+    if (event.status !== EventStatus.PUBLISHED) {
+      throw new BadRequestException('Event is no longer available');
+    }
+
+    if (event.startDate && new Date(event.startDate) <= new Date()) {
+      throw new BadRequestException('Cannot confirm waitlist after event has started');
+    }
+
+    reg.status = RegistrationStatus.PENDING;
+    const saved = await this.repo.save(reg);
+
+    await this.auditService.log({
+      action: 'WAITLIST_CONFIRMED' as any,
+      userId,
+      resourceId: registrationId,
+      meta: { eventId: reg.eventId },
+    });
+
+    return saved;
+  }
+
   // ── Waitlist helpers ───────────────────────────────────────────────────────
 
   async getWaitlistPosition(eventId: string, registrationId: string): Promise<number> {
