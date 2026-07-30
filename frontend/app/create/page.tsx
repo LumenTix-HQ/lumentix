@@ -5,25 +5,17 @@ import EventForm, { type EventFormSubmitValues } from "@/components/events/Event
 import EventPreviewOverlay from "@/components/EventPreviewOverlay";
 import { defaultCreateEventValues, type CreateEventFormValues } from "@/lib/schemas/create-event.schema";
 import { localDateTimeToUTC } from "@/lib/utils/datetime";
+import { apiGet, apiPost } from "@/lib/api-client";
+import { useWallet } from "@/contexts/WalletContext";
 
 type EventRecord = { id: string; title: string; location?: string };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
-
 function toApiDate(value: string, timezone: string): string {
-    // The picker emits a wall-clock string like "2025-06-15T15:00". Interpret
-    // it in the organizer's chosen IANA zone and convert to a UTC ISO string.
     return localDateTimeToUTC(value, timezone);
 }
 
-async function parseApiError(response: Response): Promise<string> {
-    const payload = await response.json().catch(() => null);
-    if (typeof payload?.message === "string") return payload.message;
-    if (Array.isArray(payload?.message)) return payload.message.join(", ");
-    return `Request failed with status ${response.status}`;
-}
-
 export default function CreateEventPage() {
+    const { publicKey } = useWallet();
     const [events, setEvents] = useState<EventRecord[]>([]);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
@@ -32,9 +24,7 @@ export default function CreateEventPage() {
     const fetchEvents = async () => {
         setLoadError(null);
         try {
-            const response = await fetch(`${API_BASE_URL}/events?page=1&limit=10`, { cache: "no-store" });
-            if (!response.ok) throw new Error(await parseApiError(response));
-            const payload = (await response.json()) as { data?: EventRecord[] };
+            const payload = await apiGet<{ data?: EventRecord[] }>("events?page=1&limit=10");
             setEvents(payload.data ?? []);
         } catch (error) {
             setLoadError(error instanceof Error ? error.message : "Could not load events");
@@ -49,27 +39,20 @@ export default function CreateEventPage() {
         setSubmitError(null);
         setSubmitSuccess(null);
         try {
-            window.localStorage.setItem("lumentix_access_token", values.authToken);
-            window.localStorage.setItem("lumentix_wallet_public_key", values.walletPublicKey);
-
-            const response = await fetch(`${API_BASE_URL}/events`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${values.authToken}` },
-                body: JSON.stringify({
-                    title: values.title,
-                    description: values.description || undefined,
-                    location: values.location || undefined,
-                    startDate: toApiDate(values.startDate, values.timezone),
-                    endDate: toApiDate(values.endDate, values.timezone),
-                    timezone: values.timezone,
-                    ticketPrice: values.ticketPrice,
-                    currency: values.currency,
-                    status: values.status,
-                }),
+            if (!publicKey) {
+                throw new Error("Connect your wallet before creating an event.");
+            }
+            const created = await apiPost<EventRecord>("events", {
+                title: values.title,
+                description: values.description || undefined,
+                location: values.location || undefined,
+                startDate: toApiDate(values.startDate, values.timezone),
+                endDate: toApiDate(values.endDate, values.timezone),
+                timezone: values.timezone,
+                ticketPrice: values.ticketPrice,
+                currency: values.currency,
+                status: values.status,
             });
-
-            if (!response.ok) throw new Error(await parseApiError(response));
-            const created = (await response.json()) as EventRecord;
             setSubmitSuccess(`Event "${created.title}" created successfully.`);
             await fetchEvents();
         } catch (error) {
@@ -85,27 +68,21 @@ export default function CreateEventPage() {
         setShowPreview(true);
     }, []);
 
-    const initialValues = {
-        ...defaultCreateEventValues,
-        authToken: typeof window === "undefined" ? "" : window.localStorage.getItem("lumentix_access_token") ?? "",
-        walletPublicKey: typeof window === "undefined" ? "" : window.localStorage.getItem("lumentix_wallet_public_key") ?? "",
-    };
-
     return (
         <>
             {showPreview && formData && (
                 <EventPreviewOverlay
                     formValues={{
                         title: formData.title,
-                        description: formData.description,
-                        location: formData.location,
+                        description: formData.description ?? "",
+                        location: formData.location ?? "",
                         startDate: formData.startDate,
                         endDate: formData.endDate,
                         ticketPrice: formData.ticketPrice,
                         currency: formData.currency,
-                        category: formData.category || '',
-                        maxAttendees: formData.maxAttendees ?? null,
-                        imageUrl: formData.imageUrl || '',
+                        category: "",
+                        maxAttendees: null,
+                        imageUrl: "",
                     }}
                     onClose={() => setShowPreview(false)}
                     onSubmit={() => {
@@ -119,7 +96,7 @@ export default function CreateEventPage() {
                 <section className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md sm:p-8">
                     <h1 className="mb-2 bg-gradient-to-r from-purple-300 to-pink-400 bg-clip-text text-3xl font-extrabold text-transparent sm:text-4xl">Create New Event</h1>
                     <p className="mb-6 text-sm text-gray-300">Organizers can publish events and optional sponsor tiers.</p>
-                    <EventForm mode="create" initialValues={initialValues} submitLabel="Create Event" loadingLabel="Creating Event..." successMessage={submitSuccess} errorMessage={submitError} onSubmit={handleSubmit} />
+                    <EventForm mode="create" initialValues={defaultCreateEventValues} submitLabel="Create Event" loadingLabel="Creating Event..." successMessage={submitSuccess} errorMessage={submitError} onSubmit={handleSubmit} />
                 </section>
                 <section className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md sm:p-8">
                     <h2 className="mb-5 text-2xl font-bold">Recent Events</h2>

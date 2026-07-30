@@ -84,6 +84,18 @@ pub struct ReferralLinkRecord {
     pub total_discount_awarded: i128,
 }
 
+/// A single record in a ticket's transfer history
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TicketTransferRecord {
+    /// Address that sent the ticket
+    pub from: Address,
+    /// Address that received the ticket
+    pub to: Address,
+    /// Ledger timestamp when the transfer occurred
+    pub timestamp: u64,
+}
+
 /// Fee collected event for tracking platform fees
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -791,161 +803,113 @@ pub struct CrossChainLock {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Tax Determination System
+// Event Certification (Issue #654)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Jurisdiction type for tax applicability
+/// A blockchain-issued certification standard an event can be certified against.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TaxJurisdiction {
-    /// US state-level tax
-    UsState,
-    /// Country-level tax (VAT, GST, etc.)
-    Country,
-    /// Municipal / city tax
-    Municipal,
+pub enum CertificationStandard {
+    /// Certifies the event and its tickets are verified as authentic/non-counterfeit.
+    AuthenticityVerified,
+    /// Certifies the event meets the platform's quality-assurance criteria.
+    QualityAssured,
+    /// Certifies the event meets the platform's safety-compliance criteria.
+    SafetyCompliant,
 }
 
-/// A single applicable tax rule for a jurisdiction
+/// A certificate issued for an event under a specific standard.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TaxRule {
-    /// Unique rule identifier
-    pub rule_id: u64,
-    /// Human-readable jurisdiction name (e.g. "California", "Germany")
-    pub jurisdiction_name: String,
-    /// ISO 3166-1 alpha-2 country code or US state abbreviation
-    pub jurisdiction_code: String,
-    /// Jurisdiction type
-    pub jurisdiction_type: TaxJurisdiction,
-    /// Tax rate in basis points (e.g., 875 = 8.75%)
-    pub rate_bps: u32,
-    /// True when the rule is active and should be applied
-    pub is_active: bool,
-    /// Timestamp when the rule was last updated
-    pub updated_at: u64,
-}
-
-/// Result of a tax calculation for a ticket purchase
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TicketTaxCalculation {
-    /// The event for which tax was calculated
+pub struct EventCertificate {
+    pub certificate_id: u64,
     pub event_id: u64,
-    /// Ticket base price (before tax)
-    pub base_price: i128,
-    /// Total tax amount in the same currency units as base_price
-    pub tax_amount: i128,
-    /// Final price (base_price + tax_amount)
-    pub total_price: i128,
-    /// Effective tax rate in basis points (weighted across rules)
-    pub effective_rate_bps: u32,
-    /// ISO 3166 jurisdiction code used for the calculation
-    pub jurisdiction_code: String,
-    /// Ledger timestamp of the calculation
-    pub calculated_at: u64,
-}
-
-/// An immutable on-chain record of a tax collection event
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TaxCollectionRecord {
-    /// Unique sequential record identifier
-    pub record_id: u64,
-    /// Ticket purchase that triggered this collection
-    pub ticket_id: u64,
-    /// Event associated with the ticket
-    pub event_id: u64,
-    /// Purchaser address
-    pub purchaser: Address,
-    /// Tax amount collected
-    pub tax_amount: i128,
-    /// Currency code (e.g. "USD", "XLM")
-    pub currency: String,
-    /// Jurisdiction code used
-    pub jurisdiction_code: String,
-    /// On-chain timestamp of collection
-    pub collected_at: u64,
-    /// Whether the tax has been remitted/exported
-    pub remitted: bool,
-}
-
-/// Aggregated tax report for a given jurisdiction and time window
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TaxReport {
-    /// Unique report identifier
-    pub report_id: u64,
-    /// Jurisdiction this report covers
-    pub jurisdiction_code: String,
-    /// Number of collection records included
-    pub record_count: u32,
-    /// Total tax collected across all records
-    pub total_tax_collected: i128,
-    /// Currency of the collected amount
-    pub currency: String,
-    /// Start of the reporting window (ledger timestamp)
-    pub period_start: u64,
-    /// End of the reporting window (ledger timestamp)
-    pub period_end: u64,
-    /// Address of the admin who exported the report
-    pub exported_by: Address,
-    /// Timestamp when the report was generated
-    pub generated_at: u64,
+    pub organizer: Address,
+    pub standard: CertificationStandard,
+    pub issued_at: u64,
+    pub revoked: bool,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Calendar Integration
+// Anonymous Event Feedback Surveys
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// A generated iCalendar (RFC 5545) record anchored to a ticket purchase
+/// A single anonymous survey response.
+///
+/// Deliberately does **not** store the respondent's wallet address or ticket
+/// ID — only a one-way `nullifier` hash derived from the ticket is kept, so
+/// double-submission from the same ticket can be rejected without the stored
+/// record ever revealing which ticket (and therefore which wallet) answered.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ICalRecord {
-    /// Unique record id (sequential)
-    pub record_id: u64,
-    /// Event this record belongs to
+pub struct AnonymousSurveyResponse {
+    pub id: u64,
     pub event_id: u64,
-    /// Ticket that triggered the generation
-    pub ticket_id: u64,
-    /// Attendee address
-    pub attendee: Address,
-    /// RFC 5545 UID for the VEVENT (deterministic: "evt-{event_id}-{ticket_id}@lumentix")
-    pub uid: String,
-    /// Ledger timestamp when the record was created
-    pub generated_at: u64,
+    /// One rating (1–5) per survey question.
+    pub ratings: Vec<u32>,
+    pub comment: String,
+    pub submitted_at: u64,
 }
 
-/// A Google Calendar deep-link record
+/// Aggregated, privacy-preserving results compiled from all anonymous
+/// responses recorded for an event.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GoogleCalendarLink {
-    /// Unique record id
-    pub record_id: u64,
-    /// Event this link belongs to
+pub struct SurveyResults {
     pub event_id: u64,
-    /// Attendee who requested the link
-    pub attendee: Address,
-    /// The encoded URL (stored on-chain as proof of issuance)
-    pub url: String,
-    /// Ledger timestamp
-    pub created_at: u64,
+    pub total_responses: u32,
+    /// Average rating × 100 per question index (parallel to `ratings`).
+    pub average_ratings_x100: Vec<u32>,
 }
 
-/// A calendar invite dispatch record (proof that an invite was sent)
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A community vote to decide which candidate (artist, track, speaker, etc.)
+/// fills a specific schedule slot at an event. Open to any ticket holder of
+/// the event.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CalendarInviteRecord {
-    /// Unique record id
-    pub record_id: u64,
-    /// Event
+pub struct ScheduleVote {
+    pub vote_id: u64,
     pub event_id: u64,
-    /// Ticket that triggered the invite
-    pub ticket_id: u64,
-    /// Attendee address
-    pub attendee: Address,
-    /// Destination email address (stored as a String for on-chain reference)
-    pub recipient_email: String,
-    /// Ledger timestamp
-    pub sent_at: u64,
+    pub slot_name: String,
+    /// Candidate names, e.g. artists/tracks/speakers competing for the slot.
+    pub candidates: Vec<String>,
+    /// Vote tally, parallel to `candidates`.
+    pub vote_counts: Vec<u32>,
+    pub voting_deadline: u64,
+    pub finalized: bool,
+    pub winning_candidate: Option<String>,
+}
+
+/// A single ticket holder's vote on a schedule slot (duplicate-vote guard).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVoteCastRecord {
+    pub vote_id: u64,
+    pub voter: Address,
+    pub candidate_index: u32,
+    pub timestamp: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A discount code scoped to a single event, with an expiration date and
+/// both a global and a per-user usage limit (0 means unlimited).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromoCode {
+    pub event_id: u64,
+    pub code: String,
+    pub discount_bps: u32,
+    pub expires_at: u64,
+    pub max_global_uses: u32,
+    pub max_uses_per_user: u32,
+    pub total_uses: u32,
+    pub active: bool,
+    pub created_by: Address,
 }

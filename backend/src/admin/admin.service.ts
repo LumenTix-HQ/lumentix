@@ -19,7 +19,9 @@ import { ListAdminEventsDto } from './dto/list-admin-events.dto';
 import { UpdateAdminUserDto } from './dto/update-admin-user.dto';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { MailerService } from '../mailer/mailer.service';
+import { StellarWebhookService, DlqItem } from '../stellar/stellar-webhook.service';
 
 @Injectable()
 export class AdminService {
@@ -32,6 +34,7 @@ export class AdminService {
     private readonly roleRequestRepository: Repository<RoleRequest>,
     private readonly auditService: AuditService,
     private readonly mailerService: MailerService,
+    private readonly stellarWebhookService: StellarWebhookService,
   ) {}
 
   // ── Audit Logs ────────────────────────────────────────────────────────────
@@ -119,9 +122,9 @@ export class AdminService {
       qb.andWhere('user.status = :status', { status: dto.status });
     }
 
-    // Search by email (partial match)
+    // Search by email or display name (partial match)
     if (dto.search) {
-      qb.andWhere('LOWER(user.email) LIKE LOWER(:search)', {
+      qb.andWhere('(LOWER(user.email) LIKE LOWER(:search) OR LOWER(user.displayName) LIKE LOWER(:search))', {
         search: `%${dto.search}%`,
       });
     }
@@ -159,6 +162,17 @@ export class AdminService {
 
     user.deletedAt = new Date();
     await this.userRepository.save(user);
+  }
+
+  async restoreUser(userId: string): Promise<User> {
+    const user = await this.findUserOrFail(userId);
+
+    if (!user.deletedAt) {
+      throw new BadRequestException('User is not deleted.');
+    }
+
+    user.deletedAt = null;
+    return this.userRepository.save(user);
   }
 
   async getUserById(userId: string): Promise<User> {
@@ -242,7 +256,7 @@ export class AdminService {
     const saved = await this.roleRequestRepository.save(request);
 
     await this.auditService.log({
-      action: 'ROLE_APPROVED',
+      action: AuditAction.ROLE_APPROVED,
       userId: request.userId,
       resourceId: request.id,
       meta: { requestedRole: request.requestedRole },
@@ -272,7 +286,7 @@ export class AdminService {
     const saved = await this.roleRequestRepository.save(request);
 
     await this.auditService.log({
-      action: 'ROLE_REJECTED',
+      action: AuditAction.ROLE_REJECTED,
       userId: request.userId,
       resourceId: request.id,
       meta: { requestedRole: request.requestedRole, reason },
@@ -288,6 +302,19 @@ export class AdminService {
       .catch(() => undefined);
 
     return saved;
+  }
+
+  // ── Stellar DLQ ──────────────────────────────────────────────────────────
+
+  listStellarDlq(): DlqItem[] {
+    return this.stellarWebhookService.getDlq();
+  }
+
+  async retryStellarDlqItem(id: string): Promise<{ message: string }> {
+    const item = this.stellarWebhookService.getDlqItem(id);
+    if (!item) throw new NotFoundException(`DLQ item "${id}" not found.`);
+    await this.stellarWebhookService.retryDlqItem(id);
+    return { message: `DLQ item "${id}" requeued for processing.` };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

@@ -34,6 +34,9 @@ import { IdempotencyInterceptor } from '../common/interceptors/idempotency.inter
 @ApiBearerAuth()
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Resource not found' })
 export class RegistrationsController {
   constructor(private readonly service: RegistrationsService) {}
 
@@ -102,17 +105,17 @@ export class RegistrationsController {
   @ApiParam({ name: 'id', description: 'Event UUID' })
   @ApiResponse({ status: 200, description: 'CSV file' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 429, description: 'Rate limit exceeded (10/hour per organizer)' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded (5/minute per organizer)' })
   async exportCsv(
     @Param('id', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
     @Res() res: Response,
   ) {
-    const rateKey = `export-limit:${req.user.id}`;
+    const rateKey = `export-rate:${req.user.id}`;
     const count = await this.redis.incr(rateKey);
-    if (count === 1) await this.redis.expire(rateKey, 3600);
-    if (count > 10) {
-      return res.status(429).json({ message: 'Export rate limit exceeded. Maximum 10 exports per hour.' });
+    if (count === 1) await this.redis.expire(rateKey, 60);
+    if (count > 5) {
+      return res.status(429).json({ message: 'Export rate limit exceeded. Maximum 5 exports per minute.' });
     }
 
     const csv = await this.service.exportRegistrationsCsv(eventId, req.user.id);
@@ -134,6 +137,24 @@ export class RegistrationsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.service.listForUser(req.user.id, dto);
+  }
+
+  @Post('registrations/:id/confirm-waitlist')
+  @ApiOperation({
+    summary: 'Confirm a waitlist promotion',
+    description:
+      'Authenticated. Confirms a waitlisted registration when a spot becomes available.',
+  })
+  @ApiParam({ name: 'id', description: 'Registration UUID' })
+  @ApiResponse({ status: 200, description: 'Registration confirmed from waitlist' })
+  @ApiResponse({ status: 400, description: 'Registration is not waitlisted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Registration not found' })
+  confirmWaitlist(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.service.confirmWaitlist(id, req.user.id);
   }
 
   @Delete('registrations/:id')

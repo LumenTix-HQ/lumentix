@@ -38,6 +38,11 @@ export class AuditController {
 
   @Get()
   @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Search audit logs with advanced filters' })
+  @ApiResponse({ status: 200, description: 'Filtered audit logs returned' })
+  @ApiResponse({ status: 400, description: 'Invalid audit query' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   getAuditLogs(
     @Query() query: AuditLogQueryDto,
   ) {

@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Routes protected by authentication (and optional role check)
 export const config = {
-  matcher: ['/my-tickets', '/organizer/:path*', '/events/:path*/checkout'],
+  matcher: ['/create', '/my-tickets', '/organizer/:path*', '/profile', '/admin/:path*'],
 };
-
-// ---------------------------------------------------------------------------
-// Inline helpers (keep middleware edge-compatible — no Node.js-only imports)
-// ---------------------------------------------------------------------------
 
 function isExpired(token: string): boolean {
   try {
@@ -36,25 +31,28 @@ function decodeRole(token: string): string {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Middleware
-// ---------------------------------------------------------------------------
-
 export default function middleware(req: NextRequest) {
   const token = req.cookies.get('lumentix_access_token')?.value;
   const url = req.nextUrl.clone();
 
-  // Redirect unauthenticated / expired-token requests to /login
   if (!token || isExpired(token)) {
     url.pathname = '/login';
     url.searchParams.set('redirect', req.nextUrl.pathname);
     return NextResponse.redirect(url);
   }
 
-  // Role guard for /organizer/* routes
   if (req.nextUrl.pathname.startsWith('/organizer')) {
     const role = decodeRole(token);
     if (role !== 'organizer' && role !== 'admin') {
+      url.pathname = '/';
+      url.searchParams.delete('redirect');
+      return NextResponse.redirect(url);
+    }
+  }
+
+  if (req.nextUrl.pathname.startsWith('/admin')) {
+    const role = decodeRole(token);
+    if (role !== 'admin') {
       url.pathname = '/';
       url.searchParams.delete('redirect');
       return NextResponse.redirect(url);

@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { z } from 'zod';
-import { registerUser, loginUser } from '@/lib/auth/register';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 const schema = z
   .object({
@@ -75,28 +76,37 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      await registerUser({
-        email: form.email,
-        password: form.password,
-        displayName: form.displayName || undefined,
+      const res = await fetch(`${API_BASE}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          displayName: form.displayName || undefined,
+        }),
       });
-      const tokens = await loginUser(form.email, form.password);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('auth_token', tokens.accessToken);
-        if (tokens.refreshToken) localStorage.setItem('refresh_token', tokens.refreshToken);
-      }
-      router.push('/events');
-    } catch (err: any) {
-      if (err.status === 409 || err.status === 400) {
-        const msg: string = err.message ?? '';
-        if (msg.toLowerCase().includes('email')) {
-          setErrors((prev) => ({ ...prev, email: 'This email address is already taken' }));
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          const msg: string = Array.isArray(body.message) ? body.message[0] : (body.message ?? '');
+          if (msg.toLowerCase().includes('email')) {
+            setErrors((prev) => ({ ...prev, email: 'This email address is already taken' }));
+          } else {
+            setServerError(msg || 'Registration failed');
+          }
+        } else if (res.status === 400) {
+          const msg: string = Array.isArray(body.message) ? body.message[0] : (body.message ?? '');
+          setServerError(msg || 'Invalid registration data');
         } else {
-          setServerError(msg || 'Registration failed');
+          setServerError(body.message || 'Something went wrong. Please try again.');
         }
-      } else {
-        setServerError(err.message || 'Something went wrong. Please try again.');
+        return;
       }
+
+      router.push('/login?registered=1');
+    } catch {
+      setServerError('Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }

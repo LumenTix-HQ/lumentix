@@ -10,6 +10,7 @@ import Redis from 'ioredis';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
+import { CorrelationStore } from './common/correlation/correlation.store';
 import { LoggerService } from './common/logging/logger.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AppController } from './app.controller';
@@ -43,9 +44,12 @@ import { DecentralizedStorageModule } from './decentralized-storage/decentralize
 import { ChatModule } from './chat/chat.module';
 import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
-import { EmailCampaignsModule } from './email-campaigns/email-campaigns.module';
-import { TaxModule } from './tax/tax.module';
-import { CalendarModule } from './calendar/calendar.module';
+import { TelemetryModule } from './telemetry/telemetry.module';
+import { MerchModule } from './merch/merch.module';
+import { TicketDesignModule } from './ticket-design/ticket-design.module';
+import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
+import { InternalModule } from './common/internal.module';
+import { InternalRoutingModule } from './internal/internal.module';
 
 
 @Module({
@@ -131,14 +135,18 @@ import { CalendarModule } from './calendar/calendar.module';
     ChatModule,
     ZkpModule,
     LoyaltyModule,
-    EmailCampaignsModule,
-    TaxModule,
-    CalendarModule,
+    TelemetryModule,
+    MerchModule,
+    TicketDesignModule,
+    ScanAnalyticsModule,
+    InternalModule,
+    InternalRoutingModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     LoggerService,
+    CorrelationStore,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,

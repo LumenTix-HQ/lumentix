@@ -2,7 +2,8 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AttendanceMemorabiliaMinted,
+    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AnonymousSurveySubmitted,
+    AttendanceMemorabiliaMinted,
     AttendanceVerificationFailed,
     AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
@@ -17,10 +18,13 @@ use crate::events::{
     MerchandisePurchased, NftMinted, NftTraded,
     OraclePriceUpdated,
     PlatformFeeRecipientUpdated, PlatformFeeUpdated, PlatformFeesWithdrawn, PriceCeilingSet,
+    PromoCodeApplied, PromoCodeCreated,
     ProtocolFeeQueried,
     ReferralLinkGenerated, ReferralPurchaseProcessed, ReferralRewardsCredited, ReputationUpdated,
     ResaleComplianceEnforced, ResalePriceVerified, ReviewSubmitted, SeatHoldReleased, SeatSelected,
+    ScheduleVoteCast, ScheduleVoteFinalized, ScheduleVoteInitialized,
     SeatUpgradeBidPlaced, SeatUpgradeBidRefunded, SeatUpgradeBidResolved,
+    SurveyResultsCompiled,
     TicketDidLinked, TicketDidRevoked, TicketPurchased, TicketRefunded,
     TicketRevoked, TicketTransferred, TicketUsed, TransferBlackoutUpdated, TransferLockBypassed,
     UpgradeExecuted,
@@ -31,17 +35,17 @@ use crate::events::{
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
-    EmailCampaignCreated, MarketingEmailsSent, EmailAnalyticsUpdated,
+    EventCertificateIssued, CertificationStandardUpdated,
 };
 use crate::storage;
 use crate::types::{
-use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CancellationReason,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    CancellationReason,
     CarbonFootprint, CarbonOffsetPurchase, CollectibleInventory, CrossChainTransfer,
     CrossChainTransferStatus, CurrencyConfig, EnvironmentalImpact, Event, EventMerchandise,
     EventReview, EventStatus, IdentityCredential, IdentityProof, IdentityProvider, InsurancePolicy,
-    MemorabiliaClaim, MerchVoucher, NftCollectible, OrganizerReputation, RarityTier, ReferralLinkRecord,
-    ResalePriceCeiling, Seat, SeatUpgradeBid, Ticket,
+    MemorabiliaClaim, MerchVoucher, NftCollectible, OrganizerReputation, PromoCode, RarityTier, ReferralLinkRecord,
+    ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid, SurveyResults, Ticket,
     TicketDidAssociation, TicketTransferRecord, TransferBlackout, UpgradeGovernanceConfig,
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
@@ -49,10 +53,10 @@ use crate::types::{
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
-    EmailCampaign, EmailCampaignStatus, EmailCampaignAnalytics,
+    CertificationStandard,
 };
 use crate::validation;
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Map, String, Vec};
 
 #[contract]
 pub struct LumentixContract;
@@ -1300,6 +1304,201 @@ impl LumentixContract {
         }
         Self::resolve_price_tier(&env, event_id, &event)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Event Certification (Issue #654)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Issue a blockchain certificate attesting `event_id` meets `standard`.
+    /// Organizer-only, and the standard must first be enabled by the admin
+    /// via `manage_certification_standards`. Returns the new certificate ID.
+    pub fn issue_event_certificate(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        standard: CertificationStandard,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+        if !storage::is_certification_standard_enabled(&env, &standard) {
+            return Err(LumentixError::CertificationStandardNotFound);
+        }
+
+        let certificate_id = storage::get_next_certificate_id(&env);
+        storage::increment_certificate_id(&env);
+
+        let certificate = EventCertificate {
+            certificate_id,
+            event_id,
+            organizer: organizer.clone(),
+            standard,
+            issued_at: env.ledger().timestamp(),
+            revoked: false,
+        };
+        storage::set_certificate(&env, certificate_id, &certificate);
+        storage::set_event_active_certificate(&env, event_id, certificate_id);
+
+        EventCertificateIssued::emit(&env, certificate_id, event_id, organizer);
+
+        Ok(certificate_id)
+    }
+
+    /// Returns true if `event_id` currently has a valid (issued and not
+    /// revoked) certificate. No auth required — authenticity must be
+    /// publicly verifiable by anyone (e.g. a ticket marketplace or buyer).
+    pub fn verify_event_authenticity(env: Env, event_id: u64) -> Result<bool, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        match storage::get_event_active_certificate(&env, event_id) {
+            Some(certificate_id) => {
+                let certificate = storage::get_certificate(&env, certificate_id)?;
+                Ok(!certificate.revoked)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Enable or disable a certification standard platform-wide. Admin only.
+    /// Disabling a standard does not retroactively revoke certificates
+    /// already issued under it — use this to control which standards
+    /// `issue_event_certificate` will accept going forward.
+    pub fn manage_certification_standards(
+        env: Env,
+        admin: Address,
+        standard: CertificationStandard,
+        enabled: bool,
+    ) -> Result<(), LumentixError> {
+        admin.require_auth();
+        let stored_admin = storage::get_admin(&env);
+        if stored_admin != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        storage::set_certification_standard_enabled(&env, &standard, enabled);
+        CertificationStandardUpdated::emit(&env, standard, enabled);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Predictive Analytics (Issue #646)
+    //
+    // Soroban contracts are deterministic, gas-metered, and have no floating
+    // point or external data access, so a real statistical/ML model cannot
+    // run on-chain. The functions below are lightweight, fully deterministic
+    // heuristics over caller-supplied historical data — not machine learning.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Forecast next-period ticket demand as a weighted moving average of
+    /// `recent_period_sales` (one entry per past period, oldest first) —
+    /// more recent periods are weighted more heavily.
+    pub fn forecast_ticket_demand(
+        env: Env,
+        event_id: u64,
+        recent_period_sales: Vec<u32>,
+    ) -> Result<u32, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        if recent_period_sales.is_empty() {
+            return Err(LumentixError::InsufficientSalesHistory);
+        }
+
+        let mut weighted_sum: u64 = 0;
+        let mut weight_sum: u64 = 0;
+        let mut weight: u64 = 1;
+        for sales in recent_period_sales.iter() {
+            weighted_sum = weighted_sum.saturating_add((sales as u64).saturating_mul(weight));
+            weight_sum = weight_sum.saturating_add(weight);
+            weight = weight.saturating_add(1);
+        }
+
+        let forecast = if weight_sum == 0 {
+            0
+        } else {
+            weighted_sum / weight_sum
+        };
+        Ok(forecast as u32)
+    }
+
+    /// Suggest a price adjustment for `event_id` based on current demand
+    /// relative to remaining capacity, returning a suggested ticket price.
+    /// Builds on the same demand-multiplier concept as
+    /// `calculate_dynamic_price`, but framed around a demand/capacity ratio
+    /// rather than a sales-velocity window.
+    pub fn optimize_pricing_strategy(
+        env: Env,
+        event_id: u64,
+        current_demand: u32,
+        capacity_remaining: u32,
+    ) -> Result<i128, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+
+        if capacity_remaining == 0 {
+            return Ok(event.ticket_price);
+        }
+
+        // Demand relative to remaining capacity, in basis points (10000 = 1:1).
+        let demand_ratio_bps =
+            ((current_demand as u64).saturating_mul(10000)) / (capacity_remaining as u64);
+
+        let multiplier_bps: i128 = if demand_ratio_bps >= 20000 {
+            13000 // Demand at least 2x remaining capacity -- price up 30%.
+        } else if demand_ratio_bps >= 10000 {
+            11500
+        } else if demand_ratio_bps >= 5000 {
+            10500
+        } else {
+            9000 // Low relative demand -- suggest a modest discount.
+        };
+
+        let suggested_price = (event.ticket_price * multiplier_bps) / 10000;
+        if suggested_price <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        Ok(suggested_price)
+    }
+
+    /// Estimate the probability (0-100) that `event_id` sells out before
+    /// `days_remaining` elapses, by comparing the actual daily sales rate
+    /// so far (`current_sales` / `days_since_sales_started`) against the
+    /// rate required to sell the remaining capacity in time.
+    pub fn predict_sellout_probability(
+        env: Env,
+        event_id: u64,
+        current_sales: u32,
+        capacity: u32,
+        days_since_sales_started: u32,
+        days_remaining: u32,
+    ) -> Result<u32, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        if capacity == 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+        if current_sales >= capacity {
+            return Ok(100);
+        }
+        if days_remaining == 0 {
+            return Ok(0);
+        }
+
+        let remaining_capacity = (capacity - current_sales) as u64;
+        let required_daily_rate = remaining_capacity / (days_remaining as u64);
+        if required_daily_rate == 0 {
+            // Remaining capacity sells out even at a bare trickle of sales.
+            return Ok(100);
+        }
+
+        let actual_daily_rate = if days_since_sales_started == 0 {
+            current_sales as u64
+        } else {
+            (current_sales as u64) / (days_since_sales_started as u64)
+        };
+
+        let probability = ((actual_daily_rate.saturating_mul(100)) / required_daily_rate).min(100);
+        Ok(probability as u32)
+    }
+
     /// Join an event waitlist once capacity is exhausted.
     pub fn join_waitlist(env: Env, event_id: u64, buyer: Address) -> Result<u32, LumentixError> {
         buyer.require_auth();
@@ -5916,7 +6115,479 @@ impl LumentixContract {
         seat.x = Some(x);
         seat.y = Some(y);
         storage::set_seat(&env, event_id, &seat_id, &seat);
-        
+
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ANONYMOUS EVENT FEEDBACK SURVEYS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Verify that `owner` attended `event_id` via `ticket_id`, without
+    /// persisting the link anywhere. Shared by `submit_anonymous_survey` and
+    /// available standalone for other flows that need the same proof.
+    ///
+    /// Checks:
+    ///  a) The event exists and has completed.
+    ///  b) The ticket exists, belongs to `owner`, and belongs to `event_id`.
+    ///  c) The ticket was used (checked in) — the attendance proof.
+    ///  d) `signature` is a non-empty attendance authorization proof.
+    pub fn verify_attendance_proof(
+        env: Env,
+        event_id: u64,
+        ticket_id: u64,
+        owner: Address,
+        signature: BytesN<64>,
+    ) -> Result<bool, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+        if event.status != EventStatus::Completed {
+            return Err(LumentixError::EventNotCompleted);
+        }
+
+        let ticket = storage::get_ticket(&env, ticket_id)?;
+        if ticket.owner != owner {
+            return Err(LumentixError::ReviewerNotTicketOwner);
+        }
+        if ticket.event_id != event_id {
+            return Err(LumentixError::TicketEventMismatch);
+        }
+        if !ticket.used {
+            return Err(LumentixError::AttendanceNotVerified);
+        }
+
+        // Signature must be a non-zero attendance authorization proof.
+        let mut sig_valid = false;
+        for i in 0..64 {
+            if signature.get(i) != Some(0) {
+                sig_valid = true;
+                break;
+            }
+        }
+        if !sig_valid {
+            return Err(LumentixError::AttendanceNotVerified);
+        }
+
+        Ok(true)
+    }
+
+    /// Submit an anonymous event feedback survey.
+    ///
+    /// Attendance is proven via [`Self::verify_attendance_proof`], but the
+    /// stored [`AnonymousSurveyResponse`] never records the respondent's
+    /// wallet address or ticket ID. Instead, a one-way `nullifier` hash
+    /// derived from `(event_id, ticket_id)` is checked against previously
+    /// used nullifiers to reject a second submission from the same ticket,
+    /// without the stored response ever revealing which ticket it was.
+    pub fn submit_anonymous_survey(
+        env: Env,
+        event_id: u64,
+        ticket_id: u64,
+        owner: Address,
+        signature: BytesN<64>,
+        ratings: Vec<u32>,
+        comment: String,
+    ) -> Result<u64, LumentixError> {
+        owner.require_auth();
+
+        Self::verify_attendance_proof(env.clone(), event_id, ticket_id, owner.clone(), signature)?;
+
+        if ratings.len() == 0 {
+            return Err(LumentixError::EmptySurveyAnswers);
+        }
+        for rating in ratings.iter() {
+            if rating < 1 || rating > 5 {
+                return Err(LumentixError::InvalidSurveyRating);
+            }
+        }
+
+        // Derive a one-way nullifier from (event_id, ticket_id) so the same
+        // ticket cannot submit twice, without ever storing the ticket_id.
+        let mut buf = Bytes::new(&env);
+        buf.extend_from_array(&event_id.to_be_bytes());
+        buf.extend_from_array(&ticket_id.to_be_bytes());
+        let nullifier: BytesN<32> = env.crypto().sha256(&buf).to_bytes();
+
+        if storage::has_survey_nullifier(&env, event_id, &nullifier) {
+            return Err(LumentixError::SurveyAlreadySubmitted);
+        }
+
+        let survey_id = storage::get_next_survey_id(&env);
+        storage::increment_survey_id(&env);
+
+        let now = env.ledger().timestamp();
+        let response_len = ratings.len();
+        let response = AnonymousSurveyResponse {
+            id: survey_id,
+            event_id,
+            ratings,
+            comment,
+            submitted_at: now,
+        };
+
+        storage::set_survey_response(&env, survey_id, &response);
+        storage::add_survey_to_event(&env, event_id, survey_id);
+        storage::mark_survey_nullifier_used(&env, event_id, &nullifier);
+
+        AnonymousSurveySubmitted::emit(&env, survey_id, event_id, response_len, now);
+
+        Ok(survey_id)
+    }
+
+    /// Compile aggregated results across every anonymous survey response
+    /// recorded for an event. Returns per-question average ratings (×100)
+    /// without exposing any individual response or respondent.
+    pub fn compile_survey_results(env: Env, event_id: u64) -> Result<SurveyResults, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+
+        let survey_ids = storage::get_survey_ids_for_event(&env, event_id);
+        if survey_ids.len() == 0 {
+            return Err(LumentixError::NoSurveyResponses);
+        }
+
+        let mut totals: Vec<u64> = Vec::new(&env);
+        let mut question_count: u32 = 0;
+        let mut total_responses: u32 = 0;
+
+        for survey_id in survey_ids.iter() {
+            let response = storage::get_survey_response(&env, survey_id)?;
+
+            if total_responses == 0 {
+                question_count = response.ratings.len();
+                for _ in 0..question_count {
+                    totals.push_back(0);
+                }
+            }
+
+            for (i, rating) in response.ratings.iter().enumerate() {
+                if (i as u32) < question_count {
+                    let current = totals.get(i as u32).unwrap_or(0);
+                    totals.set(i as u32, current + rating as u64);
+                }
+            }
+
+            total_responses += 1;
+        }
+
+        let mut average_ratings_x100: Vec<u32> = Vec::new(&env);
+        for i in 0..question_count {
+            let sum = totals.get(i).unwrap_or(0);
+            let avg_x100 = (sum * 100) / total_responses as u64;
+            average_ratings_x100.push_back(avg_x100 as u32);
+        }
+
+        let now = env.ledger().timestamp();
+        SurveyResultsCompiled::emit(&env, event_id, total_responses, now);
+
+        Ok(SurveyResults {
+            event_id,
+            total_responses,
+            average_ratings_x100,
+        })
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DECENTRALIZED COMMUNITY VOTING FOR EVENT SCHEDULES
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Open a community vote for a schedule slot (e.g. "Main Stage — 8PM"),
+    /// letting ticket holders decide which candidate (artist, track,
+    /// speaker, etc.) fills it. Only the event organizer can open a vote.
+    pub fn initialize_schedule_vote(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        slot_name: String,
+        candidates: Vec<String>,
+        voting_deadline: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_string_not_empty(&slot_name)?;
+
+        if candidates.len() < 2 {
+            return Err(LumentixError::InsufficientScheduleCandidates);
+        }
+
+        if voting_deadline <= env.ledger().timestamp() {
+            return Err(LumentixError::InvalidTimeRange);
+        }
+
+        let mut vote_counts: Vec<u32> = Vec::new(&env);
+        for _ in candidates.iter() {
+            vote_counts.push_back(0);
+        }
+
+        let vote_id = storage::get_next_schedule_vote_id(&env);
+        storage::increment_schedule_vote_id(&env);
+
+        let candidate_count = candidates.len();
+        let vote = ScheduleVote {
+            vote_id,
+            event_id,
+            slot_name: slot_name.clone(),
+            candidates,
+            vote_counts,
+            voting_deadline,
+            finalized: false,
+            winning_candidate: None,
+        };
+
+        storage::set_schedule_vote(&env, vote_id, &vote);
+
+        ScheduleVoteInitialized::emit(
+            &env,
+            vote_id,
+            event_id,
+            slot_name,
+            candidate_count,
+            voting_deadline,
+        );
+
+        Ok(vote_id)
+    }
+
+    /// Cast a vote for a candidate in an open schedule slot vote. Only
+    /// holders of a ticket for the event being voted on may participate,
+    /// and each ticket holder may vote once per slot.
+    pub fn cast_schedule_vote(
+        env: Env,
+        voter: Address,
+        vote_id: u64,
+        candidate_index: u32,
+    ) -> Result<(), LumentixError> {
+        voter.require_auth();
+
+        let mut vote = storage::get_schedule_vote(&env, vote_id)?;
+
+        if vote.finalized {
+            return Err(LumentixError::ScheduleVotingClosed);
+        }
+
+        let now = env.ledger().timestamp();
+        if now > vote.voting_deadline {
+            return Err(LumentixError::ScheduleVotingClosed);
+        }
+
+        if candidate_index >= vote.candidates.len() {
+            return Err(LumentixError::InvalidScheduleCandidateIndex);
+        }
+
+        // Voter must hold a ticket for the event this slot belongs to.
+        let mut is_ticket_holder = false;
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.owner == voter && ticket.event_id == vote.event_id {
+                    is_ticket_holder = true;
+                    break;
+                }
+            }
+            ticket_id += 1;
+        }
+        if !is_ticket_holder {
+            return Err(LumentixError::ScheduleVoterNotTicketHolder);
+        }
+
+        if storage::has_cast_schedule_vote(&env, vote_id, &voter) {
+            return Err(LumentixError::ScheduleVoteAlreadyCast);
+        }
+
+        let current_count = vote.vote_counts.get(candidate_index).unwrap_or(0);
+        let new_count = current_count + 1;
+        vote.vote_counts.set(candidate_index, new_count);
+        storage::set_schedule_vote(&env, vote_id, &vote);
+
+        let cast_record = ScheduleVoteCastRecord {
+            vote_id,
+            voter: voter.clone(),
+            candidate_index,
+            timestamp: now,
+        };
+        storage::set_schedule_vote_cast(&env, vote_id, &voter, &cast_record);
+
+        ScheduleVoteCast::emit(&env, vote_id, voter, candidate_index, new_count);
+
+        Ok(())
+    }
+
+    /// Tally and finalize a schedule vote once its voting deadline has
+    /// passed. Idempotent — calling it again after finalization simply
+    /// returns the already-finalized result. Ties are broken in favor of
+    /// the lowest candidate index.
+    pub fn tally_vote_results(env: Env, vote_id: u64) -> Result<ScheduleVote, LumentixError> {
+        let mut vote = storage::get_schedule_vote(&env, vote_id)?;
+
+        if vote.finalized {
+            return Ok(vote);
+        }
+
+        let now = env.ledger().timestamp();
+        if now <= vote.voting_deadline {
+            return Err(LumentixError::ScheduleVotingStillActive);
+        }
+
+        let mut winner_index: u32 = 0;
+        let mut winner_votes: u32 = 0;
+        for i in 0..vote.vote_counts.len() {
+            let count = vote.vote_counts.get(i).unwrap_or(0);
+            if count > winner_votes {
+                winner_votes = count;
+                winner_index = i;
+            }
+        }
+
+        let winning_candidate = vote.candidates.get(winner_index).unwrap();
+
+        vote.finalized = true;
+        vote.winning_candidate = Some(winning_candidate.clone());
+        storage::set_schedule_vote(&env, vote_id, &vote);
+
+        ScheduleVoteFinalized::emit(
+            &env,
+            vote_id,
+            vote.event_id,
+            winning_candidate,
+            winner_votes,
+        );
+
+        Ok(vote)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PROMO CODES WITH COMPLEX USAGE LIMITS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Create a promo code for an event. Only the event organizer can
+    /// create promo codes. `max_global_uses` and `max_uses_per_user` of `0`
+    /// mean "unlimited" for that dimension.
+    pub fn create_promo_code(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        code: String,
+        discount_bps: u32,
+        expires_at: u64,
+        max_global_uses: u32,
+        max_uses_per_user: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        validation::validate_string_not_empty(&code)?;
+
+        if discount_bps == 0 || discount_bps > 10_000 {
+            return Err(LumentixError::InvalidPromoDiscount);
+        }
+
+        if expires_at <= env.ledger().timestamp() {
+            return Err(LumentixError::InvalidTimeRange);
+        }
+
+        if storage::has_promo_code(&env, event_id, &code) {
+            return Err(LumentixError::PromoCodeAlreadyExists);
+        }
+
+        let promo = PromoCode {
+            event_id,
+            code: code.clone(),
+            discount_bps,
+            expires_at,
+            max_global_uses,
+            max_uses_per_user,
+            total_uses: 0,
+            active: true,
+            created_by: organizer,
+        };
+
+        storage::set_promo_code(&env, event_id, &code, &promo);
+
+        PromoCodeCreated::emit(
+            &env,
+            event_id,
+            code,
+            discount_bps,
+            expires_at,
+            max_global_uses,
+            max_uses_per_user,
+        );
+
+        Ok(())
+    }
+
+    /// Validate that a promo code can currently be redeemed by `user`:
+    /// it must be active, not expired, under its global use limit, and
+    /// under that user's individual use limit.
+    pub fn validate_promo_code_limits(
+        env: Env,
+        event_id: u64,
+        code: String,
+        user: Address,
+    ) -> Result<(), LumentixError> {
+        let promo = storage::get_promo_code(&env, event_id, &code)?;
+
+        if !promo.active {
+            return Err(LumentixError::PromoCodeInactive);
+        }
+
+        if env.ledger().timestamp() > promo.expires_at {
+            return Err(LumentixError::PromoCodeExpired);
+        }
+
+        if promo.max_global_uses > 0 && promo.total_uses >= promo.max_global_uses {
+            return Err(LumentixError::PromoCodeGlobalLimitReached);
+        }
+
+        if promo.max_uses_per_user > 0 {
+            let user_uses = storage::get_promo_user_usage(&env, event_id, &code, &user);
+            if user_uses >= promo.max_uses_per_user {
+                return Err(LumentixError::PromoCodeUserLimitReached);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Apply a promo code's discount to `amount`, enforcing its expiration,
+    /// global limit, and per-user limit. Records the redemption and returns
+    /// the discounted amount.
+    pub fn apply_promo_code_discount(
+        env: Env,
+        event_id: u64,
+        code: String,
+        user: Address,
+        amount: i128,
+    ) -> Result<i128, LumentixError> {
+        user.require_auth();
+
+        if amount <= 0 {
+            return Err(LumentixError::InvalidAmount);
+        }
+
+        Self::validate_promo_code_limits(env.clone(), event_id, code.clone(), user.clone())?;
+
+        let mut promo = storage::get_promo_code(&env, event_id, &code)?;
+
+        let discount = (amount * promo.discount_bps as i128) / 10_000;
+        let discounted_amount = amount - discount;
+
+        promo.total_uses += 1;
+        storage::set_promo_code(&env, event_id, &code, &promo);
+
+        let user_uses = storage::get_promo_user_usage(&env, event_id, &code, &user);
+        storage::set_promo_user_usage(&env, event_id, &code, &user, user_uses + 1);
+
+        PromoCodeApplied::emit(&env, event_id, code, user, amount, discounted_amount);
+
+        Ok(discounted_amount)
     }
 }

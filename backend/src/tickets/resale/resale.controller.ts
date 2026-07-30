@@ -30,6 +30,7 @@ import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto'
 @ApiBearerAuth()
 @Controller('resale')
 @UseGuards(JwtAuthGuard)
+@ApiResponse({ status: 401, description: 'Unauthorized' })
 @ApiResponse({ status: 429, description: 'Too Many Requests' })
 export class ResaleController {
   constructor(private readonly resaleService: ResaleService) {}
@@ -43,6 +44,7 @@ export class ResaleController {
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 201, description: 'Ticket listed for resale' })
   @ApiResponse({ status: 400, description: 'Price exceeds maximum allowed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Not ticket owner' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async listForResale(
@@ -62,6 +64,9 @@ export class ResaleController {
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 201, description: 'Resale ticket purchased' })
   @ApiResponse({ status: 400, description: 'Invalid transaction or price exceeds limit' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 409, description: 'Ticket is no longer available' })
+  @ApiResponse({ status: 422, description: 'Payment could not be processed' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async buyResaleTicket(
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
@@ -79,6 +84,7 @@ export class ResaleController {
   })
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 200, description: 'Listing cancelled' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Not ticket owner' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async cancelResaleListing(
@@ -96,6 +102,8 @@ export class ResaleController {
   })
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 200, description: 'Resale history returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
   async getResaleHistory(
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
   ) {
@@ -111,6 +119,8 @@ export class ResaleController {
       'Organizer-only. Returns total earnings from the 5% resale fee across all events.',
   })
   @ApiResponse({ status: 200, description: 'Earnings returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   async getOrganizerEarnings(@Req() req: AuthenticatedRequest) {
     return this.resaleService.getOrganizerResaleEarnings(req.user.id);
   }
@@ -127,6 +137,7 @@ export class ResaleController {
   })
   @ApiResponse({ status: 201, description: 'Price ceiling set' })
   @ApiResponse({ status: 400, description: 'Invalid multiplier or absolute ceiling' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Not the event organizer' })
   async setPriceCeiling(
     @Req() req: AuthenticatedRequest,
@@ -144,6 +155,9 @@ export class ResaleController {
       'Checks whether a proposed resale price is compliant with the price ceiling for the event.',
   })
   @ApiResponse({ status: 200, description: 'Compliance check result' })
+  @ApiResponse({ status: 400, description: 'Invalid price request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   async verifyResalePrice(@Body() dto: VerifyResalePriceDto) {
     return this.resaleService.verifyResalePrice(dto);
   }
@@ -157,6 +171,9 @@ export class ResaleController {
       'Caps a proposed resale price to the maximum allowed ceiling. Returns the enforced price.',
   })
   @ApiResponse({ status: 200, description: 'Enforced price returned' })
+  @ApiResponse({ status: 400, description: 'Invalid price request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   async enforceResaleCompliance(
     @Req() req: AuthenticatedRequest,
     @Body() dto: EnforceResaleComplianceDto,

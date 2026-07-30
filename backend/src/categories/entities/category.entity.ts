@@ -1,8 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToMany } from 'typeorm';
-import { Event } from '../../events/entities/event.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('categories')
-export class Category {
+export class CategoryEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -12,12 +11,15 @@ export class Category {
   @Column({ unique: true })
   slug: string;
 
-  @Column({ type: 'text', nullable: true })
-  description: string | null;
-
   @Column({ nullable: true })
-  iconUrl: string | null;
+  iconUrl: string;
 
-  @ManyToMany(() => Event, (event) => event.categories)
-  events: Event[];
+  @Column({ default: true })
+  isActive: boolean;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

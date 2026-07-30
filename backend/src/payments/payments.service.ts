@@ -324,7 +324,7 @@ export class PaymentsService {
     const saved = await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
-      action: AuditAction.PAYMENT_INTENT_CREATED,
+      action: AuditAction.SEASON_PASS_INTENT_CREATED,
       userId,
       resourceId: saved.id,
       meta: {
@@ -394,6 +394,7 @@ export class PaymentsService {
     }
 
     let targetEscrowPublicKey: string | null = null;
+    let event: Event | null = null;
     if (payment.isSeasonPass) {
       const series = await this.eventSeriesRepository.findOne({
         where: { id: payment.seriesId as string },
@@ -403,7 +404,7 @@ export class PaymentsService {
       }
       targetEscrowPublicKey = series.escrowPublicKey;
     } else {
-      const event = await this.eventsService.getEventById(payment.eventId as string);
+      event = await this.eventsService.getEventById(payment.eventId as string);
       if (!event.escrowPublicKey) {
         throw new ConflictException('Escrow wallet is not configured for this event.');
       }
@@ -455,7 +456,7 @@ export class PaymentsService {
       },
     });
 
-    this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+    this.webhooksService.queueDelivery(event as Event, confirmed).catch(() => undefined);
 
     return confirmed;
   }
@@ -474,6 +475,31 @@ export class PaymentsService {
     );
   }
 
+  async findPaymentPaths(
+    sourcePublicKey: string,
+    sourceAsset: string,
+    destAsset: string,
+    destAmount: string,
+  ) {
+    const records = await this.stellarService.findPaymentPath(
+      sourcePublicKey,
+      sourceAsset,
+      destAsset,
+      destAmount,
+    );
+
+    return records.map((record: any, index: number) => ({
+      rank: index + 1,
+      sourceAmount: record.source_amount,
+      sourceAsset: sourceAsset,
+      destinationAmount: record.destination_amount,
+      destinationAsset: destAsset,
+      path: (record.path ?? []).map((a: any) =>
+        a.asset_code ? `${a.asset_code}:${a.asset_issuer}` : 'native',
+      ),
+    }));
+  }
+
   async expireStalePayments(): Promise<void> {
     const expired = await this.paymentsRepository.find({
       where: {
@@ -485,6 +511,15 @@ export class PaymentsService {
     for (const payment of expired) {
       await this.markFailed(payment, 'Payment expired');
     }
+  }
+
+  async mergeEscrowToOrganizer(eventId: string, organizerId: string) {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+    return this.escrowService.mergeEscrowToOrganizer(eventId, event.organizerId);
   }
 
   private async resolvePaymentOperations(txRecord: any): Promise<PaymentOperation[]> {
