@@ -9,6 +9,7 @@ import { Job } from 'bull';
 import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { MailerService } from '../mailer/mailer.service';
 import { UsersService } from '../users/users.service';
+import { CalendarService } from '../calendar/calendar.service';
 
 @Processor('notifications')
 export class NotificationProcessor {
@@ -17,6 +18,7 @@ export class NotificationProcessor {
     private readonly mailerService: MailerService,
     @Inject(forwardRef(() => UsersService))
     private readonly usersService: UsersService,
+    private readonly calendarService: CalendarService,
   ) { }
 
   private async shouldSkip(job: Job, preferenceKey: string): Promise<boolean> {
@@ -265,6 +267,57 @@ export class NotificationProcessor {
       </div>
     `;
     await this.mailerService.send(user.email, subject, html);
+    return { sent: true };
+  }
+
+  @Process('sendCalendarInvite')
+  async handleCalendarInvite(job: Job) {
+    this.logger.log(`Sending calendar invite email for job ${job.id}...`);
+    const {
+      to,
+      eventTitle,
+      eventDescription,
+      startDate,
+      endDate,
+      location,
+      ticketId,
+      organizerName,
+      googleUrl,
+      outlookUrl,
+      yahooUrl,
+      icsDownloadUrl,
+    } = job.data;
+
+    const eventDate = new Date(startDate);
+    const eventDateStr = eventDate.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const eventTimeStr = eventDate.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const subject = `📅 Save the Date: ${eventTitle}`;
+    await this.mailerService.send({
+      to,
+      subject,
+      template: 'calendar-invite',
+      context: {
+        eventTitle,
+        eventDate: eventDateStr,
+        eventTime: eventTimeStr,
+        eventLocation: location ?? '',
+        ticketId: ticketId ?? '',
+        googleUrl: googleUrl ?? '',
+        outlookUrl: outlookUrl ?? '',
+        yahooUrl: yahooUrl ?? '',
+        icsDownloadUrl: icsDownloadUrl ?? '',
+        currentYear: new Date().getFullYear(),
+      },
+    });
     return { sent: true };
   }
 

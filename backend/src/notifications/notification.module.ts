@@ -6,6 +6,7 @@ import { MailerModule } from '../mailer/mailer.module';
 import { UsersModule } from '../users/users.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { CalendarModule } from '../calendar/calendar.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { TicketEntity } from '../tickets/entities/ticket.entity';
     TypeOrmModule.forFeature([TicketEntity]),
     MailerModule,
     forwardRef(() => UsersModule),
+    CalendarModule,
   ],
   providers: [NotificationService, NotificationProcessor],
   exports: [NotificationService], // Allow Payments/Sponsors to import this
