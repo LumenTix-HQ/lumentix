@@ -707,6 +707,52 @@ pub struct UserPreferences {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Email Campaign System
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of an email campaign
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EmailCampaignStatus {
+    Draft,
+    Scheduled,
+    Sending,
+    Sent,
+    Cancelled,
+}
+
+/// An email campaign created by an organizer to send newsletters to attendees
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailCampaign {
+    pub id: u64,
+    pub organizer: Address,
+    /// Optional event filter — None means all events by this organizer
+    pub event_id: Option<u64>,
+    pub subject: String,
+    pub body_html: String,
+    pub status: EmailCampaignStatus,
+    pub created_at: u64,
+    pub scheduled_at: Option<u64>,
+    pub sent_at: Option<u64>,
+    pub recipient_count: u32,
+}
+
+/// Analytics record for a sent email campaign
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailCampaignAnalytics {
+    pub campaign_id: u64,
+    pub total_sent: u32,
+    pub total_delivered: u32,
+    pub total_opened: u32,
+    pub total_clicked: u32,
+    pub total_bounced: u32,
+    pub total_unsubscribed: u32,
+    pub last_updated_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Refund Automation Pipeline (Issue #674)
 // ═══════════════════════════════════════════════════════════════════════════
 

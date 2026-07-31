@@ -386,6 +386,13 @@ export default function OrganizerDashboardPage() {
                   >
                     Download CSV
                   </button>
+
+                  <Link
+                    href="/organizer/email-campaigns"
+                    className="rounded-lg border border-indigo-700 bg-indigo-900/30 hover:bg-indigo-900/60 px-4 py-2 text-sm font-medium text-indigo-300 hover:text-white transition-colors"
+                  >
+                    ✉️ Email Campaigns
+                  </Link>
                 </div>
               </div>
             </div>
