@@ -304,6 +304,42 @@ pub enum LumentixError {
     MemorabiliaClaimNotFound = 103,
 
     // ═══════════════════════════════════════════════════════════════════════
+    // Email Campaign errors (116–121)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Email campaign not found
+    EmailCampaignNotFound = 116,
+    /// Email campaign subject or body is empty
+    EmailCampaignInvalidContent = 117,
+    /// Email campaign has already been sent and cannot be modified
+    EmailCampaignAlreadySent = 118,
+    /// Caller is not the campaign organizer
+    EmailCampaignUnauthorized = 119,
+    /// Campaign analytics record not found
+    EmailCampaignAnalyticsNotFound = 120,
+    /// Delivery count exceeds the number of recipients
+    EmailCampaignInvalidDeliveryCount = 121,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Tax Determination errors (122–130)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Tax rule with the specified ID does not exist
+    TaxRuleNotFound = 122,
+    /// Tax jurisdiction code is empty or invalid
+    TaxInvalidJurisdiction = 123,
+    /// Tax rate basis points exceed 10 000 (100%)
+    TaxInvalidRate = 124,
+    /// Tax collection record not found
+    TaxCollectionRecordNotFound = 125,
+    /// Tax report not found
+    TaxReportNotFound = 126,
+    /// No tax collection records exist for the requested jurisdiction/period
+    TaxNoRecordsForJurisdiction = 127,
+    /// Period start must be strictly before period end
+    TaxInvalidPeriod = 128,
+    /// Tax rule already exists for this jurisdiction code
+    TaxRuleAlreadyExists = 129,
+    /// Ticket base price must be positive to compute tax
+    TaxInvalidBasePrice = 130,
     // Core feature implementation errors
     // ═══════════════════════════════════════════════════════════════════════
     /// The provided zero-knowledge proof is invalid

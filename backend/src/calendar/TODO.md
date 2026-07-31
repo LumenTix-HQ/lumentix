@@ -1,22 +1,14 @@
-# Arbitration & Dispute Resolution Framework - Implementation TODO
+# Calendar Integration Implementation Checklist
 
-## Backend (NestJS)
-- [x] Create dispute claim type enums
-- [x] Create arbitration DTOs
-- [x] Create DisputeArbitrationService with fileDisputeClaim, assignDisputeArbitrators, resolveDisputeRefund
-- [x] Add endpoints to refund controller
-- [x] Update refund module
-
-## Contract (Soroban Rust)
-- [x] Add new error variants for arbitration
-- [x] Add new types for disputes and arbitrators
-- [x] Add storage helpers
-- [x] Add events  
-- [x] Add contract functions: file_dispute_claim, assign_dispute_arbitrators, resolve_dispute_refund
-- [x] Export in lib.rs
-
-## Git
-- [x] Create branch
-- [x] Commit changes
-- [x] Push and create PR
+- [x] Step 1: Create CalendarService (generateIcalFile, createGoogleCalendarLink, createOutlookCalendarLink, createYahooCalendarLink, sendCalendarInvite)
+- [x] Step 2: Create CalendarModule 
+- [x] Step 3: Create calendar-invite.hbs email template
+- [x] Step 4: Add queueCalendarInvite to NotificationService
+- [x] Step 5: Add sendCalendarInvite handler to NotificationProcessor
+- [x] Step 6: Queue calendar invite after registration + ticket confirmation
+- [x] Step 7: Register CalendarModule in NotificationModule
+- [x] Step 8: Create calendar REST endpoints (download .ics)
+- [x] Step 9: Update TicketCard.tsx with "Add to Calendar" buttons
+- [x] Step 10: Update my-tickets page with calendar integration
+- [x] Step 11: Register CalendarModule in AppModule
 
