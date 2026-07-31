@@ -1,17 +1,18 @@
 use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
-    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, NftCollectible,
-    OrganizerReputation, ResalePriceCeiling, Seat,
+    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
+    OrganizerReputation, PromoCode, ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid,
     Ticket, TicketDidAssociation, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
-    EmailCampaign, EmailCampaignAnalytics,
-    TaxRule, TaxCollectionRecord, TaxReport,
+
+  CertificationStandard, EventCertificate,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -60,6 +61,23 @@ const PLAN_ID_COUNTER: &str = "PLAN_CTR";
 const INCIDENT_PREFIX: &str = "INC_";
 const INCIDENT_COUNTER: &str = "INC_CTR";
 const USER_PREFS_PREFIX: &str = "UPREF_";
+const ZKP_PARAMS: &str = "ZKP_PARAMS";
+const COMPLIANCE_RULES: &str = "COMP_RULES";
+const STAFF_ROLE_PREFIX: &str = "STAFF_";
+const VISUAL_LAYOUT_PREFIX: &str = "VISLAY_";
+const CERTIFICATE_PREFIX: &str = "CERT_";
+const CERTIFICATE_ID_COUNTER: &str = "CERT_CTR";
+const EVENT_CERTIFICATE_PREFIX: &str = "EVCERT_";
+const CERT_STANDARD_PREFIX: &str = "CERTSTD_";
+const SURVEY_ID_COUNTER: &str = "SURVEY_CTR";
+const SURVEY_PREFIX: &str = "SURVEY_";
+const SURVEY_EVENT_INDEX_PREFIX: &str = "SUREVT_";
+const SURVEY_NULLIFIER_PREFIX: &str = "SURNULL_";
+const SCHEDULE_VOTE_ID_COUNTER: &str = "SCHVOTE_CTR";
+const SCHEDULE_VOTE_PREFIX: &str = "SCHVOTE_";
+const SCHEDULE_VOTE_CAST_PREFIX: &str = "SCHCAST_";
+const PROMO_CODE_PREFIX: &str = "PROMO_";
+const PROMO_USER_USAGE_PREFIX: &str = "PROMOUSR_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -183,6 +201,114 @@ pub fn get_event(env: &Env, event_id: u64) -> Result<Event, LumentixError> {
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(event)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event Certification (Issue #654)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Maps a certification standard to a small, stable discriminant used as a
+/// storage-key component (avoids relying on enum variants being usable
+/// directly as map/tuple keys).
+fn certification_standard_discriminant(standard: &CertificationStandard) -> u32 {
+    match standard {
+        CertificationStandard::AuthenticityVerified => 0,
+        CertificationStandard::QualityAssured => 1,
+        CertificationStandard::SafetyCompliant => 2,
+    }
+}
+
+/// Get next certificate ID
+pub fn get_next_certificate_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&CERTIFICATE_ID_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment certificate ID counter
+pub fn increment_certificate_id(env: &Env) {
+    let next_id = get_next_certificate_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&CERTIFICATE_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Set certificate data
+pub fn set_certificate(env: &Env, certificate_id: u64, certificate: &EventCertificate) {
+    let key = (CERTIFICATE_PREFIX, certificate_id);
+    env.storage().persistent().set(&key, certificate);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get certificate data
+pub fn get_certificate(env: &Env, certificate_id: u64) -> Result<EventCertificate, LumentixError> {
+    let key = (CERTIFICATE_PREFIX, certificate_id);
+    let certificate = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::CertificateNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(certificate)
+}
+
+/// Record the currently-active certificate ID for an event (most recently issued).
+pub fn set_event_active_certificate(env: &Env, event_id: u64, certificate_id: u64) {
+    let key = (EVENT_CERTIFICATE_PREFIX, event_id);
+    env.storage().persistent().set(&key, &certificate_id);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get the currently-active certificate ID for an event, if any.
+pub fn get_event_active_certificate(env: &Env, event_id: u64) -> Option<u64> {
+    let key = (EVENT_CERTIFICATE_PREFIX, event_id);
+    let result = env.storage().persistent().get(&key);
+    if result.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    result
+}
+
+/// Enable/disable a certification standard platform-wide.
+pub fn set_certification_standard_enabled(
+    env: &Env,
+    standard: &CertificationStandard,
+    enabled: bool,
+) {
+    let key = (
+        CERT_STANDARD_PREFIX,
+        certification_standard_discriminant(standard),
+    );
+    env.storage().persistent().set(&key, &enabled);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether a certification standard is currently enabled platform-wide.
+pub fn is_certification_standard_enabled(env: &Env, standard: &CertificationStandard) -> bool {
+    let key = (
+        CERT_STANDARD_PREFIX,
+        certification_standard_discriminant(standard),
+    );
+    env.storage().persistent().get(&key).unwrap_or(false)
 }
 
 /// Set ticket data
@@ -1803,235 +1929,293 @@ pub fn has_memorabilia_claimed(env: &Env, ticket_id: u64) -> bool {
     env.storage().persistent().has(&key)
 }
 
+// ── ZKP Storage ────────────────────────────────────────────────────────────
+
+pub fn set_zkp_params(env: &Env, params: &String) {
+    env.storage().instance().set(&ZKP_PARAMS, params);
+}
+
+pub fn get_zkp_params(env: &Env) -> Option<String> {
+    env.storage().instance().get(&ZKP_PARAMS)
+}
+
+// ── Compliance Storage ─────────────────────────────────────────────────────
+
+pub fn set_compliance_rules(env: &Env, rules: &String) {
+    env.storage().instance().set(&COMPLIANCE_RULES, rules);
+}
+
+pub fn get_compliance_rules(env: &Env) -> Option<String> {
+    env.storage().instance().get(&COMPLIANCE_RULES)
+}
+
+// ── Staff Role Storage ─────────────────────────────────────────────────────
+
+pub fn set_staff_role(env: &Env, organizer: &Address, staff: &Address, role: &String) {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    env.storage().persistent().set(&key, role);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_staff_role(env: &Env, organizer: &Address, staff: &Address) -> Option<String> {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    let role = env.storage().persistent().get(&key);
+    if role.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    role
+}
+
+pub fn remove_staff_role(env: &Env, organizer: &Address, staff: &Address) {
+    let key = (STAFF_ROLE_PREFIX, organizer.clone(), staff.clone());
+    env.storage().persistent().remove(&key);
+}
+
+// ── Visual Layout Storage ──────────────────────────────────────────────────
+
+pub fn set_visual_layout(env: &Env, event_id: u64, layout_data: &String) {
+    let key = (VISUAL_LAYOUT_PREFIX, event_id);
+    env.storage().persistent().set(&key, layout_data);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_visual_layout(env: &Env, event_id: u64) -> Option<String> {
+    let key = (VISUAL_LAYOUT_PREFIX, event_id);
+    let layout = env.storage().persistent().get(&key);
+    if layout.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    layout
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-// EMAIL CAMPAIGN STORAGE
+// ANONYMOUS SURVEY STORAGE
 // ═══════════════════════════════════════════════════════════════════════════
 
-const EMAIL_CAMPAIGN_ID_COUNTER: &str = "EMCAMP_CTR";
-const EMAIL_CAMPAIGN_PREFIX: &str = "EMCAMP_";
-const EMAIL_CAMPAIGN_ANALYTICS_PREFIX: &str = "EMANA_";
-
-pub fn next_email_campaign_id(env: &Env) -> u64 {
-    let id: u64 = env
+/// Get the next survey response ID
+pub fn get_next_survey_id(env: &Env) -> u64 {
+    let id = env
         .storage()
         .instance()
-        .get(&EMAIL_CAMPAIGN_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage()
-        .instance()
-        .set(&EMAIL_CAMPAIGN_ID_COUNTER, &id);
+        .get(&SURVEY_ID_COUNTER)
+        .unwrap_or(1u64);
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
     id
 }
 
-pub fn set_email_campaign(env: &Env, campaign_id: u64, campaign: &EmailCampaign) {
-    let key = (EMAIL_CAMPAIGN_PREFIX, campaign_id);
-    env.storage().persistent().set(&key, campaign);
+/// Increment the survey response ID counter
+pub fn increment_survey_id(env: &Env) {
+    let next_id = get_next_survey_id(env) + 1;
+    env.storage().instance().set(&SURVEY_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist an anonymous survey response
+pub fn set_survey_response(env: &Env, survey_id: u64, response: &AnonymousSurveyResponse) {
+    let key = (SURVEY_PREFIX, survey_id);
+    env.storage().persistent().set(&key, response);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_email_campaign(
+/// Fetch an anonymous survey response by ID
+pub fn get_survey_response(
     env: &Env,
-    campaign_id: u64,
-) -> Result<EmailCampaign, LumentixError> {
-    let key = (EMAIL_CAMPAIGN_PREFIX, campaign_id);
-    let campaign = env
+    survey_id: u64,
+) -> Result<AnonymousSurveyResponse, LumentixError> {
+    let key = (SURVEY_PREFIX, survey_id);
+    let response = env
         .storage()
         .persistent()
         .get(&key)
-        .ok_or(LumentixError::EmailCampaignNotFound)?;
+        .ok_or(LumentixError::NoSurveyResponses)?;
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(campaign)
+    Ok(response)
 }
 
-pub fn set_email_campaign_analytics(
+/// Append a survey response ID to the index of responses recorded for an event
+pub fn add_survey_to_event(env: &Env, event_id: u64, survey_id: u64) {
+    let key = (SURVEY_EVENT_INDEX_PREFIX, event_id);
+    let mut ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    ids.push_back(survey_id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get all survey response IDs recorded for an event
+pub fn get_survey_ids_for_event(env: &Env, event_id: u64) -> Vec<u64> {
+    let key = (SURVEY_EVENT_INDEX_PREFIX, event_id);
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    ids
+}
+
+/// Check whether a survey nullifier has already been used (duplicate-submission guard)
+pub fn has_survey_nullifier(env: &Env, event_id: u64, nullifier: &BytesN<32>) -> bool {
+    let key = (SURVEY_NULLIFIER_PREFIX, event_id, nullifier.clone());
+    env.storage().persistent().has(&key)
+}
+
+/// Mark a survey nullifier as used
+pub fn mark_survey_nullifier_used(env: &Env, event_id: u64, nullifier: &BytesN<32>) {
+    let key = (SURVEY_NULLIFIER_PREFIX, event_id, nullifier.clone());
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULE VOTE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the next schedule vote ID
+pub fn get_next_schedule_vote_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&SCHEDULE_VOTE_ID_COUNTER)
+        .unwrap_or(1u64);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment the schedule vote ID counter
+pub fn increment_schedule_vote_id(env: &Env) {
+    let next_id = get_next_schedule_vote_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&SCHEDULE_VOTE_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist a schedule vote
+pub fn set_schedule_vote(env: &Env, vote_id: u64, vote: &ScheduleVote) {
+    let key = (SCHEDULE_VOTE_PREFIX, vote_id);
+    env.storage().persistent().set(&key, vote);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a schedule vote by ID
+pub fn get_schedule_vote(env: &Env, vote_id: u64) -> Result<ScheduleVote, LumentixError> {
+    let key = (SCHEDULE_VOTE_PREFIX, vote_id);
+    let vote = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::ScheduleVoteNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(vote)
+}
+
+/// Persist a voter's cast record for a schedule vote (duplicate-vote guard)
+pub fn set_schedule_vote_cast(
     env: &Env,
-    campaign_id: u64,
-    analytics: &EmailCampaignAnalytics,
+    vote_id: u64,
+    voter: &Address,
+    record: &ScheduleVoteCastRecord,
 ) {
-    let key = (EMAIL_CAMPAIGN_ANALYTICS_PREFIX, campaign_id);
-    env.storage().persistent().set(&key, analytics);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-}
-
-pub fn get_email_campaign_analytics(
-    env: &Env,
-    campaign_id: u64,
-) -> Result<EmailCampaignAnalytics, LumentixError> {
-    let key = (EMAIL_CAMPAIGN_ANALYTICS_PREFIX, campaign_id);
-    let analytics = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::EmailCampaignAnalyticsNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(analytics)
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TAX DETERMINATION STORAGE
-// ═══════════════════════════════════════════════════════════════════════════
-
-const TAX_RULE_ID_COUNTER: &str = "TAXRULE_CTR";
-const TAX_RULE_PREFIX: &str = "TAXRULE_";
-/// Maps jurisdiction_code → rule_id so we can look up by code
-const TAX_RULE_BY_CODE_PREFIX: &str = "TAXCODE_";
-const TAX_COLLECTION_ID_COUNTER: &str = "TAXCOL_CTR";
-const TAX_COLLECTION_PREFIX: &str = "TAXCOL_";
-const TAX_REPORT_ID_COUNTER: &str = "TAXRPT_CTR";
-const TAX_REPORT_PREFIX: &str = "TAXRPT_";
-
-// ── Tax Rule ────────────────────────────────────────────────────────────────
-
-pub fn next_tax_rule_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&TAX_RULE_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage().instance().set(&TAX_RULE_ID_COUNTER, &id);
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_tax_rule(env: &Env, rule_id: u64, rule: &TaxRule) {
-    let key = (TAX_RULE_PREFIX, rule_id);
-    env.storage().persistent().set(&key, rule);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    // Also index by jurisdiction_code for O(1) lookup
-    let code_key = (TAX_RULE_BY_CODE_PREFIX, rule.jurisdiction_code.clone());
-    env.storage().persistent().set(&code_key, &rule_id);
-    env.storage()
-        .persistent()
-        .extend_ttl(&code_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-}
-
-pub fn get_tax_rule(env: &Env, rule_id: u64) -> Result<TaxRule, LumentixError> {
-    let key = (TAX_RULE_PREFIX, rule_id);
-    let rule = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::TaxRuleNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(rule)
-}
-
-pub fn get_tax_rule_by_code(env: &Env, jurisdiction_code: &String) -> Result<TaxRule, LumentixError> {
-    let code_key = (TAX_RULE_BY_CODE_PREFIX, jurisdiction_code.clone());
-    let rule_id: u64 = env
-        .storage()
-        .persistent()
-        .get(&code_key)
-        .ok_or(LumentixError::TaxRuleNotFound)?;
-    get_tax_rule(env, rule_id)
-}
-
-pub fn has_tax_rule_for_code(env: &Env, jurisdiction_code: &String) -> bool {
-    let code_key = (TAX_RULE_BY_CODE_PREFIX, jurisdiction_code.clone());
-    env.storage().persistent().has(&code_key)
-}
-
-// ── Tax Collection Record ───────────────────────────────────────────────────
-
-pub fn next_tax_collection_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&TAX_COLLECTION_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage()
-        .instance()
-        .set(&TAX_COLLECTION_ID_COUNTER, &id);
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
-}
-
-pub fn set_tax_collection_record(env: &Env, record_id: u64, record: &TaxCollectionRecord) {
-    let key = (TAX_COLLECTION_PREFIX, record_id);
+    let key = (SCHEDULE_VOTE_CAST_PREFIX, vote_id, voter.clone());
     env.storage().persistent().set(&key, record);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_tax_collection_record(
-    env: &Env,
-    record_id: u64,
-) -> Result<TaxCollectionRecord, LumentixError> {
-    let key = (TAX_COLLECTION_PREFIX, record_id);
-    let record = env
+/// Check whether a voter has already cast a vote for this schedule vote
+pub fn has_cast_schedule_vote(env: &Env, vote_id: u64, voter: &Address) -> bool {
+    let key = (SCHEDULE_VOTE_CAST_PREFIX, vote_id, voter.clone());
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROMO CODE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Persist a promo code, scoped to a single event
+pub fn set_promo_code(env: &Env, event_id: u64, code: &String, promo: &PromoCode) {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    env.storage().persistent().set(&key, promo);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a promo code by event and code name
+pub fn get_promo_code(env: &Env, event_id: u64, code: &String) -> Result<PromoCode, LumentixError> {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    let promo = env
         .storage()
         .persistent()
         .get(&key)
-        .ok_or(LumentixError::TaxCollectionRecordNotFound)?;
+        .ok_or(LumentixError::PromoCodeNotFound)?;
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(record)
+    Ok(promo)
 }
 
-pub fn get_tax_collection_count(env: &Env) -> u64 {
-    env.storage()
-        .instance()
-        .get(&TAX_COLLECTION_ID_COUNTER)
-        .unwrap_or(0u64)
+/// Check whether a promo code already exists for an event
+pub fn has_promo_code(env: &Env, event_id: u64, code: &String) -> bool {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    env.storage().persistent().has(&key)
 }
 
-// ── Tax Report ──────────────────────────────────────────────────────────────
-
-pub fn next_tax_report_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .instance()
-        .get(&TAX_REPORT_ID_COUNTER)
-        .unwrap_or(0u64)
-        + 1;
-    env.storage().instance().set(&TAX_REPORT_ID_COUNTER, &id);
-    env.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
-    id
+/// Get how many times a specific user has redeemed a promo code
+pub fn get_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Address) -> u32 {
+    let key = (PROMO_USER_USAGE_PREFIX, event_id, code.clone(), user.clone());
+    let usage = env.storage().persistent().get(&key).unwrap_or(0u32);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    usage
 }
 
-pub fn set_tax_report(env: &Env, report_id: u64, report: &TaxReport) {
-    let key = (TAX_REPORT_PREFIX, report_id);
-    env.storage().persistent().set(&key, report);
+/// Persist a user's redemption count for a promo code
+pub fn set_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Address, usage: u32) {
+    let key = (PROMO_USER_USAGE_PREFIX, event_id, code.clone(), user.clone());
+    env.storage().persistent().set(&key, &usage);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_tax_report(env: &Env, report_id: u64) -> Result<TaxReport, LumentixError> {
-    let key = (TAX_REPORT_PREFIX, report_id);
-    let report = env
-        .storage()
-        .persistent()
-        .get(&key)
-        .ok_or(LumentixError::TaxReportNotFound)?;
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    Ok(report)
-}

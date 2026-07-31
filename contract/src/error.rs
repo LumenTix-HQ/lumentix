@@ -340,4 +340,72 @@ pub enum LumentixError {
     TaxRuleAlreadyExists = 129,
     /// Ticket base price must be positive to compute tax
     TaxInvalidBasePrice = 130,
+    // Core feature implementation errors
+    // ═══════════════════════════════════════════════════════════════════════
+    /// The provided zero-knowledge proof is invalid
+    InvalidZkp = 150,
+    /// Staff member doesn't have the required role/permission
+    StaffRoleNotFound = 151,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Event Certification errors (Issue #654)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// The requested certification standard has not been enabled by the platform admin
+    CertificationStandardNotFound = 200,
+    /// No certificate exists with the given ID
+    CertificateNotFound = 201,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Predictive Analytics errors (Issue #646)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Not enough historical sales data points were provided to produce a forecast
+    InsufficientSalesHistory = 202,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Anonymous Event Feedback Survey errors (203–206)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// This ticket has already submitted a survey response for this event
+    SurveyAlreadySubmitted = 203,
+    /// No survey responses exist yet for this event
+    NoSurveyResponses = 204,
+    /// Survey submission must include at least one rating
+    EmptySurveyAnswers = 205,
+    /// Every survey rating must be between 1 and 5
+    InvalidSurveyRating = 206,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Decentralized Schedule Voting errors (207–213)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// A schedule vote needs at least two candidates to be meaningful
+    InsufficientScheduleCandidates = 207,
+    /// Schedule vote with the given ID does not exist
+    ScheduleVoteNotFound = 208,
+    /// Voting deadline for this schedule vote has passed
+    ScheduleVotingClosed = 209,
+    /// Schedule vote cannot be tallied before its voting deadline
+    ScheduleVotingStillActive = 210,
+    /// This ticket holder has already voted on this schedule slot
+    ScheduleVoteAlreadyCast = 211,
+    /// Caller does not hold a ticket for the event being voted on
+    ScheduleVoterNotTicketHolder = 212,
+    /// Candidate index is out of range for this schedule vote
+    InvalidScheduleCandidateIndex = 213,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Promo Code errors (214–220)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Promo code does not exist for this event
+    PromoCodeNotFound = 214,
+    /// A promo code with this name already exists for this event
+    PromoCodeAlreadyExists = 215,
+    /// Promo code's expiration date has passed
+    PromoCodeExpired = 216,
+    /// Promo code has been deactivated by the organizer
+    PromoCodeInactive = 217,
+    /// Promo code has reached its maximum total number of uses
+    PromoCodeGlobalLimitReached = 218,
+    /// Caller has already used this promo code the maximum number of times
+    PromoCodeUserLimitReached = 219,
+    /// Discount basis points must be between 1 and 10000
+    InvalidPromoDiscount = 220,
 }

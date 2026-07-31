@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Link from 'next/link';
 
 interface ErrorProps {
   error: Error & { digest?: string };
@@ -72,6 +73,12 @@ export default function Error({ error, reset }: ErrorProps) {
           >
             Try Again
           </button>
+          <Link
+            href="/events"
+            className="px-6 py-3 bg-white/[0.06] border border-white/[0.1] text-white rounded-lg font-semibold hover:bg-white/[0.1] transition-colors text-center"
+          >
+            Browse Events
+          </Link>
           <button
             onClick={() => (window.location.href = '/')}
             className="px-6 py-3 bg-white/[0.06] border border-white/[0.1] text-white rounded-lg font-semibold hover:bg-white/[0.1] transition-colors"
