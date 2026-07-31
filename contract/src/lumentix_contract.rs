@@ -35,7 +35,8 @@ use crate::events::{
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
-    EventCertificateIssued, CertificationStandardUpdated,
+
+  EventCertificateIssued, CertificationStandardUpdated,
 };
 use crate::storage;
 use crate::types::{

@@ -5,6 +5,8 @@ import { useWallet } from '@/contexts/WalletContext';
 import usePaymentStatus from '@/hooks/usePaymentStatus';
 import { useWalletBalance } from '@/hooks/useWalletBalance';
 import { InsufficientFundsWarning } from '@/components/payments/InsufficientFundsWarning';
+import TaxBreakdown from '@/components/TaxBreakdown';
+import type { TaxCalculationResult } from '@/types/tax';
 
 interface PaymentFlowProps {
   eventId: string;
@@ -25,13 +27,23 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
   const [flowState, setFlowState] = useState<FlowState>('idle');
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [taxResult, setTaxResult] = useState<TaxCalculationResult | null>(null);
 
   const { status: paymentStatus } = usePaymentStatus(paymentId);
-
   const { networkMismatch } = useWallet();
-  const insufficientFunds = ticketPrice > 0 && hasInsufficientFunds(ticketPrice);
-  const shortfall = getShortfall(ticketPrice);
+
+  // Use tax-inclusive price for insufficiency check when tax has been calculated
+  const effectivePrice = taxResult ? taxResult.totalPrice / 100 : ticketPrice;
+  const insufficientFunds = effectivePrice > 0 && hasInsufficientFunds(effectivePrice);
+  const shortfall = getShortfall(effectivePrice);
   const isBlocked = !isConnected || flowState !== 'idle' || insufficientFunds || networkMismatch;
+
+  // Refresh balance after successful payment
+  useEffect(() => {
+    if (paymentStatus === 'CONFIRMED') {
+      refreshBalance();
+    }
+  }, [paymentStatus, refreshBalance]);
 
   if (paymentStatus === 'CONFIRMED') {
     return (
@@ -74,13 +86,6 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
     );
   }
 
-  // Refresh balance after successful payment
-  useEffect(() => {
-    if (paymentStatus === 'CONFIRMED') {
-      refreshBalance();
-    }
-  }, [paymentStatus, refreshBalance]);
-
   const handleRegister = async () => {
     setError(null);
 
@@ -107,7 +112,13 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
       const res = await fetch(`${API_BASE}/payments/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ eventId, currency }),
+        body: JSON.stringify({
+          eventId,
+          currency,
+          // Pass the tax-inclusive amount so the backend can record it
+          taxAmount: taxResult?.taxAmount ?? 0,
+          jurisdictionCode: taxResult?.jurisdictionCode ?? null,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -122,15 +133,32 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
     }
   };
 
+  // Compute display price — use tax total if available
+  const displayTotal = taxResult
+    ? `${(taxResult.totalPrice / 100).toFixed(2)} ${currency} (incl. tax)`
+    : ticketPrice === 0
+    ? 'Free'
+    : `${ticketPrice} ${currency}`;
+
   return (
     <div className="space-y-3">
       {error && <p className="text-red-400 text-sm">{error}</p>}
-      
+
+      {/* Tax breakdown — only shown for paid tickets */}
+      {ticketPrice > 0 && (
+        <TaxBreakdown
+          eventId={eventId}
+          basePrice={ticketPrice * 100} // convert to cents
+          currency={currency}
+          onTaxCalculated={setTaxResult}
+        />
+      )}
+
       {/* Insufficient funds warning */}
       {insufficientFunds && (
         <InsufficientFundsWarning
           balance={balance}
-          requiredAmount={ticketPrice + 0.50001}
+          requiredAmount={effectivePrice + 0.50001}
           shortfall={shortfall}
         />
       )}
@@ -154,9 +182,9 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
           ? 'Connect Wallet & Register'
           : ticketPrice === 0
           ? 'Register (Free)'
-          : `Register — ${ticketPrice} ${currency}`}
+          : `Register — ${displayTotal}`}
       </button>
-      
+
       {!isConnected && (
         <p className="text-xs text-gray-500 text-center">Requires Freighter wallet</p>
       )}

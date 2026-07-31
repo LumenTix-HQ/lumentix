@@ -11,7 +11,8 @@ use crate::types::{
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
-    CertificationStandard, EventCertificate,
+
+  CertificationStandard, EventCertificate,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
