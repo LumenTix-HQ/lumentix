@@ -11,6 +11,21 @@ export default function NotFound() {
                 <p className="text-gray-400 mb-12 max-w-md mx-auto">
                     The coordinate you're looking for doesn't exist in this galaxy. Let's get you back home.
                 </p>
+                <form action="/events" className="max-w-md mx-auto mb-12 flex gap-2">
+                    <input
+                        type="search"
+                        name="search"
+                        placeholder="Search events..."
+                        aria-label="Search events"
+                        className="flex-1 bg-white/[0.06] border border-white/[0.1] rounded-full px-6 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white/20"
+                    />
+                    <button
+                        type="submit"
+                        className="px-6 py-3 bg-white text-black rounded-full font-bold hover:bg-gray-200 transition-colors"
+                    >
+                        Search
+                    </button>
+                </form>
                 <Link
                     href="/"
                     className="px-8 py-4 bg-white text-black rounded-full font-bold hover:bg-gray-200 transition-colors shadow-xl"

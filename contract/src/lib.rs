@@ -249,9 +249,16 @@ mod upgrade_carbon_identity_crosschain_tests;
 
 #[cfg(test)]
 mod merchandise_nft_tests;
+
+#[cfg(test)]
+mod certification_analytics_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
+    AnonymousSurveySubmitted, SurveyResultsCompiled,
+    ScheduleVoteCast, ScheduleVoteFinalized, ScheduleVoteInitialized,
+    PromoCodeApplied, PromoCodeCreated,
     AttendanceMemorabiliaMinted, AttendanceVerificationFailed, AttendanceVerified,
     BlockchainIdentityVerified,
     BridgeTransactionValidated, CarbonFootprintCalculated, CarbonOffsetPurchased,
@@ -260,28 +267,32 @@ pub use events::{
     CrossChainTransferInitiated, EnvironmentalImpactUpdated, EventCancelled, EventMetadataUpdated,
     EventSalesPaused, EventSalesResumed, IdentityCredentialIssued, IdentityCredentialRevoked,
     InsuranceClaimProcessed, InsurancePoolUpdated, InsurancePurchased, MemorabiliaClaimed,
-    MerchandiseCreated,
+    MerchandiseCreated, MerchandiseLinkedToTicket, MerchandisePreordered,
     MerchandisePurchased, NftMinted, NftTraded, PriceCeilingSet, ReputationUpdated,
     ResaleComplianceEnforced, ResalePriceVerified, ReviewSubmitted,
+    SeatUpgradeBidPlaced, SeatUpgradeBidRefunded, SeatUpgradeBidResolved,
     TicketDidLinked, TicketDidRevoked, TransferEvent,
     UpgradeExecuted, UpgradeGovernanceConfigUpdated, UpgradeProposed, UpgradeVoteCast,
     VenueSpaceAllocated, SpaceUtilizationOptimized, VenueConflictManaged,
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
-    EmailCampaignCreated, MarketingEmailsSent, EmailAnalyticsUpdated,
+    WaitlistOfferExpired, WaitlistSpotReleased,
+    EventCertificateIssued, CertificationStandardUpdated,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
 pub use types::{
+    AnonymousSurveyResponse, SurveyResults,
+    ScheduleVote, ScheduleVoteCastRecord,
+    PromoCode,
     BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
     CollectibleInventory, CrossChainTransfer, CrossChainTransferStatus, EnvironmentalImpact,
     Event, EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,
-    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, NftCollectible,
+    IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
     OrganizerReputation,
-    RarityTier, ResalePriceCeiling, Ticket as LumentixTicket, TicketDidAssociation,
+    RarityTier, ResalePriceCeiling, SeatUpgradeBid, Ticket as LumentixTicket, TicketDidAssociation,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
-    UserPreferences,
-    EmailCampaign, EmailCampaignStatus, EmailCampaignAnalytics,
+    UserPreferences, CertificationStandard, EventCertificate,
 };

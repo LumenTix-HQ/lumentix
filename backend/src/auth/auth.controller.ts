@@ -132,24 +132,15 @@ export class AuthController {
     return this.authService.requestWalletChallenge(dto.publicKey);
   }
 
-  @Post('wallet-login')
+  @Post('wallet-verify')
+  @SkipThrottle()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login or link wallet with signed challenge' })
-  async walletLogin(@Body() dto: { publicKey: string; signature: string }) {
-    return this.authService.walletLogin(dto.publicKey, dto.signature);
+  @ApiOperation({ summary: 'Verify a signed wallet challenge and issue JWT tokens' })
+  async walletVerify(@Body() dto: WalletVerifyDto) {
+    return this.authService.walletLogin(dto.publicKey, dto.nonce, dto.signature);
   }
 
   // ─── Google OAuth ────────────────────────────────────────────────────────
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Generate wallet challenge nonce' })
-  @ApiResponse({ status: 201, description: 'Nonce generated' })
-  async walletChallenge(
-    @Req() req: AuthenticatedRequest,
-  ): Promise<WalletChallengeResponseDto> {
-    const result = await this.authService.generateWalletChallenge(req.user.id);
-    return { nonce: result.nonce, message: result.message };
-  }
 
   @Get('google')
   @UseGuards(GoogleAuthGuard)

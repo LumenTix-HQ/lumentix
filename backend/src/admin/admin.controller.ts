@@ -41,6 +41,9 @@ import { RejectRoleRequestDto } from './dto/reject-role-request.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 @Controller('admin')
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Admin resource not found' })
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,
@@ -132,6 +135,13 @@ export class AdminController {
     return this.adminService.softDeleteUser(id);
   }
 
+  @Post('users/:id/restore')
+  @ApiOperation({ summary: 'Restore a soft-deleted user' })
+  @ApiResponse({ status: 200, description: 'User restored' })
+  restoreUser(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.restoreUser(id);
+  }
+
   @Patch('users/:id/unblock')
   @ApiOperation({ summary: 'Unblock a user' })
   @ApiResponse({ status: 200, description: 'User unblocked successfully' })
@@ -189,5 +199,32 @@ export class AdminController {
   @ApiOperation({ summary: 'Get platform Stellar account balance' })
   getPlatformBalance() {
     return this.stellarService.getPlatformBalanceInfo();
+  }
+
+  @Get('stellar/dlq')
+  @ApiOperation({
+    summary: 'List unmatched Stellar Horizon events',
+    description:
+      'Admin-only. Returns all events in the dead-letter queue that could not ' +
+      'be matched to a pending payment or sponsor contribution.',
+  })
+  @ApiResponse({ status: 200, description: 'DLQ items retrieved' })
+  listStellarDlq() {
+    return this.adminService.listStellarDlq();
+  }
+
+  @Post('stellar/dlq/:id/retry')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Retry a specific dead-lettered Stellar event',
+    description:
+      'Admin-only. Re-attempts to match the DLQ item to a pending payment or ' +
+      'sponsor contribution.',
+  })
+  @ApiParam({ name: 'id', description: 'DLQ item UUID' })
+  @ApiResponse({ status: 200, description: 'DLQ item requeued' })
+  @ApiResponse({ status: 404, description: 'DLQ item not found' })
+  retryStellarDlqItem(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.retryStellarDlqItem(id);
   }
 }

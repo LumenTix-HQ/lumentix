@@ -157,6 +157,23 @@ export class TicketsController {
   ) {
     return this.ticketsService.confirmTransfer(ticketId, req.user.id, dto);
   }
+
+  @Post('verify-qr')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Verify QR code for physical event check-in',
+    description:
+      'Authenticated organizer/admin. Scans a ticket QR code, validates signature, and marks the ticket as used.',
+  })
+  @ApiBody({ schema: { properties: { qrData: { type: 'string', description: 'JSON-encoded QR payload with ticketId and signature' } }, required: ['qrData'] } })
+  @ApiResponse({ status: 200, description: 'Ticket checked in successfully with attendee info' })
+  @ApiResponse({ status: 400, description: 'Invalid QR data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized or invalid signature' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  verifyQr(@Body('qrData') qrData: string) {
+    return this.ticketsService.verifyQrCheckIn(qrData);
+  }
 }
 
 @ApiTags('Tickets')
