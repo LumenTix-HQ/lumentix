@@ -23,6 +23,11 @@ export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0.00 })
+  carbonOffsetAmount: number;
+
+  
   @Index() // NEW
   @Index()
   @Column({ nullable: true })
