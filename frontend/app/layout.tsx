@@ -5,6 +5,7 @@ import { WalletProvider } from "@/contexts/WalletContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { NetworkMismatchBanner } from "@/components/NetworkMismatchBanner";
 import ToastContainer from "@/components/Toast";
+import AnalyticsConsentBanner from "@/components/AnalyticsConsentBanner";
 import { Providers } from "./providers";
 import ServiceWorkerRegister from "./ServiceWorkerRegister";
 
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Navbar />
               {children}
               <ToastContainer />
+              <AnalyticsConsentBanner />
               <ServiceWorkerRegister />
             </Providers>
           </WalletProvider>
