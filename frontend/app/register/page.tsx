@@ -114,8 +114,10 @@ export default function RegisterPage() {
 
   const field = (name: keyof FormData, label: string, type = 'text', placeholder = '') => (
     <div>
-      <label className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
+      <label htmlFor={name} className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
       <input
+        id={name}
+        name={name}
         type={type}
         value={form[name] as string}
         onChange={set(name)}
@@ -148,8 +150,10 @@ export default function RegisterPage() {
             {field('displayName', 'Display name (optional)', 'text', 'Your name')}
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Password</label>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">Password</label>
               <input
+                id="password"
+                name="password"
                 type="password"
                 value={form.password}
                 onChange={set('password')}

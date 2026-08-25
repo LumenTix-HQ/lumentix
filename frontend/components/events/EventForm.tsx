@@ -133,7 +133,7 @@ export default function EventForm({
                 {/* Title */}
                 <div>
                     <label className="mb-2 block text-sm text-gray-300">Event Title</label>
-                    <input type="text" placeholder="Lumentix Builder Summit" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("title")} />
+                    <input type="text" placeholder="Lumentix Builder Summit" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" aria-label="Event Title" {...register("title")} />
                     {errors.title ? <p className="mt-1 text-xs text-red-300">{errors.title.message}</p> : null}
                 </div>
 
@@ -180,14 +180,14 @@ export default function EventForm({
                 {/* Location */}
                 <div>
                     <label className="mb-2 block text-sm text-gray-300">Location</label>
-                    <input type="text" placeholder="Accra, Ghana" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("location")} />
+                    <input type="text" placeholder="Accra, Ghana" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" aria-label="Location" {...register("location")} />
                     {errors.location ? <p className="mt-1 text-xs text-red-300">{errors.location.message}</p> : null}
                 </div>
 
                 {/* Description */}
                 <div>
                     <label className="mb-2 block text-sm text-gray-300">Description</label>
-                    <textarea rows={4} placeholder="Describe the event agenda and audience..." className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("description")} />
+                    <textarea rows={4} placeholder="Describe the event agenda and audience..." className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" aria-label="Description" {...register("description")} />
                     {errors.description ? <p className="mt-1 text-xs text-red-300">{errors.description.message}</p> : null}
                 </div>
 
@@ -195,17 +195,17 @@ export default function EventForm({
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div>
                         <label className="mb-2 block text-sm text-gray-300">Ticket Price</label>
-                        <input type="number" min="0" step="0.0001" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("ticketPrice", { valueAsNumber: true })} />
+                        <input type="number" min="0" step="0.0001" className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" aria-label="Ticket Price" {...register("ticketPrice", { valueAsNumber: true })} />
                         {errors.ticketPrice ? <p className="mt-1 text-xs text-red-300">{errors.ticketPrice.message}</p> : null}
                     </div>
                     <div>
                         <label className="mb-2 block text-sm text-gray-300">Currency</label>
-                        <input type="text" maxLength={3} className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm uppercase outline-none transition-all focus:border-purple-400" {...register("currency")} />
+                        <input type="text" maxLength={3} className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm uppercase outline-none transition-all focus:border-purple-400" aria-label="Currency" {...register("currency")} />
                         {errors.currency ? <p className="mt-1 text-xs text-red-300">{errors.currency.message}</p> : null}
                     </div>
                     <div>
                         <label className="mb-2 block text-sm text-gray-300">Status</label>
-                        <select className="w-full rounded-xl border border-white/15 bg-gray-900 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" {...register("status")}>
+                        <select className="w-full rounded-xl border border-white/15 bg-gray-900 px-4 py-3 text-sm outline-none transition-all focus:border-purple-400" aria-label="Status" {...register("status")}>
                             <option value="draft">Draft</option>
                             <option value="published">Published</option>
                             <option value="completed">Completed</option>
