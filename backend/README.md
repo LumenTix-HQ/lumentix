@@ -59,7 +59,7 @@ cp .env.example .env
 
 # update env values
 # then run migrations
-npm run typeorm:migration:run
+npm run migration:run
 
 # start dev server
 npm run start:dev
@@ -71,10 +71,10 @@ API runs at:
 http://localhost:3000
 ```
 
-Swagger docs:
+Swagger docs (development only):
 
 ```
-http://localhost:3000/api-docs
+http://localhost:3000/api
 ```
 
 ---
@@ -86,34 +86,30 @@ lumentix-backend/
 ├── src/
 │   ├── main.ts
 │   ├── app.module.ts
+│   ├── app.controller.ts
+│   ├── app.service.ts
 │
-│   ├── config/
-│   │   ├── database.config.ts
-│   │   └── stellar.config.ts
+│   ├── config/               # env validation
+│   ├── common/               # guards, filters, interceptors, decorators, etc.
+│   ├── database/             # data-source & migrations
 │
-│   ├── common/
-│   │   ├── guards/
-│   │   ├── filters/
-│   │   ├── interceptors/
-│   │   └── decorators/
+│   ├── auth/
+│   ├── users/
+│   ├── events/
+│   ├── payments/
+│   ├── tickets/
+│   ├── registrations/
+│   ├── sponsors/
+│   ├── stellar/
+│   ├── wallet/
+│   ├── notifications/
+│   ├── analytics/
+│   ├── categories/
+│   ├── currencies/
+│   ├── reviews/
+│   ├── social/
+│   └── ...                   # additional feature modules
 │
-│   ├── modules/
-│   │   ├── auth/
-│   │   │   ├── auth.module.ts
-│   │   │   ├── auth.controller.ts
-│   │   │   ├── auth.service.ts
-│   │   │   └── dto/
-│   │
-│   │   ├── users/
-│   │   ├── events/
-│   │   ├── payments/
-│   │   ├── sponsors/
-│   │   ├── tickets/
-│   │
-│   │   └── stellar/
-│   │       └── stellar.service.ts
-│
-├── test/
 ├── .env.example
 ├── package.json
 └── README.md
@@ -317,8 +313,10 @@ Swagger is enabled in `main.ts`:
 Docs available at:
 
 ```
-/api-docs
+/api
 ```
+
+> Swagger is only served in non-production environments.
 
 ---
 
@@ -348,13 +346,13 @@ Docs available at:
 
 ```bash
 # generate migration
-npm run typeorm:migration:generate -- src/database/migrations/init
+npm run migration:generate -- src/database/migrations/init
 
 # run migration
-npm run typeorm:migration:run
+npm run migration:run
 
 # revert
-npm run typeorm:migration:revert
+npm run migration:revert
 ```
 
 ---

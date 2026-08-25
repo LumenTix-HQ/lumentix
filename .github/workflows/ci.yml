@@ -96,3 +96,32 @@ jobs:
       - name: Lint
         working-directory: backend
         run: npm run lint
+
+  readme-script-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check README script names match package.json
+        run: |
+          # Extract all "npm run <script>" references from the README
+          readme_scripts=$(grep -oP '(?<=npm run )[a-zA-Z0-9:_-]+' backend/README.md | sort -u)
+
+          # Extract actual script names from package.json
+          package_scripts=$(node -e "const p=require('./backend/package.json'); console.log(Object.keys(p.scripts).join('\n'))" | sort -u)
+
+          # Check each referenced script exists in package.json
+          missing=()
+          while IFS= read -r script; do
+            if ! echo "$package_scripts" | grep -qx "$script"; then
+              missing+=("$script")
+            fi
+          done <<< "$readme_scripts"
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ README references scripts not found in package.json:"
+            printf '  - %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+          echo "✅ All README npm run commands exist in package.json"
