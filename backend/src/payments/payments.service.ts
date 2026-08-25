@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, In } from 'typeorm';
+import { Horizon } from '@stellar/stellar-sdk';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { paginate } from '../common/pagination/pagination.helper';
@@ -227,7 +228,7 @@ export class PaymentsService {
     ) {
       try {
         const user = await this.userRepository.findOne({ where: { id: userId } });
-        const userPublicKey = (user as any)?.stellarPublicKey;
+        const userPublicKey = user?.stellarPublicKey ?? null;
         if (userPublicKey) {
           const pathResult = await this.stellarService.findPaymentPath(
             userPublicKey,
@@ -238,8 +239,8 @@ export class PaymentsService {
           if (pathResult) {
             pathPayment = {
               sendAsset: sourceAsset,
-              sendAmount: (pathResult as any).source_amount ?? String(finalPrice),
-              path: (pathResult as any).path ?? [],
+              sendAmount: pathResult.source_amount ?? String(finalPrice),
+              path: pathResult.path ?? [],
             };
           }
         }
@@ -350,7 +351,7 @@ export class PaymentsService {
     userId: string,
   ): Promise<Payment> {
 
-    let txRecord: any;
+    let txRecord: Horizon.ServerApi.TransactionRecord;
     try {
       txRecord = await this.stellarService.getTransaction(transactionHash);
     } catch {
@@ -456,7 +457,9 @@ export class PaymentsService {
       },
     });
 
-    this.webhooksService.queueDelivery(event as Event, confirmed).catch(() => undefined);
+    if (event) {
+      this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+    }
 
     return confirmed;
   }
@@ -488,13 +491,13 @@ export class PaymentsService {
       destAmount,
     );
 
-    return records.map((record: any, index: number) => ({
+    return records.map((record: Horizon.ServerApi.PaymentPathRecord, index: number) => ({
       rank: index + 1,
       sourceAmount: record.source_amount,
       sourceAsset: sourceAsset,
       destinationAmount: record.destination_amount,
       destinationAsset: destAsset,
-      path: (record.path ?? []).map((a: any) =>
+      path: (record.path ?? []).map((a: { asset_code?: string; asset_issuer?: string }) =>
         a.asset_code ? `${a.asset_code}:${a.asset_issuer}` : 'native',
       ),
     }));

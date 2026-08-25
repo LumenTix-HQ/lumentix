@@ -7,6 +7,7 @@ import {
   Post,
   Req,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -21,6 +22,7 @@ import { MobilePaymentsService } from './mobile-payments.service';
 import { ProcessMobilePaymentDto } from './dto/process-mobile-payment.dto';
 import { HandleCallbackDto } from './dto/handle-callback.dto';
 import { MobilePaymentResponseDto } from './dto/mobile-payment-response.dto';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
 @ApiTags('Mobile Payments')
 @ApiBearerAuth()
@@ -33,6 +35,7 @@ export class MobilePaymentsController {
   ) {}
 
   @Post('process')
+  @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
     summary: 'Process a mobile wallet payment',
     description:
