@@ -80,6 +80,9 @@ export default function QRModal({ qrUrl, ticketTitle, onClose }: QRModalProps) {
         </div>
 
         <div className="bg-white rounded-xl p-3">
+          {/* Intentionally a plain <img>: qrUrl is a locally-generated data URI,
+              so next/image optimization does not apply. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={qrUrl}
             alt={`QR code for ${ticketTitle}`}
