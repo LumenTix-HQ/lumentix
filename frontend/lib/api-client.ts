@@ -1,4 +1,10 @@
+import type { Event, PaginatedResponse } from "@/types/event";
+import type { CreateEventFormValues } from "@/lib/schemas/create-event.schema";
+
 const PROXY_BASE = "/api/proxy";
+
+/** The events list endpoint may return a bare array or a paginated envelope. */
+export type EventsResponse = Event[] | PaginatedResponse<Event>;
 
 class ApiProxyError extends Error {
   status: number;
@@ -93,16 +99,16 @@ export const apiClient = {
 
   getEvents: (params?: Record<string, string>) => {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return request<any>(`/events${qs}`);
+    return request<EventsResponse>(`/events${qs}`);
   },
-  getEvent: (id: string) => request<any>(`/events/${id}`),
-  createEvent: (body: any) =>
-    request<any>("/events", {
+  getEvent: (id: string) => request<Event>(`/events/${id}`),
+  createEvent: (body: CreateEventFormValues) =>
+    request<Event>("/events", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  patchEvent: (id: string, body: any) =>
-    request<any>(`/events/${id}`, {
+  patchEvent: (id: string, body: Partial<CreateEventFormValues>) =>
+    request<Event>(`/events/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),

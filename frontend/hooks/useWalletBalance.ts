@@ -54,7 +54,9 @@ export function useWalletBalance(): WalletBalanceInfo {
       const { Horizon } = await import('@stellar/stellar-sdk');
       const server = new Horizon.Server(HORIZON_URLS[network as NetworkType] || HORIZON_URLS[NetworkType.TESTNET]);
       const account = await server.loadAccount(publicKey);
-      const xlmBalance = account.balances.find((b: any) => b.asset_type === 'native');
+      const xlmBalance = account.balances.find(
+        (b: { asset_type: string; balance: string }) => b.asset_type === 'native',
+      );
       const balanceStr = xlmBalance?.balance ?? '0';
       setBalance(parseFloat(balanceStr));
     } catch (err) {
