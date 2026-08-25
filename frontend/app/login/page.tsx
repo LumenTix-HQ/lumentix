@@ -2,9 +2,11 @@
 
 import React, { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 
 export default function LoginPage() {
+  const t = useTranslations('Auth');
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get('redirect') || '/events';
@@ -17,7 +19,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('Please fill in all fields.');
+      setError(t('fillAllFields'));
       return;
     }
 
@@ -50,8 +52,8 @@ export default function LoginPage() {
     <main className="min-h-screen bg-gray-900 flex items-center justify-center p-4 text-white">
       <div className="bg-gray-800 border border-gray-700 p-8 rounded-2xl max-w-md w-full shadow-2xl space-y-6">
         <div className="text-center space-y-1">
-          <h1 className="text-2xl font-bold">Welcome Back</h1>
-          <p className="text-xs text-gray-400">Sign in to your LumenTix account</p>
+          <h1 className="text-2xl font-bold">{t('loginTitle')}</h1>
+          <p className="text-xs text-gray-400">{t('loginSubtitle')}</p>
         </div>
 
         {error && (
@@ -62,7 +64,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-300 mb-1">Email Address</label>
+            <label className="block text-xs font-semibold text-gray-300 mb-1">{t('emailAddress')}</label>
             <input
               type="email"
               value={email}
@@ -74,7 +76,7 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-300 mb-1">Password</label>
+            <label className="block text-xs font-semibold text-gray-300 mb-1">{t('password')}</label>
             <input
               type="password"
               value={password}
@@ -90,13 +92,13 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? t('signingIn') : t('signIn')}
           </button>
         </form>
 
         <div className="flex justify-between text-xs text-gray-400 pt-2 border-t border-gray-700">
-          <Link href="/register" className="hover:text-blue-400">Create an Account</Link>
-          <Link href="/forgot-password" className="hover:text-blue-400">Forgot Password?</Link>
+          <Link href="/register" className="hover:text-blue-400">{t('createAccount')}</Link>
+          <Link href="/forgot-password" className="hover:text-blue-400">{t('forgotPassword')}</Link>
         </div>
       </div>
     </main>
