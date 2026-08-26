@@ -2,13 +2,21 @@ import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import * as path from 'path';
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Required environment variable "${name}" is not set. Aborting.`);
+  }
+  return value;
+}
+
 export const AppDataSource = new DataSource({
   type: 'postgres',
   host: process.env.DB_HOST ?? 'localhost',
   port: parseInt(process.env.DB_PORT ?? '5432', 10),
-  username: process.env.DB_USERNAME ?? 'postgres',
-  password: process.env.DB_PASSWORD ?? 'postgres',
-  database: process.env.DB_NAME ?? 'lumentix',
+  username: requireEnv('DB_USERNAME'),
+  password: requireEnv('DB_PASSWORD'),
+  database: requireEnv('DB_NAME'),
   synchronize: false,
   logging: false,
   entities: [path.join(__dirname, '..', '**', '*.entity.{ts,js}')],
