@@ -4,7 +4,7 @@ import { solidColorPlaceholder } from '@/lib/images/blur-placeholder';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-async function getFeaturedEvents() {
+async function getFeaturedEvents(): Promise<Event[]> {
   try {
     const res = await fetch(`${API_BASE}/events?status=published&limit=6`, {
       next: { revalidate: 60 },
@@ -33,7 +33,7 @@ export default async function FeaturedEvents() {
           </p>
         ) : (
           <div className="flex gap-5 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-hide">
-            {events.map((event: any) => (
+            {events.map((event: Event) => (
               <Link
                 key={event.id}
                 href={`/events/${event.id}`}

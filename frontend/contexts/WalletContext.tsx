@@ -180,7 +180,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           : 'https://horizon-testnet.stellar.org',
       );
       const account = await server.loadAccount(state.publicKey);
-      const xlm = account.balances.find((b: any) => b.asset_type === 'native');
+      const xlm = account.balances.find(
+        (b: { asset_type: string; balance: string }) => b.asset_type === 'native',
+      );
       setState(prev => ({ ...prev, balance: xlm?.balance ?? '0' }));
     } catch { /* non-fatal */ }
   }, [state.publicKey, state.network]);
