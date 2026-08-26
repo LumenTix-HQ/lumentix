@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import { WalletProvider } from "@/contexts/WalletContext";
@@ -13,21 +15,26 @@ export const metadata: Metadata = {
   description: 'Decentralized event management platform built on Stellar blockchain',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
-    <html lang="en">
+    <html lang={locale}>
       <body className="antialiased">
-        <AuthProvider>
-          <WalletProvider>
-            <NetworkMismatchBanner />
-            <Providers>
-              <Navbar />
-              {children}
-              <ToastContainer />
-              <ServiceWorkerRegister />
-            </Providers>
-          </WalletProvider>
-        </AuthProvider>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <AuthProvider>
+            <WalletProvider>
+              <NetworkMismatchBanner />
+              <Providers>
+                <Navbar />
+                {children}
+                <ToastContainer />
+                <ServiceWorkerRegister />
+              </Providers>
+            </WalletProvider>
+          </AuthProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );
