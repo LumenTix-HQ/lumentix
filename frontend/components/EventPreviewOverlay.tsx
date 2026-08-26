@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import type { Event } from '@/types/event';
+import { solidColorPlaceholder } from '@/lib/images/blur-placeholder';
 
 // Placeholder text for unfilled fields
 const PLACEHOLDER_TEXT = '[Not provided]';
@@ -93,12 +95,16 @@ export default function EventPreviewOverlay({
         {/* Preview content */}
         <div className="p-6 space-y-6">
           {/* Image */}
-          <div className="aspect-video bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl overflow-hidden">
+          <div className="relative aspect-video bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl overflow-hidden">
             {formValues.imageUrl ? (
-              <img
+              <Image
                 src={formValues.imageUrl}
                 alt={formValues.title || 'Event preview'}
-                className="w-full h-full object-cover"
+                fill
+                sizes="(max-width: 768px) 100vw, 672px"
+                placeholder="blur"
+                blurDataURL={solidColorPlaceholder('#e0e7ff')}
+                className="object-cover"
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center">

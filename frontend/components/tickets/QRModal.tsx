@@ -20,6 +20,9 @@ export function QRModal({ isOpen, onClose, ticketId, qrUrl }: QRModalProps) {
 
         <div className="bg-white p-4 rounded-xl inline-block shadow-inner my-2">
           {qrUrl ? (
+            // Intentionally a plain <img>: qrUrl is a locally-generated data URI,
+            // so next/image optimization does not apply.
+            // eslint-disable-next-line @next/next/no-img-element
             <img src={qrUrl} alt="Ticket QR Code" className="w-48 h-48 object-contain" />
           ) : (
             <div className="w-48 h-48 bg-gray-100 flex items-center justify-center text-gray-500 font-mono text-xs text-center p-2">

@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import Image from 'next/image';
+import { solidColorPlaceholder } from '@/lib/images/blur-placeholder';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
@@ -38,11 +40,17 @@ export default async function FeaturedEvents() {
                 className="snap-start flex-none w-64 bg-white/5 border border-white/10 rounded-2xl overflow-hidden hover:border-blue-500/30 hover:bg-white/8 transition-all duration-200 group"
               >
                 {event.imageUrl ? (
-                  <img
-                    src={event.imageUrl}
-                    alt={event.title}
-                    className="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
+                  <div className="relative w-full h-36 overflow-hidden">
+                    <Image
+                      src={event.imageUrl}
+                      alt={event.title}
+                      fill
+                      sizes="256px"
+                      placeholder="blur"
+                      blurDataURL={solidColorPlaceholder('#1e293b')}
+                      className="object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  </div>
                 ) : (
                   <div className="w-full h-36 bg-gradient-to-br from-blue-600/30 to-indigo-600/30" />
                 )}
