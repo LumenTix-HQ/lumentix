@@ -1,48 +1,66 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { TelemetryService } from './telemetry.service';
-import { RecordMetricDatapointDto } from './dto/record-metric-datapoint.dto';
-import { Roles, Role } from '../common/decorators/roles.decorator';
-import { RolesGuard } from '../common/guards/roles.guard';
+import { RecordMetricDto } from './dto/record-metric.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../users/enums/user-role.enum';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 
-@ApiTags('Telemetry')
-@ApiBearerAuth()
+@ApiTags('Telemetry & Monitoring')
 @Controller('telemetry')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN)
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@ApiResponse({ status: 403, description: 'Forbidden' })
 export class TelemetryController {
   constructor(private readonly telemetryService: TelemetryService) {}
 
-  @Get('status')
+  @Post('metrics')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Fetch platform telemetry status',
-    description: 'Admin-only. Returns node ping results, average latency, uptime percentage, and recent datapoints.',
+    summary: 'Record a metric datapoint',
+    description: 'Admin-only. Records a system telemetry metric (API latency, error rate, etc).',
   })
-  @ApiResponse({ status: 200, description: 'Telemetry status summary' })
-  fetchStatus() {
-    return this.telemetryService.fetchTelemetryStatus();
+  @ApiResponse({ status: 201, description: 'Metric recorded' })
+  async recordMetric(@Body() dto: RecordMetricDto) {
+    return this.telemetryService.recordMetric(dto);
   }
 
-  @Post('ping')
+  @Get('health')
   @ApiOperation({
-    summary: 'Ping system services',
-    description: 'Admin-only. Pings the database, Redis, and Stellar Horizon, recording latency datapoints.',
+    summary: 'Get system health status',
+    description: 'Returns overall platform health based on recent metrics.',
   })
-  @ApiResponse({ status: 201, description: 'Ping results for all monitored services' })
-  ping() {
+  @ApiResponse({ status: 200, description: 'Health status' })
+  async getHealth() {
     return this.telemetryService.pingSystemServices();
   }
 
-  @Post('metrics')
+  @Get('status')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Record a telemetry metric datapoint',
-    description: 'Admin-only. Persists a custom telemetry datapoint for dashboards.',
+    summary: 'Fetch telemetry status',
+    description: 'Admin-only. Returns detailed telemetry metrics from the specified time window.',
   })
-  @ApiResponse({ status: 201, description: 'Metric datapoint recorded' })
-  recordMetric(@Body() dto: RecordMetricDatapointDto) {
-    return this.telemetryService.recordMetricDatapoint(dto);
+  @ApiResponse({ status: 200, description: 'Telemetry data' })
+  async getTelemetryStatus(
+    @Query('metricType') metricType?: string,
+    @Query('service') service?: string,
+    @Query('hoursBack', { transform: (v) => parseInt(v, 10) }) hoursBack: number = 1,
+  ) {
+    return this.telemetryService.fetchTelemetryStatus(
+      metricType as any,
+      service,
+      hoursBack,
+    );
   }
 }
