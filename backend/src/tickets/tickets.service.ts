@@ -167,11 +167,19 @@ export class TicketsService {
       const events = await this.eventRepo.find({ where: { seriesId: payment.seriesId as string } });
       if (events.length === 0) throw new BadRequestException('No events found for this series');
 
+      // Batch-fetch existing tickets for all events in this series
+      const eventIds = events.map((e) => e.id);
+      const existingTickets = await this.ticketRepo.find({
+        where: eventIds.map((eventId) => ({
+          transactionHash: payment.transactionHash,
+          eventId,
+        })),
+      });
+      const existingByEventId = new Map(existingTickets.map((t) => [t.eventId, t]));
+
       const tickets: TicketEntity[] = [];
       for (const event of events) {
-        let ticket = await this.ticketRepo.findOne({
-          where: { transactionHash: payment.transactionHash, eventId: event.id },
-        });
+        let ticket = existingByEventId.get(event.id) ?? null;
 
         if (!ticket) {
           ticket = this.ticketRepo.create({
