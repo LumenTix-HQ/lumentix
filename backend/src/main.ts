@@ -8,8 +8,11 @@ import { corsOptions, helmetOptions } from './common/security/security.config';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // ── Trust first proxy hop so req.ip is the real client IP ─────────────────
-  // app.getHttpAdapter().getInstance().set('trust proxy', 1); // ← add
+  // ── Trust proxy hops so req.ip is the real client IP ─────────────────────
+  const trustProxy = parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10);
+  if (!isNaN(trustProxy) && trustProxy >= 0) {
+    app.getHttpAdapter().getInstance().set('trust proxy', trustProxy);
+  }
 
   app.use(helmet(helmetOptions));
   app.enableCors(corsOptions);
