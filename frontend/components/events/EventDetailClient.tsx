@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Event, VipTier, SeatCategoryName } from "@/types/event";
+import { Event, VipTier, SeatCategoryName, Seat } from "@/types/event";
 import { formatPrice } from "@/types/event";
 import SeatMap from "@/components/venues/SeatMap";
 import VenueMap from "@/components/VenueMap";
@@ -27,7 +27,7 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
   const [selectedSeatId, setSelectedSeatId] = useState<string | undefined>();
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
 
-  const handleSelectSeat = (seat: any) => {
+  const handleSelectSeat = (seat: Seat) => {
     setSelectedSeatId(seat.id);
   };
 
