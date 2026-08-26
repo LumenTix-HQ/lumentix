@@ -111,10 +111,17 @@
 - [x] Comprehensive comments
 - [x] Type safety throughout
 
-## ✅ Security
+## ⚠️ Security
 
-- [x] No private key exposure
-- [x] Transactions signed in wallet
+- [ ] No private key exposure — **NOT TRUE TODAY.** `frontend/components/StellarPayment.tsx`
+  exposes a raw secret-key input field, and `frontend/lib/stellar.ts`'s
+  `signTransaction(transaction, secretKey)` accepts and signs with a raw secret
+  key outside of any wallet. This is a known custodial-key exposure risk that
+  must be removed before this claim can be checked. See the Stellar/wallet
+  consolidation work tracked in the backlog.
+- [ ] Transactions signed in wallet — partially true (Freighter path), but the
+  `StellarPayment.tsx` / `lib/stellar.ts` secret-key path above is a known
+  exception that signs outside the wallet.
 - [x] Network validation
 - [x] Public data only in storage
 - [x] Secure error messages
@@ -141,8 +148,8 @@
 
 ## ⏳ Optional Features (Not Required)
 
-- [ ] LOBSTR integration (marked as "coming soon")
-- [ ] WalletConnect integration (marked as "coming soon")
+- [x] LOBSTR integration (connector behind the `WalletType` abstraction)
+- [x] WalletConnect integration (connector behind the `WalletType` abstraction)
 - [ ] Hardware wallet support
 - [ ] Multi-signature support
 

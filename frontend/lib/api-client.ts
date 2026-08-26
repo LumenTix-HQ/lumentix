@@ -5,6 +5,8 @@ const PROXY_BASE = "/api/proxy";
 
 /** The events list endpoint may return a bare array or a paginated envelope. */
 export type EventsResponse = Event[] | PaginatedResponse<Event>;
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_BASE_RETRY_DELAY_MS = 300;
 
 class ApiProxyError extends Error {
   status: number;
@@ -15,6 +17,52 @@ class ApiProxyError extends Error {
   }
 }
 
+function isIdempotent(method?: string): boolean {
+  const m = (method ?? "GET").toUpperCase();
+  return m === "GET" || m === "HEAD";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface RetryOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+}
+
+/**
+ * fetch wrapper that retries idempotent (GET/HEAD) requests with exponential
+ * backoff on transient failures — network errors and 5xx responses — before
+ * surfacing the result. Non-idempotent requests are never retried. The retry
+ * budget is capped so a persistent failure surfaces promptly.
+ */
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit = {},
+  { maxRetries = DEFAULT_MAX_RETRIES, baseDelayMs = DEFAULT_BASE_RETRY_DELAY_MS }: RetryOptions = {},
+): Promise<Response> {
+  const retryable = isIdempotent(init.method);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (retryable && res.status >= 500 && attempt < maxRetries) {
+        await delay(baseDelayMs * 2 ** attempt);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastError = err;
+      if (!retryable || attempt === maxRetries) throw err;
+      await delay(baseDelayMs * 2 ** attempt);
+    }
+  }
+  // Unreachable for retryable requests (loop returns or throws), but keeps TS happy.
+  throw lastError instanceof Error ? lastError : new Error("Request failed");
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -23,7 +71,7 @@ async function request<T>(
   const path = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
   const url = `${PROXY_BASE}/${path}`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
