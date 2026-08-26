@@ -133,18 +133,6 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
     this.clearReconnectTimer();
 
-    this.logger.warn(
-    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      this.logger.error(
-        `Stellar Horizon stream failed ${MAX_RECONNECT_ATTEMPTS} times. Emitting STELLAR_STREAM_DEAD alert.`,
-      );
-      this.notificationService.notifyAdminDeadStream({
-        attempts: this.reconnectAttempts,
-        service: 'StellarWebhookService',
-      });
-      return;
-    }
-
     const delay = Math.min(
       INITIAL_RECONNECT_DELAY_MS * Math.pow(BACKOFF_MULTIPLIER, this.reconnectAttempts),
       MAX_RECONNECT_DELAY_MS,
@@ -153,7 +141,7 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
     this.logger.warn(`Scheduling Stellar stream reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     this.reconnectTimer = setTimeout(() => {
-      this.initStream();
+      this.connect();
     }, delay);
   }
 
