@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getAccessToken, clearTokens } from '@/lib/auth/auth';
+import { decodeJwtPayload } from '@/lib/auth/token';
 
 interface User {
   id: string;
@@ -27,10 +28,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const token = getAccessToken();
     if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setUser({ id: payload.sub, email: payload.email || 'user@example.com', role: payload.role || 'USER' });
-      } catch {
+      const payload = decodeJwtPayload(token);
+      if (payload) {
+        setUser({
+          id: payload.sub ?? '',
+          email: payload.email || 'user@example.com',
+          role: payload.role || 'USER',
+        });
+      } else {
         setUser(null);
       }
     }
