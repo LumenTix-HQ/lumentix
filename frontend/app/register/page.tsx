@@ -74,12 +74,25 @@ export default function RegisterPage() {
     } catch {
       setServerError('Something went wrong. Please try again.');
     }
-  });
+  };
 
-  const inputClass = (hasError: boolean) =>
-    `w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-      hasError ? 'border-red-500/50' : 'border-white/10'
-    }`;
+  const field = (name: keyof FormData, label: string, type = 'text', placeholder = '') => (
+    <div>
+      <label htmlFor={name} className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
+      <input
+        id={name}
+        name={name}
+        type={type}
+        value={form[name] as string}
+        onChange={set(name)}
+        placeholder={placeholder}
+        className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+          errors[name] ? 'border-red-500/50' : 'border-white/10'
+        }`}
+      />
+      {errors[name] && <p className="text-red-400 text-xs mt-1">{errors[name]}</p>}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[#060609] text-white flex items-center justify-center px-4">
@@ -122,8 +135,10 @@ export default function RegisterPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Password</label>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">Password</label>
               <input
+                id="password"
+                name="password"
                 type="password"
                 placeholder="Min 8 characters, at least 1 number"
                 className={inputClass(!!errors.password)}
