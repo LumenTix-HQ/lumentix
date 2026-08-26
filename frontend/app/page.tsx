@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import FeaturedEvents from '@/components/FeaturedEvents';
 import Footer from '@/components/Footer';
 
@@ -51,6 +52,7 @@ const FEATURES = [
 ];
 
 export default function Home() {
+  const t = useTranslations('HomePage');
   return (
     <>
     <main className="min-h-screen bg-[#060609] text-white">
@@ -66,26 +68,26 @@ export default function Home() {
         <div className="text-center mb-20">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-6">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-            Built on Stellar
+            {t('badge')}
           </div>
           <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 mb-6 leading-tight">
-            Lumentix
+            {t('title')}
           </h1>
           <p className="text-gray-400 text-lg sm:text-xl max-w-2xl mx-auto mb-10">
-            The decentralized event platform where every ticket, payment, review, and insurance policy lives on the blockchain.
+            {t('subtitle')}
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
               href="/events"
               className="px-8 py-3.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors"
             >
-              Discover Events
+              {t('discover')}
             </Link>
             <Link
               href="/create"
               className="px-8 py-3.5 rounded-full border border-white/[0.15] hover:border-white/[0.3] text-gray-300 hover:text-white font-semibold transition-colors"
             >
-              Host an Event
+              {t('host')}
             </Link>
           </div>
         </div>
@@ -124,7 +126,7 @@ export default function Home() {
 
       {/* How it works */}
       <div className="max-w-5xl mx-auto px-4 py-16">
-        <h2 className="text-2xl md:text-3xl font-bold text-white text-center mb-12">How It Works</h2>
+        <h2 className="text-2xl md:text-3xl font-bold text-white text-center mb-12">{t('howItWorks')}</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {[
             { n: '1', title: 'Create an Event', desc: 'Set up your event with details, ticket price, and capacity. A Stellar escrow account is created automatically.' },

@@ -29,7 +29,7 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
   const [error, setError] = useState<string | null>(null);
   const [taxResult, setTaxResult] = useState<TaxCalculationResult | null>(null);
 
-  const { status: paymentStatus } = usePaymentStatus(paymentId);
+  const { status: paymentStatus, timedOut: statusTimedOut } = usePaymentStatus(paymentId);
   const { networkMismatch } = useWallet();
 
   // Use tax-inclusive price for insufficiency check when tax has been calculated
@@ -57,6 +57,15 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
         >
           Download Ticket
         </a>
+      </div>
+    );
+  }
+
+  if (statusTimedOut && paymentStatus !== 'CONFIRMED' && paymentStatus !== 'FAILED') {
+    return (
+      <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 p-3 rounded-xl text-sm text-center">
+        Your payment is still processing. This is taking longer than expected — check back
+        later in <a href={`/my-tickets?paymentId=${paymentId}`} className="underline font-medium">My Tickets</a>.
       </div>
     );
   }

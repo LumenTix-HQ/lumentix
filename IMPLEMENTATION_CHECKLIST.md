@@ -148,8 +148,8 @@
 
 ## ⏳ Optional Features (Not Required)
 
-- [ ] LOBSTR integration (marked as "coming soon")
-- [ ] WalletConnect integration (marked as "coming soon")
+- [x] LOBSTR integration (connector behind the `WalletType` abstraction)
+- [x] WalletConnect integration (connector behind the `WalletType` abstraction)
 - [ ] Hardware wallet support
 - [ ] Multi-signature support
 
