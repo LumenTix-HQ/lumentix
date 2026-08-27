@@ -2,14 +2,16 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
   Inject,
+  Logger,
   forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import * as qrcode from 'qrcode';
 
 import { TicketEntity } from './entities/ticket.entity';
@@ -17,15 +19,23 @@ import { TicketSigningService } from './ticket-signing.service';
 import { TicketPdfService } from './ticket-pdf.service';
 import { IssueTicketResponseDto } from './dto/issue-ticket-response.dto';
 import { BulkIssueResultDto } from './dto/bulk-issue-result.dto';
+import { ConfirmTransferDto } from './dto/confirm-transfer.dto';
+import { TransferTicketDto } from './dto/transfer-ticket.dto';
 import { PaymentsService } from '../payments/payments.service';
-import { PaymentStatus } from '../payments/entities/payment.entity';
+import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
+import { Event } from '../events/entities/event.entity';
+import { EventSeries } from '../events/entities/event-series.entity';
 import { StellarService } from '../stellar/stellar.service';
 import { NotificationService } from '../notifications/notification.service';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class TicketsService {
+  private readonly logger = new Logger(TicketsService.name);
+
   constructor(
     @InjectRepository(TicketEntity)
     private readonly ticketRepo: Repository<TicketEntity>,
@@ -36,8 +46,12 @@ export class TicketsService {
     private readonly ticketSigningService: TicketSigningService,
     private readonly ticketPdfService: TicketPdfService,
     private readonly notificationService: NotificationService,
+    private readonly auditService: AuditService,
+    private readonly dataSource: DataSource,
     @InjectRepository(Event)
     private readonly eventRepo: Repository<Event>,
+    @InjectRepository(EventSeries)
+    private readonly eventSeriesRepo: Repository<EventSeries>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
   ) {}
@@ -97,10 +111,27 @@ export class TicketsService {
   async findByOwner(ownerId: string, paginationDto: any) {
     const queryBuilder = this.ticketRepo
       .createQueryBuilder('ticket')
+      .leftJoinAndMapOne('ticket.event', Event, 'event', 'event.id = ticket.eventId')
+      .leftJoinAndMapOne('ticket.payment', Payment, 'payment', 'payment.transactionHash = ticket.transactionHash')
       .where('ticket.ownerId = :ownerId', { ownerId })
       .orderBy('ticket.createdAt', 'DESC');
 
-    return paginate(queryBuilder, paginationDto, 'ticket');
+    if (paginationDto?.status) {
+      queryBuilder.andWhere('ticket.status = :status', { status: paginationDto.status });
+    }
+
+    const result = await paginate(queryBuilder, paginationDto, 'ticket');
+
+    const now = new Date();
+    const enriched = result.data.map((ticket: any) => ({
+      ...ticket,
+      isExpired:
+        ticket.status === 'valid' &&
+        ticket.event?.endDate instanceof Date &&
+        ticket.event.endDate < now,
+    }));
+
+    return { ...result, data: enriched };
   }
 
   async issueTicket(paymentId: string): Promise<IssueTicketResponseDto> {
@@ -114,42 +145,8 @@ export class TicketsService {
       throw new BadRequestException('Payment has no transaction hash');
     }
 
-    // ── Capacity enforcement ───────────────────────────────────────────────
-    const event = await this.eventRepo.findOne({ where: { id: payment.eventId } });
-    if (!event) throw new NotFoundException('Event not found');
-
-    if (event.maxAttendees !== null) {
-      const soldCount = await this.ticketRepo.count({
-        where: { eventId: payment.eventId, status: 'valid' },
-      });
-      if (soldCount >= event.maxAttendees) {
-        throw new BadRequestException('This event is sold out.');
-      }
-    }
-
-    const existing = await this.ticketRepo.findOne({
-      where: { transactionHash: payment.transactionHash },
-    });
-    if (existing) {
-      const signature = this.ticketSigningService.sign(existing.id);
-      const qrPayload = JSON.stringify({ ticketId: existing.id, signature });
-      const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
-      return {
-        ticket: existing,
-        signature,
-        qrCodeDataUrl,
-        pdfUrl: existing.pdfUrl,
-        ownerId: existing.ownerId,
-        assetCode: existing.assetCode,
-        status: existing.status,
-        transactionHash: existing.transactionHash as string,
-      };
-    }
-
     const tx = await this.stellarService.getTransaction(payment.transactionHash);
-
-    const memoValue: string | undefined =
-      typeof tx.memo === 'string' ? tx.memo : undefined;
+    const memoValue: string | undefined = typeof tx.memo === 'string' ? tx.memo : undefined;
 
     if (!memoValue) {
       throw new BadRequestException(
@@ -163,49 +160,150 @@ export class TicketsService {
       );
     }
 
-    const ticket = this.ticketRepo.create({
-      eventId: payment.eventId,
-      ownerId: payment.userId,
-      assetCode: payment.currency,
-      transactionHash: payment.transactionHash,
-      status: 'valid',
-    });
-
-    const saved = await this.ticketRepo.save(ticket);
-    const signature = this.ticketSigningService.sign(saved.id);
-    const qrPayload = JSON.stringify({ ticketId: saved.id, signature });
-    const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
-
     const user = await this.userRepo.findOne({ where: { id: payment.userId } });
-    if (user && event) {
-      try {
-        const pdfBuffer = await this.ticketPdfService.generate(saved, event, user, qrCodeDataUrl);
-        pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString('base64')}`;
-        saved.pdfUrl = pdfUrl;
-        await this.ticketRepo.save(saved);
-      } catch {
-        // PDF generation failure is non-fatal
+    if (!user) throw new NotFoundException('User not found');
+
+    if (payment.isSeasonPass) {
+      const events = await this.eventRepo.find({ where: { seriesId: payment.seriesId as string } });
+      if (events.length === 0) throw new BadRequestException('No events found for this series');
+
+      // Batch-fetch existing tickets for all events in this series
+      const eventIds = events.map((e) => e.id);
+      const existingTickets = await this.ticketRepo.find({
+        where: eventIds.map((eventId) => ({
+          transactionHash: payment.transactionHash,
+          eventId,
+        })),
+      });
+      const existingByEventId = new Map(existingTickets.map((t) => [t.eventId, t]));
+
+      const tickets: TicketEntity[] = [];
+      for (const event of events) {
+        let ticket = existingByEventId.get(event.id) ?? null;
+
+        if (!ticket) {
+          ticket = this.ticketRepo.create({
+            eventId: event.id,
+            ownerId: payment.userId,
+            assetCode: payment.currency,
+            transactionHash: payment.transactionHash,
+            status: 'valid',
+          });
+          ticket = await this.ticketRepo.save(ticket);
+
+          const signature = this.ticketSigningService.sign(ticket.id);
+          const qrPayload = JSON.stringify({ ticketId: ticket.id, signature });
+          const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
+
+          let pdfUrl: string | null = null;
+          try {
+            pdfUrl = await this.ticketPdfService.generate(
+              ticket,
+              event,
+              user.email,
+              qrCodeDataUrl,
+            );
+            ticket.pdfUrl = pdfUrl;
+            await this.ticketRepo.save(ticket);
+          } catch (err) {
+            // PDF generation non-fatal
+          }
+
+          await this.notificationService.queueTicketEmail({
+            userId: user.id,
+            email: user.email,
+            ticketId: ticket.id,
+            eventName: event.title,
+            pdfUrl: pdfUrl ?? undefined,
+          });
+        }
+        tickets.push(ticket);
       }
 
-      await this.notificationService.queueTicketEmail({
-        userId: user.id,
-        email: user.email,
-        ticketId: saved.id,
-        eventName: event.title,
-        pdfUrl: pdfUrl ?? undefined,
-      });
-    }
+      const firstTicket = tickets[0];
+      const signature = this.ticketSigningService.sign(firstTicket.id);
+      const qrPayload = JSON.stringify({ ticketId: firstTicket.id, signature });
+      const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
 
-    return {
-      ticket: saved,
-      signature,
-      qrCodeDataUrl,
-      pdfUrl,
-      ownerId: saved.ownerId,
-      assetCode: saved.assetCode,
-      status: saved.status,
-      transactionHash: saved.transactionHash as string,
-    };
+      return {
+        ticket: firstTicket,
+        signature,
+        qrCodeDataUrl,
+        pdfUrl: firstTicket.pdfUrl,
+        ownerId: firstTicket.ownerId,
+        assetCode: firstTicket.assetCode,
+        status: firstTicket.status,
+        transactionHash: firstTicket.transactionHash as string,
+      };
+    } else {
+      const event = await this.eventRepo.findOne({ where: { id: payment.eventId as string } });
+      if (!event) throw new NotFoundException('Event not found');
+
+      if (event.maxAttendees !== null) {
+        const soldCount = await this.ticketRepo.count({
+          where: { eventId: payment.eventId as string, status: 'valid' },
+        });
+        if (soldCount >= event.maxAttendees) {
+          throw new BadRequestException('This event is sold out.');
+        }
+      }
+
+      let ticket = await this.ticketRepo.findOne({
+        where: { transactionHash: payment.transactionHash, eventId: payment.eventId as string },
+      });
+
+      if (!ticket) {
+        ticket = this.ticketRepo.create({
+          eventId: payment.eventId as string,
+          ownerId: payment.userId,
+          assetCode: payment.currency,
+          transactionHash: payment.transactionHash,
+          status: 'valid',
+        });
+        ticket = await this.ticketRepo.save(ticket);
+
+        const signature = this.ticketSigningService.sign(ticket.id);
+        const qrPayload = JSON.stringify({ ticketId: ticket.id, signature });
+        const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
+
+        let pdfUrl: string | null = null;
+        try {
+          pdfUrl = await this.ticketPdfService.generate(
+            ticket,
+            event,
+            user.email,
+            qrCodeDataUrl,
+          );
+          ticket.pdfUrl = pdfUrl;
+          await this.ticketRepo.save(ticket);
+        } catch (err) {
+          // PDF generation non-fatal
+        }
+
+        await this.notificationService.queueTicketEmail({
+          userId: user.id,
+          email: user.email,
+          ticketId: ticket.id,
+          eventName: event.title,
+          pdfUrl: pdfUrl ?? undefined,
+        });
+      }
+
+      const signature = this.ticketSigningService.sign(ticket.id);
+      const qrPayload = JSON.stringify({ ticketId: ticket.id, signature });
+      const qrCodeDataUrl = await qrcode.toDataURL(qrPayload);
+
+      return {
+        ticket,
+        signature,
+        qrCodeDataUrl,
+        pdfUrl: ticket.pdfUrl,
+        ownerId: ticket.ownerId,
+        assetCode: ticket.assetCode,
+        status: ticket.status,
+        transactionHash: ticket.transactionHash as string,
+      };
+    }
   }
 
   async bulkIssueTickets(paymentIds: string[]): Promise<BulkIssueResultDto[]> {
@@ -254,6 +352,10 @@ export class TicketsService {
   }
 
   async transferTicket(
+    ticketId: string,
+    callerOwnerId: string,
+    newOwnerId: string,
+  ): Promise<TicketEntity> {
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
@@ -266,6 +368,297 @@ export class TicketsService {
     }
 
     ticket.ownerId = newOwnerId;
+    return this.ticketRepo.save(ticket);
+  }
+
+  /**
+   * Transfer a ticket to a new owner, recording the transfer on-chain (Stellar)
+   * and writing an audit event. The DB update is rolled back if Stellar fails.
+   */
+  async initiateTransfer(
+    ticketId: string,
+    requesterId: string,
+    dto: TransferTicketDto,
+  ): Promise<{ xdr: string }> {
+    // ── Validate ─────────────────────────────────────────────────────────────
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.ownerId !== requesterId) {
+      throw new ForbiddenException('You do not own this ticket');
+    }
+
+    if (ticket.status !== 'valid') {
+      throw new BadRequestException(
+        `Ticket cannot be transferred (status: ${ticket.status})`,
+      );
+    }
+
+    // Prevent double-transfer by checking transfer history for this recipient
+    const alreadyTransferred = ticket.transferHistory?.some(
+      (h) => h.to === dto.recipientUserId,
+    );
+    if (alreadyTransferred) {
+      throw new BadRequestException(
+        'Ticket has already been transferred to this recipient',
+      );
+    }
+
+    // Ensure the event has not already started
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Associated event not found');
+
+    if (new Date(event.startDate) <= new Date()) {
+      throw new BadRequestException(
+        'Cannot transfer a ticket after the event has started',
+      );
+    }
+
+    const recipient = await this.userRepo.findOne({ where: { id: dto.recipientUserId } });
+    if (!recipient) throw new NotFoundException('Recipient user not found');
+    if (!recipient.stellarPublicKey) {
+      throw new BadRequestException('Recipient does not have a linked Stellar wallet.');
+    }
+
+    if (recipient.stellarPublicKey !== dto.recipientPublicKey) {
+      throw new BadRequestException('Recipient public key does not match the one on file.');
+    }
+
+    const xdr = await this.stellarService.buildTicketTransferXdr({
+      sourcePublicKey: ticket.ownerPublicKey as string,
+      destPublicKey: dto.recipientPublicKey,
+      assetCode: ticket.assetCode,
+      assetIssuer: event.escrowPublicKey as string,
+    });
+
+    return { xdr };
+  }
+
+  async confirmTransfer(
+    ticketId: string,
+    requesterId: string,
+    dto: ConfirmTransferDto,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.ownerId !== requesterId) {
+      throw new ForbiddenException('You do not own this ticket');
+    }
+
+    const tx = await this.stellarService.getTransaction(dto.transactionHash);
+
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Associated event not found');
+
+    const recipient = await this.userRepo.findOne({ where: { id: ticket.transferHistory[ticket.transferHistory.length - 1].to } });
+    if (!recipient) throw new NotFoundException('Recipient user not found');
+
+    // ── Validate On-Chain Transaction ────────────────────────────────────────
+    const ops = await this.stellarService.getTransactionOperations(dto.transactionHash);
+    if (ops.length !== 1) {
+      throw new BadRequestException('Transaction must have exactly one operation.');
+    }
+
+    const op = ops[0];
+    if (op.type !== 'payment') {
+      throw new BadRequestException('Transaction must be a payment operation.');
+    }
+
+    if (op.asset_code !== ticket.assetCode) {
+      throw new BadRequestException('Transaction asset code does not match ticket.');
+    }
+
+    if (op.asset_issuer !== event.escrowPublicKey) {
+      throw new BadRequestException('Transaction asset issuer does not match event escrow.');
+    }
+
+    if (op.to !== recipient.stellarPublicKey) {
+      throw new BadRequestException('Transaction destination does not match recipient.');
+    }
+
+    if (op.from !== ticket.ownerPublicKey) {
+      throw new BadRequestException('Transaction source does not match original owner.');
+    }
+
+    if (op.amount !== '0.0000001') {
+      throw new BadRequestException('Transaction amount is incorrect for a ticket transfer.');
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Basic validation, more can be added here (e.g. checking operations)
+    if (!tx) {
+      throw new BadRequestException('Transaction not found on-chain.');
+    }
+
+
+    const previousOwnerId = ticket.ownerId;
+    const saved = await this.dataSource.transaction(async (em) => {
+      ticket.ownerId = recipient.id;
+      ticket.ownerPublicKey = recipient.stellarPublicKey;
+      ticket.transferHistory = [
+        ...(ticket.transferHistory ?? []),
+        {
+          from: previousOwnerId,
+          to: recipient.id,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+      return em.save(TicketEntity, ticket);
+    });
+
+    await this.auditService.log({
+      action: AuditAction.TICKET_TRANSFERRED,
+      userId: requesterId,
+      resourceId: ticketId,
+      meta: {
+        from: previousOwnerId,
+        to: recipient.id,
+        recipientPublicKey: recipient.stellarPublicKey,
+        eventId: ticket.eventId,
+        transactionHash: dto.transactionHash,
+      },
+    });
+
+    return saved;
+  }
+
+  /**
+   * Validates a batch of ticket transfers to different recipients.
+   */
+  async validate_batch_recipients(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    if (!transfers || transfers.length === 0) {
+      errors.push('Transfer batch cannot be empty.');
+      return { valid: false, errors };
+    }
+
+    const ticketIds = transfers.map((t) => t.ticketId);
+    if (new Set(ticketIds).size !== ticketIds.length) {
+      errors.push('Duplicate ticket IDs found in batch.');
+    }
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) {
+        errors.push(`Ticket ${item.ticketId} not found.`);
+        continue;
+      }
+      if (ticket.ownerId !== senderUserId) {
+        errors.push(`Sender does not own ticket ${item.ticketId}.`);
+      }
+      if (ticket.status !== 'valid') {
+        errors.push(`Ticket ${item.ticketId} is not valid for transfer.`);
+      }
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) {
+        errors.push(`Recipient ${item.recipientUserId} not found for ticket ${item.ticketId}.`);
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Emits events and audit logs for a batch of ticket transfers.
+   */
+  async emit_batch_transfer_events(
+    senderUserId: string,
+    completedTransfers: Array<{ ticketId: string; recipientUserId: string; eventId: string }>,
+  ): Promise<void> {
+    for (const t of completedTransfers) {
+      await this.auditService.log({
+        action: AuditAction.TICKET_TRANSFERRED,
+        userId: senderUserId,
+        resourceId: t.ticketId,
+        meta: {
+          ticketId: t.ticketId,
+          fromUserId: senderUserId,
+          toUserId: t.recipientUserId,
+          eventId: t.eventId,
+          batch: true,
+        },
+      });
+
+      await this.notificationService.notifyUser(t.recipientUserId, {
+        title: 'Ticket Received',
+        body: `You received a ticket for event ${t.eventId}`,
+        type: 'ticket_transferred',
+        data: { ticketId: t.ticketId },
+      });
+    }
+  }
+
+  /**
+   * Transfers multiple tickets to different recipients in one operation.
+   */
+  async batch_transfer_tickets(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ success: boolean; transferredCount: number; errors?: string[] }> {
+    const validationResult = await this.validate_batch_recipients(senderUserId, transfers);
+    if (!validationResult.valid) {
+      throw new BadRequestException(`Batch transfer validation failed: ${validationResult.errors.join('; ')}`);
+    }
+
+    const completed: Array<{ ticketId: string; recipientUserId: string; eventId: string }> = [];
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) continue;
+
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) continue;
+
+      ticket.ownerId = recipient.id;
+      if (recipient.stellarPublicKey) {
+        ticket.ownerPublicKey = recipient.stellarPublicKey;
+      }
+      ticket.transferHistory = [
+        ...(ticket.transferHistory ?? []),
+        {
+          from: senderUserId,
+          to: recipient.id,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await this.ticketRepo.save(ticket);
+      completed.push({
+        ticketId: ticket.id,
+        recipientUserId: recipient.id,
+        eventId: ticket.eventId,
+      });
+    }
+
+    await this.emit_batch_transfer_events(senderUserId, completed);
+
+    return {
+      success: true,
+      transferredCount: completed.length,
+    };
+  }
+
+  /**
+   * Push a transfer history record onto a ticket's persistent transfer log.
+   * Creates the history array if it doesn't exist yet.
+   */
+  async appendTicketTransferHistory(
+    ticketId: string,
+    from: string,
+    to: string,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    ticket.transferHistory = [
+      ...(ticket.transferHistory ?? []),
+      { from, to, timestamp: new Date().toISOString() },
+    ];
+
     return this.ticketRepo.save(ticket);
   }
 
@@ -286,6 +679,61 @@ export class TicketsService {
 
     ticket.status = 'used';
     return this.ticketRepo.save(ticket);
+  }
+
+  async verifyQrCheckIn(qrData: string): Promise<{
+    ticketId: string;
+    status: string;
+    eventId: string;
+    attendeeName: string;
+    attendeeEmail: string;
+    ticketType: string;
+  }> {
+    let parsed: { ticketId: string; signature: string };
+    try {
+      parsed = JSON.parse(qrData);
+    } catch {
+      throw new BadRequestException('Invalid QR code data');
+    }
+
+    if (!parsed.ticketId || !parsed.signature) {
+      throw new BadRequestException('QR code missing ticketId or signature');
+    }
+
+    if (!this.ticketSigningService.verify(parsed.ticketId, parsed.signature)) {
+      throw new UnauthorizedException('Invalid ticket signature');
+    }
+
+    const ticket = await this.ticketRepo.findOne({ where: { id: parsed.ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.status === 'used') {
+      throw new BadRequestException('Ticket has already been checked in');
+    }
+    if (ticket.status !== 'valid') {
+      throw new BadRequestException('Ticket is no longer valid');
+    }
+
+    ticket.status = 'used';
+    await this.ticketRepo.save(ticket);
+
+    await this.auditService.log({
+      action: 'TICKET_CHECKED_IN' as any,
+      userId: ticket.ownerId,
+      resourceId: ticket.id,
+      meta: { eventId: ticket.eventId, method: 'qr_scan' },
+    });
+
+    const user = await this.userRepo.findOne({ where: { id: ticket.ownerId } });
+
+    return {
+      ticketId: ticket.id,
+      status: 'checked_in',
+      eventId: ticket.eventId,
+      attendeeName: (user as any)?.displayName ?? 'Unknown',
+      attendeeEmail: (user as any)?.email ?? '',
+      ticketType: ticket.assetCode ?? 'general',
+    };
   }
 
   // ── Resale / marketplace ──────────────────────────────────────────────────
@@ -381,6 +829,12 @@ export class TicketsService {
     }
 
     return saved;
+  }
+
+  async getTicketById(id: string): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id } });
+    if (!ticket) throw new NotFoundException(`Ticket ${id} not found`);
+    return ticket;
   }
 
   private async resolvePaymentOps(

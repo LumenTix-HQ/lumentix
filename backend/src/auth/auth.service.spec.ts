@@ -6,11 +6,16 @@ import { ConfigService } from '@nestjs/config';
 import { MailerService } from '../mailer/mailer.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { WalletChallenge } from './entities/wallet-challenge.entity';
 import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+import { StellarService } from '../stellar/stellar.service';
 import * as bcrypt from 'bcryptjs';
 
 describe('AuthService', () => {
@@ -20,9 +25,25 @@ describe('AuthService', () => {
   let configService: any;
   let mailerService: any;
   let passwordResetTokenRepository: any;
+  let refreshTokenRepository: any;
+  let walletChallengeRepository: any;
+  let cacheManager: Cache;
+  let stellarService: StellarService;
 
   beforeEach(async () => {
     passwordResetTokenRepository = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn(),
+    };
+
+    refreshTokenRepository = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn(),
+    };
+
+    walletChallengeRepository = {
       create: jest.fn(),
       save: jest.fn(),
       findOne: jest.fn(),
@@ -36,7 +57,10 @@ describe('AuthService', () => {
           useValue: {
             createUser: jest.fn(),
             findByEmail: jest.fn(),
+            findById: jest.fn(),
             updatePassword: jest.fn(),
+            updateWallet: jest.fn(),
+            update: jest.fn(),
           },
         },
         {
@@ -61,6 +85,28 @@ describe('AuthService', () => {
           provide: getRepositoryToken(PasswordResetToken),
           useValue: passwordResetTokenRepository,
         },
+        {
+          provide: getRepositoryToken(RefreshToken),
+          useValue: refreshTokenRepository,
+        },
+        {
+          provide: getRepositoryToken(WalletChallenge),
+          useValue: walletChallengeRepository,
+        },
+        {
+          provide: CACHE_MANAGER,
+          useValue: {
+            get: jest.fn(),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
+        },
+        {
+          provide: StellarService,
+          useValue: {
+            verifySignature: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -69,10 +115,17 @@ describe('AuthService', () => {
     jwtService = module.get(JwtService);
     configService = module.get(ConfigService);
     mailerService = module.get(MailerService);
-    // @InjectRepository uses string token in tests when manual provider is used
     passwordResetTokenRepository = module.get(
       getRepositoryToken(PasswordResetToken),
     );
+    refreshTokenRepository = module.get(
+      getRepositoryToken(RefreshToken),
+    );
+    walletChallengeRepository = module.get(
+      getRepositoryToken(WalletChallenge),
+    );
+    cacheManager = module.get(CACHE_MANAGER);
+    stellarService = module.get(StellarService);
   });
 
   afterEach(() => {
@@ -97,13 +150,16 @@ describe('AuthService', () => {
       );
     });
 
-    it('should return access token on success', async () => {
+    it('should return access token and refresh token on success', async () => {
       usersService.createUser.mockResolvedValue({ id: 'user-1', role: 'user' });
       jwtService.sign.mockReturnValue('token');
+      refreshTokenRepository.create.mockReturnValue({ id: 'uuid-1', token: 'hash' });
+      refreshTokenRepository.save.mockResolvedValue({ id: 'uuid-1', token: 'hash' });
 
       const result = await authService.register(registerDto);
 
-      expect(result).toEqual({ access_token: 'token' });
+      expect(result).toHaveProperty('accessToken', 'token');
+      expect(result).toHaveProperty('refreshToken');
       expect(usersService.createUser).toHaveBeenCalledWith({
         email: registerDto.email,
         password: registerDto.password,
@@ -141,7 +197,7 @@ describe('AuthService', () => {
       );
     });
 
-    it('should return access token on success', async () => {
+    it('should return access token and refresh token on success', async () => {
       usersService.findByEmail.mockResolvedValue({
         id: 'user-1',
         role: 'user',
@@ -149,10 +205,13 @@ describe('AuthService', () => {
       });
       jest.spyOn(bcrypt, 'compare').mockImplementation(async () => true);
       jwtService.sign.mockReturnValue('token');
+      refreshTokenRepository.create.mockReturnValue({ id: 'uuid-1', token: 'hash' });
+      refreshTokenRepository.save.mockResolvedValue({ id: 'uuid-1', token: 'hash' });
 
       const result = await authService.login(loginDto);
 
-      expect(result).toEqual({ access_token: 'token' });
+      expect(result).toHaveProperty('accessToken', 'token');
+      expect(result).toHaveProperty('refreshToken');
       expect(usersService.findByEmail).toHaveBeenCalledWith(loginDto.email);
       expect(bcrypt.compare).toHaveBeenCalledWith(loginDto.password, 'hash');
       expect(jwtService.sign).toHaveBeenCalledWith({
@@ -303,6 +362,112 @@ describe('AuthService', () => {
       expect(passwordResetTokenRepository.save).toHaveBeenCalledWith(
         expect.objectContaining({ used: true }),
       );
+    });
+  });
+
+  describe('refresh', () => {
+    it('throws on invalid token format', async () => {
+      await expect(authService.refresh('invalid_format')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('throws on invalid token', async () => {
+      refreshTokenRepository.findOne.mockResolvedValue(null);
+      await expect(authService.refresh('id:secret')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('refreshes successfully', async () => {
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 1);
+
+      refreshTokenRepository.findOne.mockResolvedValue({
+        id: 'id',
+        token: 'hash',
+        userId: 'user-1',
+        expiresAt,
+        revoked: false,
+      });
+      jest.spyOn(bcrypt, 'compare').mockImplementation(async () => true);
+      usersService.findById.mockResolvedValue({ id: 'user-1', role: 'user' });
+      jwtService.sign.mockReturnValue('new_token');
+      refreshTokenRepository.create.mockReturnValue({ id: 'uuid-2', token: 'hash2' });
+      refreshTokenRepository.save.mockResolvedValue({ id: 'uuid-2', token: 'hash2' });
+
+      const result = await authService.refresh('id:secret');
+      expect(result).toHaveProperty('accessToken', 'new_token');
+      expect(result).toHaveProperty('refreshToken');
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes the token', async () => {
+      const tokenRecord = {
+        id: 'id',
+        token: 'hash',
+        userId: 'user-1',
+        revoked: false,
+      };
+      refreshTokenRepository.findOne.mockResolvedValue(tokenRecord);
+      jest.spyOn(bcrypt, 'compare').mockImplementation(async () => true);
+
+      const result = await authService.logout('user-1', 'id:secret');
+      expect(result).toEqual({ message: 'Logged out successfully.' });
+      expect(tokenRecord.revoked).toBe(true);
+      expect(refreshTokenRepository.save).toHaveBeenCalledWith(tokenRecord);
+    });
+  });
+
+  describe('wallet-challenge', () => {
+    it('should generate a nonce and store it in cache', async () => {
+      const userId = 'user-1';
+      const result = await authService.generateWalletChallenge(userId);
+
+      expect(result).toHaveProperty('nonce');
+      expect(result).toHaveProperty('message');
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        `wallet-challenge:${userId}`,
+        result.nonce,
+        300,
+      );
+    });
+  });
+
+  describe('wallet-verify', () => {
+    const userId = 'user-1';
+    const nonce = 'test-nonce';
+    const signature = 'test-signature';
+    const publicKey = 'G...';
+
+    it('should throw BadRequestException if nonce is invalid', async () => {
+      (cacheManager.get as jest.Mock).mockResolvedValue('different-nonce');
+
+      await expect(
+        authService.verifyWalletChallenge(userId, nonce, signature, publicKey),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw UnauthorizedException if signature is invalid', async () => {
+      (cacheManager.get as jest.Mock).mockResolvedValue(nonce);
+      (stellarService.verifySignature as jest.Mock).mockReturnValue(false);
+
+      await expect(
+        authService.verifyWalletChallenge(userId, nonce, signature, publicKey),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should link wallet on valid signature', async () => {
+      (cacheManager.get as jest.Mock).mockResolvedValue(nonce);
+      (stellarService.verifySignature as jest.Mock).mockReturnValue(true);
+
+      const result = await authService.verifyWalletChallenge(
+        userId,
+        nonce,
+        signature,
+        publicKey,
+      );
+
+      expect(result).toEqual({ linked: true, stellarPublicKey: publicKey });
+      expect(usersService.updateWallet).toHaveBeenCalledWith(userId, publicKey);
+      expect(cacheManager.del).toHaveBeenCalledWith(`wallet-challenge:${userId}`);
     });
   });
 });

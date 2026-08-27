@@ -21,6 +21,7 @@ import { RefundService } from '../payments/refunds/refund.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationService } from '../notifications/notification.service';
 import { UsersService } from '../users/users.service';
+import { CalendarService } from '../calendar/calendar.service';
 
 export interface RegisterResult {
   registration: Registration;
@@ -43,6 +44,7 @@ export class RegistrationsService {
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
     private readonly usersService: UsersService,
+    private readonly calendarService: CalendarService,
   ) {}
 
   // ── POST /events/:id/register ──────────────────────────────────────────────
@@ -56,46 +58,46 @@ export class RegistrationsService {
       );
     }
 
-    const existing = await this.repo.findOne({
-      where: [
-        { eventId, userId, status: RegistrationStatus.PENDING },
-        { eventId, userId, status: RegistrationStatus.CONFIRMED },
-        { eventId, userId, status: RegistrationStatus.WAITLISTED },
-      ],
-    });
-    if (existing) {
-      throw new ConflictException('You are already registered for this event');
-    }
+    try {
+      if (event.maxAttendees !== null && event.maxAttendees !== undefined) {
+        const confirmed = await this.repo.count({
+          where: [
+            { eventId, status: RegistrationStatus.CONFIRMED },
+            { eventId, status: RegistrationStatus.PENDING },
+          ],
+        });
 
-    if (event.maxAttendees !== null && event.maxAttendees !== undefined) {
-      const confirmed = await this.repo.count({
-        where: [
-          { eventId, status: RegistrationStatus.CONFIRMED },
-          { eventId, status: RegistrationStatus.PENDING },
-        ],
-      });
-
-      if (confirmed >= event.maxAttendees) {
-        const reg = await this.repo.save(
-          this.repo.create({
-            eventId,
-            userId,
-            status: RegistrationStatus.WAITLISTED,
-          }),
-        );
-        const position = await this.getWaitlistPosition(eventId, reg.id);
-        return {
-          registration: reg,
-          httpStatus: HttpStatus.ACCEPTED,
-          waitlistPosition: position,
-        };
+        if (confirmed >= event.maxAttendees) {
+          const reg = await this.repo.save(
+            this.repo.create({
+              eventId,
+              userId,
+              status: RegistrationStatus.WAITLISTED,
+            }),
+          );
+          const position = await this.getWaitlistPosition(eventId, reg.id);
+          return {
+            registration: reg,
+            httpStatus: HttpStatus.ACCEPTED,
+            waitlistPosition: position,
+          };
+        }
       }
-    }
 
-    const reg = await this.repo.save(
-      this.repo.create({ eventId, userId, status: RegistrationStatus.PENDING }),
-    );
-    return { registration: reg, httpStatus: HttpStatus.CREATED };
+      const reg = await this.repo.save(
+        this.repo.create({ eventId, userId, status: RegistrationStatus.PENDING }),
+      );
+      return { registration: reg, httpStatus: HttpStatus.CREATED };
+    } catch (err) {
+      if (err instanceof Error) {
+        // https://www.postgresql.org/docs/current/errcodes-appendix.html
+        const pgUniqueViolationCode = '23505';
+        if ((err as any).code === pgUniqueViolationCode) {
+          throw new ConflictException('You are already registered for this event');
+        }
+      }
+      throw err;
+    }
   }
 
   // ── GET /events/:id/registrations (organizer) ──────────────────────────────
@@ -148,6 +150,7 @@ export class RegistrationsService {
   async cancel(registrationId: string, callerId: string): Promise<Registration> {
     const reg = await this.findById(registrationId);
     if (reg.userId !== callerId) throw new ForbiddenException();
+    const wasConfirmed = reg.status === RegistrationStatus.CONFIRMED;
 
     if (
       reg.status !== RegistrationStatus.CONFIRMED &&
@@ -159,7 +162,7 @@ export class RegistrationsService {
     reg.status = RegistrationStatus.CANCELLED;
     const saved = await this.repo.save(reg);
 
-    if (reg.status === RegistrationStatus.CONFIRMED) {
+    if (wasConfirmed) {
       await this.promoteFromWaitlist(reg.eventId);
     }
 
@@ -226,6 +229,36 @@ export class RegistrationsService {
     return saved;
   }
 
+  // ── CSV Export ────────────────────────────────────────────────────────────
+
+  async exportRegistrationsCsv(eventId: string, callerId: string): Promise<string> {
+    const event = await this.eventsService.getEventById(eventId);
+    if (event.organizerId !== callerId) throw new ForbiddenException();
+
+    const registrations = await this.repo.find({
+      where: { eventId },
+      order: { createdAt: 'ASC' },
+    });
+
+    const header = 'registrationId,email,displayName,stellarPublicKey,registeredAt,paymentStatus,ticketId\n';
+    const rows = await Promise.all(
+      registrations.map(async (r) => {
+        let email = '';
+        let displayName = '';
+        let stellarPublicKey = '';
+        try {
+          const user = await this.usersService.findById(r.userId);
+          email = (user as any).email ?? '';
+          displayName = (user as any).displayName ?? '';
+          stellarPublicKey = (user as any).stellarPublicKey ?? '';
+        } catch { /* skip */ }
+        return [r.id, email, displayName, stellarPublicKey, r.createdAt.toISOString(), r.status, r.ticketId ?? ''].join(',');
+      }),
+    );
+
+    return header + rows.join('\n');
+  }
+
   // ── Link payment on confirmation ───────────────────────────────────────────
 
   async linkPayment(
@@ -240,6 +273,47 @@ export class RegistrationsService {
     reg.paymentId = paymentId;
     reg.status = RegistrationStatus.CONFIRMED;
     await this.repo.save(reg);
+
+    // Queue calendar invite email (best-effort)
+    try {
+      const [event, user] = await Promise.all([
+        this.eventsService.getEventById(eventId),
+        this.usersService.findById(userId),
+      ]);
+
+      const userEmail = (user as any).email;
+      if (userEmail) {
+        const calendarData = this.calendarService.createAllCalendarLinks({
+          eventTitle: event.title,
+          eventDescription: event.description ?? undefined,
+          startDate: event.startDate.toISOString(),
+          endDate: event.endDate.toISOString(),
+          location: event.location ?? undefined,
+        });
+
+        const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:3001';
+        const icsDownloadUrl = `${apiBaseUrl}/events/${eventId}/ical`;
+
+        await this.notificationService.queueCalendarInvite({
+          to: userEmail,
+          eventTitle: event.title,
+          eventDescription: event.description ?? undefined,
+          startDate: event.startDate.toISOString(),
+          endDate: event.endDate.toISOString(),
+          location: event.location ?? undefined,
+          organizerName: 'Lumentix',
+          googleUrl: calendarData.google,
+          outlookUrl: calendarData.outlook,
+          yahooUrl: calendarData.yahoo,
+          icsDownloadUrl,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not queue calendar invite for user ${userId} on event ${eventId}`,
+        err,
+      );
+    }
   }
 
   async linkTicket(
@@ -256,6 +330,37 @@ export class RegistrationsService {
     if (!reg) return;
     reg.ticketId = ticketId;
     await this.repo.save(reg);
+  }
+
+  // ── Confirm waitlist promotion ───────────────────────────────────────────
+
+  async confirmWaitlist(registrationId: string, userId: string): Promise<Registration> {
+    const reg = await this.findById(registrationId);
+    if (reg.userId !== userId) throw new ForbiddenException();
+    if (reg.status !== RegistrationStatus.WAITLISTED) {
+      throw new BadRequestException('Registration is not waitlisted');
+    }
+
+    const event = await this.eventsService.getEventById(reg.eventId);
+    if (event.status !== EventStatus.PUBLISHED) {
+      throw new BadRequestException('Event is no longer available');
+    }
+
+    if (event.startDate && new Date(event.startDate) <= new Date()) {
+      throw new BadRequestException('Cannot confirm waitlist after event has started');
+    }
+
+    reg.status = RegistrationStatus.PENDING;
+    const saved = await this.repo.save(reg);
+
+    await this.auditService.log({
+      action: 'WAITLIST_CONFIRMED' as any,
+      userId,
+      resourceId: registrationId,
+      meta: { eventId: reg.eventId },
+    });
+
+    return saved;
   }
 
   // ── Waitlist helpers ───────────────────────────────────────────────────────

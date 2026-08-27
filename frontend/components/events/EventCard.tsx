@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {Event, EventCategory} from "@/types/event";
+import {Event, EventCategory, formatPrice} from "@/types/event";
 
 const CATEGORY_STYLES: Record<
 	EventCategory,
@@ -115,7 +115,7 @@ export default function EventCard({event, viewMode}: EventCardProps) {
 								<div className="text-lg font-bold text-white">
 									{event.ticketPrice === 0
 										? "Free"
-										: `$${event.ticketPrice}`}
+										: formatPrice(event.ticketPrice, event.currency)}
 								</div>
 								<div className="text-[11px] text-gray-600">
 									{event.location}
@@ -162,7 +162,7 @@ export default function EventCard({event, viewMode}: EventCardProps) {
 						</span>
 					) : (
 						<span className="text-lg font-bold text-white">
-							${event.ticketPrice}
+							{event.ticketPrice === 0 ? "Free" : formatPrice(event.ticketPrice, event.currency)}
 						</span>
 					)}
 				</div>

@@ -6,9 +6,10 @@ import { ExchangeRatesService } from './exchange-rates.service';
 import { ExchangeRatesController } from './exchange-rates.controller';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { RatesRefreshJob } from './jobs/rates-refresh.job';
+import { MailerModule } from '../mailer/mailer.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ExchangeRate]), ConfigModule, CurrenciesModule],
+  imports: [TypeOrmModule.forFeature([ExchangeRate]), ConfigModule, CurrenciesModule, MailerModule],
   controllers: [ExchangeRatesController],
   providers: [ExchangeRatesService, RatesRefreshJob],
   exports: [ExchangeRatesService],

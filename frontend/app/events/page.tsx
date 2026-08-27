@@ -1,15 +1,17 @@
 "use client";
 
-import {useState, useEffect, useCallback} from "react";
-import {Event, EventFilters, PaginatedResponse} from "@/types/event";
-import {fetchEvents} from "@/lib/mock-data/events";
+import {useState, useEffect, useCallback, useRef} from "react";
+import {Event, EventFilters} from "@/types/event";
 import EventCard from "@/components/events/EventCard";
 import EventCardSkeleton from "@/components/events/EventCardSkeleton";
 import SearchBar from "@/components/events/SearchBar";
 import FilterPanel from "@/components/events/FilterPanel";
-import Pagination from "@/components/events/Pagination";
 import ErrorState from "@/components/events/ErrorState";
 import EmptyState from "@/components/events/EmptyState";
+import { useDebounce } from "@/hooks/useDebounce";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const ITEMS_PER_PAGE = 12;
 
 const DEFAULT_FILTERS: EventFilters = {
 	search: "",
@@ -21,41 +23,77 @@ const DEFAULT_FILTERS: EventFilters = {
 	status: "",
 };
 
-const ITEMS_PER_PAGE = 9;
+async function fetchEventsFromAPI(filters: EventFilters, page: number): Promise<Event[]> {
+	const params = new URLSearchParams({
+		page: String(page),
+		limit: String(ITEMS_PER_PAGE),
+	});
+	if (filters.search) params.set("search", filters.search);
+	if (filters.categories?.length) params.set("categoryIds", filters.categories.join(","));
+	if (filters.status) params.set("status", filters.status);
+	const res = await fetch(`${API_BASE}/events?${params}`);
+	if (!res.ok) throw new Error("Failed to fetch events");
+	const data = await res.json();
+	return Array.isArray(data) ? data : (data.data ?? []);
+}
 
 export default function EventsPage() {
 	const [filters, setFilters] = useState<EventFilters>(DEFAULT_FILTERS);
-	const [page, setPage] = useState(1);
+	const [searchInput, setSearchInput] = useState("");
 	const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [result, setResult] = useState<PaginatedResponse<Event> | null>(null);
+	const [events, setEvents] = useState<Event[]>([]);
+	const [page, setPage] = useState(1);
+	const [hasMore, setHasMore] = useState(true);
+	const sentinelRef = useRef<HTMLDivElement>(null);
 
-	const loadEvents = useCallback(async () => {
+	const debouncedSearch = useDebounce(searchInput, 300);
+
+	const loadEvents = useCallback(async (pg: number, reset: boolean) => {
 		setIsLoading(true);
 		setError(null);
 		try {
-			const data = await fetchEvents(filters, page, ITEMS_PER_PAGE);
-			setResult(data);
+			const activeFilters = { ...filters, search: debouncedSearch };
+			const items = await fetchEventsFromAPI(activeFilters, pg);
+			setEvents((prev) => (reset ? items : [...prev, ...items]));
+			setHasMore(items.length === ITEMS_PER_PAGE);
 		} catch {
 			setError("Failed to load events. Please try again.");
 		} finally {
 			setIsLoading(false);
 		}
-	}, [filters, page]);
+	}, [filters, debouncedSearch]);
 
+	// Reset and reload when filters or debounced search change
 	useEffect(() => {
-		loadEvents();
-	}, [loadEvents]);
+		setPage(1);
+		loadEvents(1, true);
+	}, [filters, debouncedSearch]);
+
+	// Infinite scroll via Intersection Observer
+	useEffect(() => {
+		if (!sentinelRef.current) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0].isIntersecting && hasMore && !isLoading) {
+					const next = page + 1;
+					setPage(next);
+					loadEvents(next, false);
+				}
+			},
+			{ rootMargin: "200px" },
+		);
+		observer.observe(sentinelRef.current);
+		return () => observer.disconnect();
+	}, [hasMore, isLoading, page, loadEvents]);
 
 	const handleFilterChange = (newFilters: EventFilters) => {
 		setFilters(newFilters);
-		setPage(1);
 	};
 
 	const handleSearchChange = (search: string) => {
-		setFilters((prev) => ({...prev, search}));
-		setPage(1);
+		setSearchInput(search);
 	};
 
 	const clearAllFilters = () => {
@@ -100,7 +138,7 @@ export default function EventsPage() {
 				<div className="flex flex-col gap-4 mb-8">
 					{/* Search */}
 					<SearchBar
-						value={filters.search}
+						value={searchInput}
 						onChange={handleSearchChange}
 					/>
 
@@ -281,35 +319,14 @@ export default function EventsPage() {
 				</div>
 
 				{/* Content */}
-				{isLoading ? (
-					/* Loading skeletons */
-					<div
-						className={
-							viewMode === "grid"
-								? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
-								: "flex flex-col gap-3"
-						}
-					>
-						{Array.from({length: viewMode === "grid" ? 6 : 4}).map(
-							(_, i) => (
-								<EventCardSkeleton
-									key={i}
-									viewMode={viewMode}
-								/>
-							),
-						)}
-					</div>
-				) : error ? (
-					/* Error state */
-					<ErrorState message={error} onRetry={loadEvents} />
-				) : result && result.data.length === 0 ? (
-					/* Empty state */
+				{error ? (
+					<ErrorState message={error} onRetry={() => loadEvents(1, true)} />
+				) : !isLoading && events.length === 0 ? (
 					<EmptyState
 						hasFilters={hasAnyFilters}
 						onClearFilters={clearAllFilters}
 					/>
-				) : result ? (
-					/* Event cards */
+				) : (
 					<>
 						<div
 							className={
@@ -318,27 +335,27 @@ export default function EventsPage() {
 									: "flex flex-col gap-3"
 							}
 						>
-							{result.data.map((event) => (
+							{events.map((event) => (
 								<EventCard
 									key={event.id}
 									event={event}
 									viewMode={viewMode}
 								/>
 							))}
+							{isLoading &&
+								Array.from({length: viewMode === "grid" ? 3 : 2}).map((_, i) => (
+									<EventCardSkeleton key={`sk-${i}`} viewMode={viewMode} />
+								))}
 						</div>
-
-						{/* Pagination */}
-						<div className="mt-10">
-							<Pagination
-								page={result.page}
-								totalPages={result.totalPages}
-								total={result.total}
-								limit={result.limit}
-								onPageChange={setPage}
-							/>
-						</div>
+						{/* Infinite scroll sentinel */}
+						<div ref={sentinelRef} className="h-4 mt-4" />
+						{!hasMore && events.length > 0 && (
+							<p className="text-center text-gray-600 text-sm mt-6">
+								All events loaded
+							</p>
+						)}
 					</>
-				) : null}
+				)}
 			</div>
 		</main>
 	);

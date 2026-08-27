@@ -66,6 +66,17 @@ export class NotificationService {
     await this.notificationQueue.add('sendSponsorConfirmedEmail', data, { attempts: 3 });
   }
 
+  async queuePaymentConfirmedEmail(data: {
+    userId: string;
+    email: string;
+    amount: number;
+    currency: string;
+    transactionHash: string;
+    eventTitle: string;
+  }) {
+    await this.notificationQueue.add('sendPaymentConfirmedEmail', data, { attempts: 3 });
+  }
+
   async queuePaymentFailedEmail(data: {
     userId: string;
     email: string;
@@ -97,6 +108,27 @@ export class NotificationService {
     eventTitle: string;
   }) {
     await this.notificationQueue.add('sendEventCompletedEmail', data, { attempts: 3 });
+  }
+
+  async queueCalendarInvite(data: {
+    to: string;
+    eventTitle: string;
+    eventDescription?: string;
+    startDate: string;
+    endDate: string;
+    location?: string;
+    ticketId?: string;
+    organizerName?: string;
+    googleUrl: string;
+    outlookUrl: string;
+    yahooUrl: string;
+    icsDownloadUrl: string;
+  }) {
+    await this.notificationQueue.add('sendCalendarInvite', data, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: true,
+    });
   }
 
   async queueLifecycleEmail(event: Event): Promise<void> {

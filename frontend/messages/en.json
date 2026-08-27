@@ -1,0 +1,46 @@
+{
+  "Nav": {
+    "events": "Events",
+    "categories": "Categories",
+    "create": "Create Event",
+    "myTickets": "My Tickets",
+    "myPayments": "My Payments",
+    "profile": "Profile",
+    "login": "Log In",
+    "register": "Sign Up",
+    "logout": "Log Out"
+  },
+  "HomePage": {
+    "badge": "Built on Stellar",
+    "title": "Lumentix",
+    "subtitle": "The decentralized event platform where every ticket, payment, review, and insurance policy lives on the blockchain.",
+    "discover": "Discover Events",
+    "host": "Host an Event",
+    "howItWorks": "How It Works"
+  },
+  "Auth": {
+    "loginTitle": "Welcome Back",
+    "loginSubtitle": "Sign in to your LumenTix account",
+    "emailAddress": "Email Address",
+    "signIn": "Sign In",
+    "signingIn": "Signing in...",
+    "createAccount": "Create an Account",
+    "forgotPassword": "Forgot Password?",
+    "fillAllFields": "Please fill in all fields.",
+    "registerTitle": "Create your account",
+    "registerSubtitle": "Join Lumentix to discover and host events",
+    "email": "Email",
+    "password": "Password",
+    "confirmPassword": "Confirm Password",
+    "displayName": "Display Name",
+    "submitLogin": "Log In",
+    "submitRegister": "Sign Up",
+    "loggingIn": "Logging in…",
+    "registering": "Creating account…",
+    "noAccount": "Don't have an account?",
+    "haveAccount": "Already have an account?"
+  },
+  "LocaleSwitcher": {
+    "label": "Language"
+  }
+}

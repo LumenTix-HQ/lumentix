@@ -1,41 +1,31 @@
 import {
   Body,
   Controller,
-  Delete,
+  Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
-  Get,
-  Query,
 } from '@nestjs/common';
 import {
-  ApiTags,
   ApiBearerAuth,
   ApiOperation,
-  ApiResponse,
+  ApiParam,
   ApiQuery,
+  ApiResponse,
+  ApiTags,
 } from '@nestjs/swagger';
-import { IsNumber, IsString, Min } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
-import { TicketsService } from './tickets.service';
-import { IssueTicketDto } from './dto/issue-ticket.dto';
 import { BulkIssueTicketDto } from './dto/bulk-issue-ticket.dto';
+import { IssueTicketDto } from './dto/issue-ticket.dto';
+import { ConfirmTransferDto } from './dto/confirm-transfer.dto';
 import { TransferTicketDto } from './dto/transfer-ticket.dto';
 import { TicketEntity } from './entities/ticket.entity';
-
-class ListTicketDto {
-  @ApiProperty() @IsNumber() @Min(0) price: number;
-  @ApiProperty() @IsString() currency: string;
-}
-
-class BuyTicketDto {
-  @ApiProperty() @IsString() transactionHash: string;
-}
+import { TicketsService } from './tickets.service';
 
 @ApiTags('Tickets')
 @ApiBearerAuth()
@@ -44,10 +34,30 @@ class BuyTicketDto {
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}
 
+  @Get('me')
+  @ApiOperation({
+    summary: 'Get my tickets (paginated)',
+    description: 'Authenticated. Returns paginated tickets owned by the current user with optional status filter and isExpired flag.',
+  })
+  @ApiQuery({ name: 'status', required: false, enum: ['valid', 'used', 'refunded', 'expired'] })
+  @ApiResponse({ status: 200, description: 'List of tickets with isExpired flag' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getMyTicketsMe(
+    @Req() req: AuthenticatedRequest,
+    @Query() paginationDto: any,
+  ) {
+    return this.ticketsService.findByOwner(req.user.id, paginationDto);
+  }
+
   @Get('my')
-  @ApiOperation({ summary: 'Get my tickets' })
+  @ApiOperation({
+    summary: 'Get my tickets',
+    description: 'Authenticated. Returns tickets owned by the current user.',
+  })
+  @ApiQuery({ name: 'status', required: false, enum: ['valid', 'used', 'refunded', 'expired'] })
   @ApiResponse({ status: 200, description: 'List of tickets' })
-  async getMyTickets(
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getMyTickets(
     @Req() req: AuthenticatedRequest,
     @Query() paginationDto: any,
   ) {
@@ -57,94 +67,158 @@ export class TicketsController {
   @Post('issue/bulk')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN, Role.ORGANIZER)
-  @ApiOperation({ summary: 'Bulk issue tickets for multiple confirmed payments' })
+  @ApiOperation({
+    summary: 'Bulk issue tickets',
+    description:
+      'Authenticated organizer/admin endpoint. Issues tickets for multiple confirmed payments.',
+  })
   @ApiResponse({ status: 201, description: 'Bulk issue results' })
-  @ApiResponse({ status: 400, description: 'Batch size exceeded' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
-  async bulkIssue(@Body() dto: BulkIssueTicketDto) {
+  bulkIssue(@Body() dto: BulkIssueTicketDto) {
     return this.ticketsService.bulkIssueTickets(dto.paymentIds);
   }
 
   @Post('issue')
-  @ApiOperation({ summary: 'Issue a ticket for a confirmed payment' })
+  @ApiOperation({
+    summary: 'Issue a ticket',
+    description:
+      'Authenticated. Issues a ticket for a confirmed payment reference.',
+  })
   @ApiResponse({ status: 201, description: 'Ticket issued' })
-  @ApiResponse({ status: 400, description: 'Payment not confirmed' })
-  async issue(@Body() dto: IssueTicketDto) {
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  issue(@Body() dto: IssueTicketDto) {
     return this.ticketsService.issueTicket(dto.paymentId);
   }
 
   @Get(':id/qr')
-  @ApiOperation({ summary: 'Regenerate QR code for a ticket' })
-  @ApiResponse({ status: 200, description: 'QR code data URL' })
-  @ApiResponse({ status: 400, description: 'Ticket not valid' })
-  @ApiResponse({ status: 403, description: 'Not ticket owner' })
-  async getQr(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+  @ApiOperation({
+    summary: 'Regenerate ticket QR code',
+    description:
+      'Authenticated. Regenerates QR code data for a ticket owned by the current user.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 200, description: 'QR code regenerated successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  getQr(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.ticketsService.regenerateQr(id, req.user.id);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a single ticket' })
-  @ApiResponse({ status: 200, type: TicketEntity })
+  @ApiOperation({
+    summary: 'Get a ticket',
+    description:
+      'Authenticated. Retrieves a single ticket visible to the current user.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 200, description: 'Ticket found', type: TicketEntity })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
-  async getTicket(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+  getTicket(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.ticketsService.findOne(id, req.user.id);
   }
 
-  @Post(':ticketId/transfer')
-  @ApiOperation({ summary: 'Transfer a ticket to a new owner' })
-  @ApiResponse({ status: 201, description: 'Ticket transferred' })
+  @Post(':id/transfer')
+  @ApiOperation({
+    summary: 'Initiate a ticket transfer',
+    description:
+      'Authenticated. Generates a transaction XDR for the client to sign and submit.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 201, description: 'Transaction XDR created' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
-  async transfer(
-    @Param('ticketId') ticketId: string,
+  initiateTransfer(
+    @Param('id') ticketId: string,
     @Body() dto: TransferTicketDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.ticketsService.transferTicket(ticketId, req.user.id, dto.newOwnerId);
+    return this.ticketsService.initiateTransfer(ticketId, req.user.id, dto);
+  }
+
+  @Post(':id/transfer/confirm')
+  @ApiOperation({
+    summary: 'Confirm a ticket transfer',
+    description:
+      'Authenticated. Verifies the on-chain transaction and updates the ticket ownership.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 201, description: 'Ticket transferred successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  confirmTransfer(
+    @Param('id') ticketId: string,
+    @Body() dto: ConfirmTransferDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.confirmTransfer(ticketId, req.user.id, dto);
+  }
+
+  @Post('batch-transfer')
+  @ApiOperation({
+    summary: 'Batch transfer multiple tickets to different recipients',
+    description: 'Allow a single wallet to transfer multiple tickets to different recipients in one transaction.',
+  })
+  batchTransfer(
+    @Body() body: { transfers: Array<{ ticketId: string; recipientUserId: string }> },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.batch_transfer_tickets(req.user.id, body.transfers);
+  }
+
+  @Post('verify-qr')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Verify QR code for physical event check-in',
+    description:
+      'Authenticated organizer/admin. Scans a ticket QR code, validates signature, and marks the ticket as used.',
+  })
+  @ApiBody({ schema: { properties: { qrData: { type: 'string', description: 'JSON-encoded QR payload with ticketId and signature' } }, required: ['qrData'] } })
+  @ApiResponse({ status: 200, description: 'Ticket checked in successfully with attendee info' })
+  @ApiResponse({ status: 400, description: 'Invalid QR data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized or invalid signature' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  verifyQr(@Body('qrData') qrData: string) {
+    return this.ticketsService.verifyQrCheckIn(qrData);
   }
 }
 
-/** Public controller — no JWT required. */
 @ApiTags('Tickets')
 @Controller('tickets')
 export class TicketsPublicController {
   constructor(private readonly ticketsService: TicketsService) {}
 
   @Get('marketplace')
-  @ApiOperation({ summary: 'Browse tickets listed for resale (public)' })
-  @ApiResponse({ status: 200, description: 'Listed tickets' })
+  @ApiOperation({
+    summary: 'Browse marketplace tickets',
+    description: 'Public. Returns tickets currently listed for resale.',
+  })
+  @ApiResponse({ status: 200, description: 'Listed tickets retrieved successfully' })
   getMarketplace() {
     return this.ticketsService.getMarketplace();
   }
 
   @Get(':id/verify-status')
   @ApiOperation({
-    summary: 'Verify ticket validity (public — no JWT required)',
-    description: 'Called by gate scanners. Validates the cryptographic signature and returns ticket status.',
+    summary: 'Verify ticket status',
+    description:
+      'Public. Validates the provided ticket signature and returns the current ticket validity status.',
   })
-  @ApiQuery({ name: 'signature', required: true })
-  @ApiResponse({ status: 200, description: 'Ticket validity status' })
-  async verifyStatus(
-    @Param('id') id: string,
-    @Query('signature') signature: string,
-  ) {
-    return this.ticketsService.getVerifyStatus(id, signature);
-  }
-}
-
-/** Public controller — no JWT required. Used by gate scanners. */
-@ApiTags('Tickets')
-@Controller('tickets')
-export class TicketsPublicController {
-  constructor(private readonly ticketsService: TicketsService) {}
-
-  @Get(':id/verify-status')
-  @ApiOperation({
-    summary: 'Verify ticket validity (public — no JWT required)',
-    description: 'Called by gate scanners. Validates the cryptographic signature and returns ticket status.',
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiQuery({
+    name: 'signature',
+    required: true,
+    description: 'Signature generated for ticket verification',
   })
-  @ApiQuery({ name: 'signature', required: true })
-  @ApiResponse({ status: 200, description: 'Ticket validity status' })
-  async verifyStatus(
+  @ApiResponse({ status: 200, description: 'Ticket validity status returned' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  verifyStatus(
     @Param('id') id: string,
     @Query('signature') signature: string,
   ) {

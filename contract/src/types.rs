@@ -1,4 +1,5 @@
 use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 pub const INSTANCE_LIFETIME: u32 = 535_680; // ~30 days
 pub const PERSISTENT_LIFETIME: u32 = 535_680; // ~30 days
@@ -29,6 +30,11 @@ pub struct Event {
     pub max_tickets: u32,
     pub tickets_sold: u32,
     pub status: EventStatus,
+    pub paused: bool,
+    pub currency: String,
+    pub accessibility_wheelchair: u32,
+    pub accessibility_hearing: u32,
+    pub accessibility_visual: u32,
 }
 
 /// Ticket structure
@@ -41,6 +47,54 @@ pub struct Ticket {
     pub purchase_time: u64,
     pub used: bool,
     pub refunded: bool,
+    /// Set by admin via [`crate::lumentix_contract::LumentixContract::revoke_ticket`]; invalidates the ticket.
+    pub revoked: bool,
+    pub vip_tier: Option<String>,
+    pub seat_id: Option<String>,
+    pub accessibility_type: Option<String>,
+}
+
+/// A single record in a ticket's transfer history
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TicketTransferRecord {
+    /// Address that sent the ticket
+    pub from: Address,
+    /// Address that received the ticket
+    pub to: Address,
+    /// Ledger timestamp when the transfer occurred
+    pub timestamp: u64,
+}
+
+/// Organizer-defined transfer lock window for an event.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferBlackout {
+    pub starts_at: u64,
+    pub ends_at: u64,
+}
+
+/// Tracks referral link ownership and reward accrual for a single event.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReferralLinkRecord {
+    pub link_code: String,
+    pub successful_purchases: u32,
+    pub pending_rewards: i128,
+    pub total_rewards_paid: i128,
+    pub total_discount_awarded: i128,
+}
+
+/// A single record in a ticket's transfer history
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TicketTransferRecord {
+    /// Address that sent the ticket
+    pub from: Address,
+    /// Address that received the ticket
+    pub to: Address,
+    /// Ledger timestamp when the transfer occurred
+    pub timestamp: u64,
 }
 
 /// A single record in a ticket's transfer history
@@ -63,4 +117,812 @@ pub struct FeeCollectedEvent {
     pub event_id: u64,
     pub platform_fee: i128,
     pub organizer_amount: i128,
+}
+
+// ── VIP Tier System ────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VipTier {
+    pub name: String,
+    pub price: i128,
+    pub max_slots: u32,
+    pub filled_slots: u32,
+    pub benefits: Vec<String>,
+}
+
+// ── Accessibility Features ─────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessibilityInventory {
+    pub wheelchair_available: u32,
+    pub wheelchair_total: u32,
+    pub hearing_available: u32,
+    pub hearing_total: u32,
+    pub visual_available: u32,
+    pub visual_total: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccessibilityBooking {
+    pub id: u64,
+    pub event_id: u64,
+    pub ticket_id: u64,
+    pub attendee: Address,
+    pub accommodation_type: String,
+    pub approved: bool,
+}
+
+// ── Seat Selection / Venue Mapping ─────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SeatCategory {
+    Standard,
+    Premium,
+    Vip,
+    Balcony,
+    Floor,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VenueSection {
+    pub name: String,
+    pub category: SeatCategory,
+    pub rows: u32,
+    pub seats_per_row: u32,
+    pub price_multiplier: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VenueLayout {
+    pub sections: Vec<VenueSection>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Seat {
+    pub section: String,
+    pub row: u32,
+    pub number: u32,
+    pub occupied: bool,
+    pub held_until: u64,
+    pub held_by: Option<Address>,
+    pub x: Option<u32>,
+    pub y: Option<u32>,
+}
+
+// ── Multi-Currency ─────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrencyConfig {
+    pub code: String,
+    pub decimals: u32,
+    pub oracle_price: i128,
+    pub last_updated: u64,
+}
+
+// ── Waitlist ───────────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WaitlistOffer {
+    pub quantity: u32,
+    pub expires_at: u64,
+}
+
+// ── Dynamic pricing ────────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PriceTier {
+    EarlyBird,
+    Standard,
+    Late,
+    LastMinute,
+}
+
+/// Organizer-configurable multipliers (basis points) for time-based pricing.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PricingSchedule {
+    pub early_bird_multiplier_bps: u32,
+    pub standard_multiplier_bps: u32,
+    pub late_multiplier_bps: u32,
+    pub last_minute_multiplier_bps: u32,
+    pub early_bird_days: u32,
+    pub standard_days: u32,
+    pub last_minute_hours: u32,
+}
+
+/// Rolling batch-mint resource usage snapshot for fee optimization.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MintGasUsage {
+    pub total_mints: u32,
+    pub total_tickets_minted: u32,
+    pub total_resource_units: u64,
+    pub last_batch_quantity: u32,
+    pub last_batch_resource_units: u64,
+    pub last_updated: u64,
+}
+
+/// CDN / adaptive streaming delivery configuration for hybrid events.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamDeliveryConfig {
+    pub cdn_endpoint: String,
+    pub stream_url: String,
+    pub quality_profile: String,
+    pub adaptive_bitrate: bool,
+    pub target_bitrate_kbps: u32,
+}
+
+/// Observed streaming performance metrics for virtual attendees.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamPerformanceMetrics {
+    pub event_id: u64,
+    pub avg_bitrate_kbps: u32,
+    pub rebuffer_ratio_bps: u32,
+    pub concurrent_viewers: u32,
+    pub quality_score: u32,
+    pub last_measured_at: u64,
+}
+// ── Insurance System ───────────────────────────────────────────────────────
+
+/// Cancellation reason enum for insurance claims
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CancellationReason {
+    EventCancelledByOrganizer,
+    ForceMajeure,
+    VenueUnavailable,
+    ArtistPerformerUnavailable,
+    HealthSafetyConcerns,
+    GovernmentRestriction,
+    Other,
+}
+
+/// Insurance policy for a ticket
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsurancePolicy {
+    pub id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub holder: Address,
+    pub premium_paid: i128,
+    pub coverage_amount: i128,
+    pub purchase_time: u64,
+    pub active: bool,
+    pub claim_processed: bool,
+}
+
+/// Insurance pool balance managed by smart contract
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsurancePool {
+    pub total_balance: i128,
+    pub total_policies: u32,
+    pub total_claims_paid: i128,
+}
+
+// ── Review & Reputation System ─────────────────────────────────────────────
+
+/// A single event review submitted by a verified attendee
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventReview {
+    pub id: u64,
+    pub event_id: u64,
+    pub reviewer: Address,
+    pub organizer: Address,
+    pub ticket_id: u64,
+    /// Star rating 1–5
+    pub rating: u32,
+    pub comment: String,
+    pub attendance_verified: bool,
+    pub timestamp: u64,
+}
+
+/// Aggregated reputation score for an organizer
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrganizerReputation {
+    pub organizer: Address,
+    /// Weighted score 0–10000 (divide by 100 for 0.00–100.00)
+    pub reputation_score: u32,
+    /// Average rating × 100 (e.g. 420 = 4.20 stars)
+    pub average_rating_x100: u32,
+    pub total_reviews: u32,
+    pub total_ratings_sum: u32,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Smart Contract Upgrade Mechanism
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Represents the current state of an upgrade proposal
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UpgradeState {
+    Pending,
+    Approved,
+    Executed,
+    Rejected,
+}
+
+/// An upgrade proposal to replace the contract WASM
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposal {
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub new_wasm_hash: BytesN<32>,
+    pub description: String,
+    pub created_at: u64,
+    pub voting_deadline: u64,
+    pub state: UpgradeState,
+    pub yes_votes: u32,
+    pub no_votes: u32,
+    pub required_yes_votes: u32,
+    pub total_voters: u32,
+}
+
+/// A record of a single vote on an upgrade proposal
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeVote {
+    pub voter: Address,
+    pub proposal_id: u64,
+    pub vote_yes: bool,
+    pub timestamp: u64,
+}
+
+/// Governance configuration for the upgrade mechanism
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeGovernanceConfig {
+    pub voting_period_seconds: u64,
+    pub required_approval_percentage: u32,
+    pub governance_members: Vec<Address>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Carbon Offset Program
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Result of a carbon footprint calculation
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CarbonFootprint {
+    pub event_id: u64,
+    pub venue_footprint_kg: i128,
+    pub attendance_footprint_kg: i128,
+    pub travel_footprint_kg: i128,
+    pub total_footprint_kg: i128,
+    pub calculated_at: u64,
+}
+
+/// A carbon offset purchase record
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CarbonOffsetPurchase {
+    pub purchase_id: u64,
+    pub event_id: u64,
+    pub purchaser: Address,
+    pub offset_amount_kg: i128,
+    pub cost: i128,
+    pub project_id: String,
+    pub timestamp: u64,
+    pub verified: bool,
+}
+
+/// Aggregated environmental impact tracking for an event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnvironmentalImpact {
+    pub event_id: u64,
+    pub total_footprint_kg: i128,
+    pub total_offset_kg: i128,
+    pub net_impact_kg: i128,
+    pub total_purchases: u32,
+    pub neutral_status: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Blockchain-Based Identity Verification
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Supported identity provider types
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IdentityProvider {
+    Stellar,
+    Ethereum,
+    Solana,
+    Polygon,
+    Other(String),
+}
+
+/// An identity credential issued on-chain
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdentityCredential {
+    pub credential_id: u64,
+    pub subject: Address,
+    pub provider: IdentityProvider,
+    pub provider_id: String,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub revoked: bool,
+    pub metadata_hash: BytesN<32>,
+    pub level: u32,
+}
+
+/// Verification proof for an identity credential
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdentityProof {
+    pub credential_id: u64,
+    pub subject: Address,
+    pub signature: BytesN<64>,
+    pub timestamp: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Chain Ticket Portability
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of a cross-chain transfer
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CrossChainTransferStatus {
+    Initiated,
+    BridgeValidated,
+    Completed,
+    Failed,
+    Expired,
+}
+
+/// A cross-chain ticket transfer request
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CrossChainTransfer {
+    pub transfer_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub sender: Address,
+    pub recipient: Address,
+    pub source_chain: String,
+    pub target_chain: String,
+    pub status: CrossChainTransferStatus,
+    pub initiated_at: u64,
+    pub bridge_tx_hash: Option<String>,
+    pub completed_at: Option<u64>,
+}
+
+/// A validated bridge transaction for cross-chain transfer
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BridgeTransaction {
+    pub tx_hash: String,
+    pub source_chain: String,
+    pub target_chain: String,
+    pub sender: Address,
+    pub recipient: Address,
+    pub ticket_id: u64,
+    pub validated: bool,
+    pub validation_time: u64,
+    pub block_number: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Merchandise & NFT Collectibles
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Rarity tier for NFT collectibles
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RarityTier {
+    Common,
+    Uncommon,
+    Rare,
+    Epic,
+    Legendary,
+}
+
+/// Event merchandise item
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventMerchandise {
+    pub id: u64,
+    pub event_id: u64,
+    pub name: String,
+    pub description: String,
+    pub price: i128,
+    pub total_supply: u32,
+    pub remaining_supply: u32,
+    pub organizer: Address,
+    pub active: bool,
+}
+
+/// Pre-ordered merchandise voucher linked to a ticket
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MerchVoucher {
+    pub voucher_id: u64,
+    pub buyer: Address,
+    pub ticket_id: u64,
+    pub merchandise_id: u64,
+    pub issued_at: u64,
+    pub redeemed: bool,
+}
+
+/// Bid for an upgraded seat or VIP tier
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeatUpgradeBid {
+    pub bid_id: u64,
+    pub event_id: u64,
+    pub ticket_id: u64,
+    pub bidder: Address,
+    pub target_tier: String,
+    pub bid_amount: i128,
+    pub timestamp: u64,
+    pub resolved: bool,
+    pub won: bool,
+    pub refunded: bool,
+}
+
+/// A commemorative NFT collectible for a special event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NftCollectible {
+    pub id: u64,
+    pub event_id: u64,
+    pub name: String,
+    pub description: String,
+    pub rarity: RarityTier,
+    pub owner: Address,
+    pub minted_at: u64,
+    pub transferable: bool,
+    pub metadata_hash: BytesN<32>,
+}
+
+/// Collectible inventory tracking per event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CollectibleInventory {
+    pub event_id: u64,
+    pub total_minted: u32,
+    pub max_supply: u32,
+    pub common_minted: u32,
+    pub uncommon_minted: u32,
+    pub rare_minted: u32,
+    pub epic_minted: u32,
+    pub legendary_minted: u32,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dynamic Venue Space Allocation
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VenueSpaceAllocation {
+    pub event_id: u64,
+    pub venue_id: String,
+    pub space_id: String,
+    pub allocated_capacity: u32,
+    pub real_time_demand: u32,
+    pub is_optimized: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Subscription-Based Access Passes
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubscriptionPlan {
+    pub plan_id: u64,
+    pub event_series_id: u64,
+    pub name: String,
+    pub price: i128,
+    pub billing_interval: u64,
+    pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubscriptionStatus {
+    pub subscriber: Address,
+    pub plan_id: u64,
+    pub expiration_time: u64,
+    pub active: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Comprehensive Security Monitoring
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SecurityIncident {
+    pub incident_id: u64,
+    pub affected_address: Address,
+    pub threat_level: String,
+    pub description: String,
+    pub timestamp: u64,
+    pub resolved: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DID / Decentralized Identity Ticket Linking
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TicketDidAssociation {
+    pub ticket_id: u64,
+    pub credential_id: u64,
+    pub subject: Address,
+    pub linked_at: u64,
+    pub revoked: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Resale Price Ceiling for Secondary Marketplace
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResalePriceCeiling {
+    pub event_id: u64,
+    pub ceiling_multiplier_bps: u32,
+    pub absolute_ceiling: i128,
+    pub set_by: Address,
+    pub set_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Attendance Memorabilia / NFT Claim Tracking
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemorabiliaClaim {
+    pub nft_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub attendee: Address,
+    pub claimed_at: u64,
+    pub metadata_hash: BytesN<32>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Personalization Engine
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserPreferences {
+    pub user: Address,
+    pub preferred_categories: Vec<String>,
+    pub max_price: i128,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Email Campaign System
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of an email campaign
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EmailCampaignStatus {
+    Draft,
+    Scheduled,
+    Sending,
+    Sent,
+    Cancelled,
+}
+
+/// An email campaign created by an organizer to send newsletters to attendees
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailCampaign {
+    pub id: u64,
+    pub organizer: Address,
+    /// Optional event filter — None means all events by this organizer
+    pub event_id: Option<u64>,
+    pub subject: String,
+    pub body_html: String,
+    pub status: EmailCampaignStatus,
+    pub created_at: u64,
+    pub scheduled_at: Option<u64>,
+    pub sent_at: Option<u64>,
+    pub recipient_count: u32,
+}
+
+/// Analytics record for a sent email campaign
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailCampaignAnalytics {
+    pub campaign_id: u64,
+    pub total_sent: u32,
+    pub total_delivered: u32,
+    pub total_opened: u32,
+    pub total_clicked: u32,
+    pub total_bounced: u32,
+    pub total_unsubscribed: u32,
+    pub last_updated_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Refund Automation Pipeline (Issue #674)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of a bulk refund batch
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RefundBatchStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// Tracks progress of a bulk refund pipeline for a cancelled event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundBatch {
+    pub batch_id: u64,
+    pub event_id: u64,
+    pub total_tickets: u32,
+    pub refunded_count: u32,
+    pub failed_count: u32,
+    pub status: RefundBatchStatus,
+    pub initiated_at: u64,
+    pub completed_at: Option<u64>,
+    pub initiated_by: Address,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Chain Ticket Bridge Lock (Issue #675)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Represents a ticket locked on the source chain for bridging
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CrossChainLock {
+    pub lock_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub owner: Address,
+    pub target_chain: String,
+    pub destination_address: String,
+    pub locked_at: u64,
+    pub expires_at: u64,
+    pub verified: bool,
+    pub unlocked: bool,
+    pub bridge_proof: Option<String>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event Certification (Issue #654)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A blockchain-issued certification standard an event can be certified against.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CertificationStandard {
+    /// Certifies the event and its tickets are verified as authentic/non-counterfeit.
+    AuthenticityVerified,
+    /// Certifies the event meets the platform's quality-assurance criteria.
+    QualityAssured,
+    /// Certifies the event meets the platform's safety-compliance criteria.
+    SafetyCompliant,
+}
+
+/// A certificate issued for an event under a specific standard.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventCertificate {
+    pub certificate_id: u64,
+    pub event_id: u64,
+    pub organizer: Address,
+    pub standard: CertificationStandard,
+    pub issued_at: u64,
+    pub revoked: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anonymous Event Feedback Surveys
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A single anonymous survey response.
+///
+/// Deliberately does **not** store the respondent's wallet address or ticket
+/// ID — only a one-way `nullifier` hash derived from the ticket is kept, so
+/// double-submission from the same ticket can be rejected without the stored
+/// record ever revealing which ticket (and therefore which wallet) answered.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnonymousSurveyResponse {
+    pub id: u64,
+    pub event_id: u64,
+    /// One rating (1–5) per survey question.
+    pub ratings: Vec<u32>,
+    pub comment: String,
+    pub submitted_at: u64,
+}
+
+/// Aggregated, privacy-preserving results compiled from all anonymous
+/// responses recorded for an event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SurveyResults {
+    pub event_id: u64,
+    pub total_responses: u32,
+    /// Average rating × 100 per question index (parallel to `ratings`).
+    pub average_ratings_x100: Vec<u32>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A community vote to decide which candidate (artist, track, speaker, etc.)
+/// fills a specific schedule slot at an event. Open to any ticket holder of
+/// the event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVote {
+    pub vote_id: u64,
+    pub event_id: u64,
+    pub slot_name: String,
+    /// Candidate names, e.g. artists/tracks/speakers competing for the slot.
+    pub candidates: Vec<String>,
+    /// Vote tally, parallel to `candidates`.
+    pub vote_counts: Vec<u32>,
+    pub voting_deadline: u64,
+    pub finalized: bool,
+    pub winning_candidate: Option<String>,
+}
+
+/// A single ticket holder's vote on a schedule slot (duplicate-vote guard).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVoteCastRecord {
+    pub vote_id: u64,
+    pub voter: Address,
+    pub candidate_index: u32,
+    pub timestamp: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A discount code scoped to a single event, with an expiration date and
+/// both a global and a per-user usage limit (0 means unlimited).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromoCode {
+    pub event_id: u64,
+    pub code: String,
+    pub discount_bps: u32,
+    pub expires_at: u64,
+    pub max_global_uses: u32,
+    pub max_uses_per_user: u32,
+    pub total_uses: u32,
+    pub active: bool,
+    pub created_by: Address,
 }

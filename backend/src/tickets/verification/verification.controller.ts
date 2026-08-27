@@ -16,6 +16,9 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 @ApiBearerAuth()
 @Controller('tickets')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Ticket not found' })
 export class VerificationController {
   constructor(private readonly ticketsService: TicketsService) {}
 
@@ -28,7 +31,10 @@ export class VerificationController {
   @ApiBody({ type: VerifyTicketDto })
   @ApiResponse({ status: 200, description: 'Ticket verified and marked as used' })
   @ApiResponse({ status: 400, description: 'Invalid signature or ticket already used' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Caller is not admin or organizer' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  @ApiResponse({ status: 422, description: 'Ticket cannot be verified' })
   async verify(@Body() verifyTicketDto: VerifyTicketDto) {
     const { ticketId, signature } = verifyTicketDto;
     const ticket = await this.ticketsService.verifyTicket(ticketId, signature);

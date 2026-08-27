@@ -9,6 +9,7 @@ import { Job } from 'bull';
 import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { MailerService } from '../mailer/mailer.service';
 import { UsersService } from '../users/users.service';
+import { CalendarService } from '../calendar/calendar.service';
 
 @Processor('notifications')
 export class NotificationProcessor {
@@ -17,6 +18,7 @@ export class NotificationProcessor {
     private readonly mailerService: MailerService,
     @Inject(forwardRef(() => UsersService))
     private readonly usersService: UsersService,
+    private readonly calendarService: CalendarService,
   ) { }
 
   private async shouldSkip(job: Job, preferenceKey: string): Promise<boolean> {
@@ -53,20 +55,19 @@ export class NotificationProcessor {
     if (await this.shouldSkip(job, 'ticketIssued')) return;
 
     this.logger.log(`Sending ticket email for job ${job.id}...`);
-    const { email, ticketId, eventName, pdfUrl } = job.data;
+    const { email, ticketId, eventName, pdfUrl, eventDate, eventLocation } = job.data;
     const subject = `Your ticket for ${eventName}`;
-    const pdfLink = pdfUrl
-      ? `<p><a href="${pdfUrl}" style="color: #007bff;">Download your PDF ticket</a></p>`
-      : '';
-    const html = `
-      <div style="font-family: Arial, sans-serif;">
-        <h2>Your Ticket for ${eventName}</h2>
-        <p>Ticket ID: <strong>${ticketId}</strong></p>
-        <p>Redeem your ticket <a href="https://lumentix.com/redeem/${ticketId}" style="color: #007bff;">here</a>.</p>
-        ${pdfLink}
-      </div>
-    `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send(email, subject, {
+      template: 'ticket-ready',
+      context: {
+        name: email,
+        ticketId,
+        eventTitle: eventName,
+        eventDate: eventDate ?? '',
+        eventLocation: eventLocation ?? '',
+        qrCodeUrl: pdfUrl ?? null,
+      },
+    });
     return { sent: true };
   }
 
@@ -90,16 +91,19 @@ export class NotificationProcessor {
   async handleRefundEmail(job: Job) {
     // Refund is critical, no skip check
     this.logger.log(`Sending refund email for job ${job.id}...`);
-    const { email, amount, refundId } = job.data;
+    const { email, amount, refundId, currency, eventTitle, transactionHash } = job.data;
     const subject = 'Your refund has been processed';
-    const html = `
-      <div style="font-family: Arial, sans-serif;">
-        <h2>Your Refund Has Been Processed</h2>
-        <p>Amount: <strong>${amount} XLM</strong></p>
-        <p>Refund ID: <strong>${refundId}</strong></p>
-      </div>
-    `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send(email, subject, {
+      template: 'refund-issued',
+      context: {
+        name: email,
+        amount,
+        currency: currency ?? 'XLM',
+        refundId,
+        eventTitle: eventTitle ?? '',
+        transactionHash: transactionHash ?? null,
+      },
+    });
   }
 
   @Process('sendSponsorEmail')
@@ -195,14 +199,16 @@ export class NotificationProcessor {
     }
 
     const subject = `Event Cancelled: ${eventTitle}`;
-    const html = `
-      <div style="font-family: Arial, sans-serif;">
-        <h2>Event Cancelled: ${eventTitle}</h2>
-        <p>We regret to inform you that the event <strong>${eventTitle}</strong> has been cancelled.</p>
-        <p>A refund will be processed for eligible tickets.</p>
-      </div>
-    `;
-    await this.mailerService.send(user.email, subject, html);
+    await this.mailerService.send(user.email, subject, {
+      template: 'event-cancelled',
+      context: {
+        name: user.email,
+        eventTitle,
+        eventDate: job.data.eventDate ?? '',
+        organizerName: job.data.organizerName ?? '',
+        refundEligible: true,
+      },
+    });
     return { sent: true };
   }
 
@@ -261,6 +267,57 @@ export class NotificationProcessor {
       </div>
     `;
     await this.mailerService.send(user.email, subject, html);
+    return { sent: true };
+  }
+
+  @Process('sendCalendarInvite')
+  async handleCalendarInvite(job: Job) {
+    this.logger.log(`Sending calendar invite email for job ${job.id}...`);
+    const {
+      to,
+      eventTitle,
+      eventDescription,
+      startDate,
+      endDate,
+      location,
+      ticketId,
+      organizerName,
+      googleUrl,
+      outlookUrl,
+      yahooUrl,
+      icsDownloadUrl,
+    } = job.data;
+
+    const eventDate = new Date(startDate);
+    const eventDateStr = eventDate.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const eventTimeStr = eventDate.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const subject = `📅 Save the Date: ${eventTitle}`;
+    await this.mailerService.send({
+      to,
+      subject,
+      template: 'calendar-invite',
+      context: {
+        eventTitle,
+        eventDate: eventDateStr,
+        eventTime: eventTimeStr,
+        eventLocation: location ?? '',
+        ticketId: ticketId ?? '',
+        googleUrl: googleUrl ?? '',
+        outlookUrl: outlookUrl ?? '',
+        yahooUrl: yahooUrl ?? '',
+        icsDownloadUrl: icsDownloadUrl ?? '',
+        currentYear: new Date().getFullYear(),
+      },
+    });
     return { sent: true };
   }
 

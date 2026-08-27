@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SponsorsService } from './sponsors.service';
-import { SponsorsController } from './sponsors.controller';
+import { SponsorsController, EventSponsorsController, SponsorProfileController } from './sponsors.controller';
 import { ContributionsService } from './contributions.service';
 import { SponsorTier } from './entities/sponsor-tier.entity';
 import { SponsorContribution } from './entities/sponsor-contribution.entity';
@@ -23,7 +23,7 @@ import { EscrowModule } from 'src/payments/escrow.module';
     NotificationModule,
     EscrowModule,
   ],
-  controllers: [SponsorsController],
+  controllers: [SponsorsController, EventSponsorsController, SponsorProfileController],
   providers: [SponsorsService, ContributionsService],
   exports: [SponsorsService, ContributionsService],
 })

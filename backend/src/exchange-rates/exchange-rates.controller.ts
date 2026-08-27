@@ -8,8 +8,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ExchangeRatesService } from './exchange-rates.service';
 import { CreateExchangeRateDto } from './dto/create-exchange-rate.dto';
@@ -53,6 +55,7 @@ export class ExchangeRatesController {
     @Query('from') from: string,
     @Query('to') to: string,
     @Query('amount') amount: string,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<{ from: string; to: string; amount: number; converted: number; rate: number }> {
     if (!from || !to || !amount) {
       throw new BadRequestException('from, to, and amount are required');
@@ -62,10 +65,15 @@ export class ExchangeRatesController {
       throw new BadRequestException('Amount must be a positive number');
     }
 
-    const rate = await this.exchangeRatesService.getRate(
+    const { rate, isStale } = await this.exchangeRatesService.getRateWithStaleness(
       from.toUpperCase(),
       to.toUpperCase(),
     );
+
+    if (isStale) {
+      res.setHeader('X-Rate-Stale', 'true');
+    }
+
     return {
       from: from.toUpperCase(),
       to: to.toUpperCase(),
@@ -73,6 +81,46 @@ export class ExchangeRatesController {
       converted: parseFloat((numAmount * rate).toFixed(7)),
       rate,
     };
+  }
+
+  @Get('convert-multiple')
+  @ApiOperation({ summary: 'Convert to multiple currencies', description: 'Public. Converts an amount from one currency to multiple target currencies.' })
+  @ApiQuery({ name: 'from', required: true, description: 'Source currency code (e.g. USD)' })
+  @ApiQuery({ name: 'amount', required: true, description: 'Amount to convert' })
+  @ApiQuery({ name: 'to', required: false, description: 'Comma-separated target currencies (e.g. EUR,XLM,NGN)' })
+  @ApiResponse({ status: 200, description: 'Multi-currency conversion' })
+  async convertMultiple(
+    @Query('from') from: string,
+    @Query('amount') amount: string,
+    @Query('to') to: string,
+  ): Promise<{ from: string; amount: number; rates: Record<string, number> }> {
+    if (!from || !amount) {
+      throw new BadRequestException('from and amount are required');
+    }
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      throw new BadRequestException('Amount must be a positive number');
+    }
+
+    const currencies = to
+      ? to.split(',').map(c => c.trim().toUpperCase()).filter(Boolean)
+      : await this.exchangeRatesService.getSupportedCurrencies();
+
+    const rates: Record<string, number> = {};
+    for (const target of currencies) {
+      if (target === from.toUpperCase()) {
+        rates[target] = numAmount;
+        continue;
+      }
+      try {
+        const rate = await this.exchangeRatesService.getRate(from.toUpperCase(), target);
+        rates[target] = parseFloat((numAmount * rate).toFixed(7));
+      } catch {
+        continue;
+      }
+    }
+
+    return { from: from.toUpperCase(), amount: numAmount, rates };
   }
 
   @Get(':id')

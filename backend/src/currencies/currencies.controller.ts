@@ -7,6 +7,8 @@ import {
   Param,
   Delete,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrenciesService } from './currencies.service';
@@ -17,10 +19,34 @@ import { RolesGuard } from '../admin/roles.guard';
 import { Roles } from '../admin/roles.decorator';
 import { UserRole } from '../users/enums/user-role.enum';
 
+import { CurrencyRateService }
+  from './services/currency-rate.service';
+
 @ApiTags('Currencies')
 @Controller('currencies')
 export class CurrenciesController {
   constructor(private readonly currenciesService: CurrenciesService) {}
+
+    @Get('rates')
+  @ApiOperation({ summary: 'Get current currency exchange rates' })
+  @ApiResponse({ status: 200, description: 'Exchange rates returned' })
+  @ApiResponse({ status: 503, description: 'Exchange rates unavailable' })
+  async getRates(
+    @Res({ passthrough: true })
+    response: Response,
+  ) {
+    const result =
+      await this.currencyRateService.getRates();
+
+    if (result.stale) {
+      response.setHeader(
+        'X-Rate-Stale',
+        'true',
+      );
+    }
+
+    return result.data;
+  }
 
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -57,6 +83,35 @@ export class CurrenciesController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   toggleActive(@Param('id') id: string) {
     return this.currenciesService.toggleActive(id);
+  }
+
+  @Patch(':code/activate')
+  @Post(':code/activate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Activate a currency', description: 'Admin only. Activates a currency by its code.' })
+  @ApiResponse({ status: 200, description: 'Currency activated' })
+  @ApiResponse({ status: 404, description: 'Currency not found' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  activate(@Param('code') code: string) {
+    return this.currenciesService.activate(code);
+  }
+
+  @Patch(':code/deactivate')
+  @Post(':code/deactivate')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Deactivate a currency', description: 'Admin only. Deactivates a currency. Returns 409 if pending payments exist for this currency.' })
+  @ApiResponse({ status: 200, description: 'Currency deactivated' })
+  @ApiResponse({ status: 404, description: 'Currency not found' })
+  @ApiResponse({ status: 409, description: 'Conflict — pending payments exist' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  deactivate(@Param('code') code: string) {
+    return this.currenciesService.deactivate(code);
   }
 
   @Patch(':id')

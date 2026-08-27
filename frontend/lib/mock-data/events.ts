@@ -4,7 +4,69 @@ import {
 	EventCategory,
 	EventFilters,
 	PaginatedResponse,
+	VipTierName,
+	SeatCategoryName,
+	AccessibilityType,
 } from "@/types/event";
+
+const MOCK_VIP_TIERS = {
+	"e1a2b3c4-d5e6-7890-abcd-ef1234567890": [
+		{
+			id: "vip-001", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890",
+			name: VipTierName.BRONZE, price: 499, maxSlots: 200, filledSlots: 120,
+			benefits: ["Early Entry", "Exclusive Merch Pack"], createdAt: "2026-01-12T12:00:00Z",
+		},
+		{
+			id: "vip-002", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890",
+			name: VipTierName.GOLD, price: 999, maxSlots: 100, filledSlots: 85,
+			benefits: ["Front Row Seating", "After Party Access", "Meet & Greet", "Exclusive Merch"], createdAt: "2026-01-12T12:00:00Z",
+		},
+		{
+			id: "vip-003", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890",
+			name: VipTierName.PLATINUM, price: 2499, maxSlots: 25, filledSlots: 22,
+			benefits: ["Everything in Gold", "Private Dinner with Speakers", "Hotel Accommodation", "Airport Transfer"], createdAt: "2026-01-12T12:00:00Z",
+		},
+	],
+	"b4d5e6f7-a8b9-0123-defa-234567890123": [
+		{
+			id: "vip-004", eventId: "b4d5e6f7-a8b9-0123-defa-234567890123",
+			name: VipTierName.SILVER, price: 149, maxSlots: 500, filledSlots: 300,
+			benefits: ["Express Entry", "VIP Bar Access"], createdAt: "2026-01-22T08:00:00Z",
+		},
+		{
+			id: "vip-005", eventId: "b4d5e6f7-a8b9-0123-defa-234567890123",
+			name: VipTierName.GOLD, price: 299, maxSlots: 200, filledSlots: 180,
+			benefits: ["Backstage Access", "Artist Meet & Greet", "VIP Lounge"], createdAt: "2026-01-22T08:00:00Z",
+		},
+	],
+};
+
+const MOCK_ACCESSIBILITY_INVENTORY: Record<string, any[]> = {
+	"e1a2b3c4-d5e6-7890-abcd-ef1234567890": [
+		{ id: "acc-001", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890", type: AccessibilityType.WHEELCHAIR, totalSlots: 20, bookedSlots: 8, description: "Wheelchair-accessible seating in all halls", createdAt: "2026-01-15T12:00:00Z" },
+		{ id: "acc-002", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890", type: AccessibilityType.HEARING, totalSlots: 15, bookedSlots: 5, description: "Hearing assist devices and sign language interpretation", createdAt: "2026-01-15T12:00:00Z" },
+		{ id: "acc-003", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890", type: AccessibilityType.VISUAL, totalSlots: 10, bookedSlots: 2, description: "Guide dog accommodation and braille materials", createdAt: "2026-01-15T12:00:00Z" },
+	],
+	"b4d5e6f7-a8b9-0123-defa-234567890123": [
+		{ id: "acc-004", eventId: "b4d5e6f7-a8b9-0123-defa-234567890123", type: AccessibilityType.WHEELCHAIR, totalSlots: 50, bookedSlots: 12, description: "Wheelchair platform near main stage", createdAt: "2026-01-25T08:00:00Z" },
+	],
+	"c5e6f7a8-b9c0-1234-efab-345678901234": [
+		{ id: "acc-005", eventId: "c5e6f7a8-b9c0-1234-efab-345678901234", type: AccessibilityType.WHEELCHAIR, totalSlots: 10, bookedSlots: 3, description: "Accessible route for the 5K run", createdAt: "2026-02-07T07:00:00Z" },
+	],
+};
+
+const MOCK_VENUE_SECTIONS: Record<string, any[]> = {
+	"e1a2b3c4-d5e6-7890-abcd-ef1234567890": [
+		{ id: "sec-001", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890", name: "Main Hall A", category: SeatCategoryName.GENERAL, rows: 20, seatsPerRow: 30, createdAt: "2026-01-14T12:00:00Z" },
+		{ id: "sec-002", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890", name: "Main Hall B", category: SeatCategoryName.PREMIUM, rows: 10, seatsPerRow: 20, createdAt: "2026-01-14T12:00:00Z" },
+		{ id: "sec-003", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890", name: "VIP Box", category: SeatCategoryName.VIP, rows: 5, seatsPerRow: 8, createdAt: "2026-01-14T12:00:00Z" },
+		{ id: "sec-004", eventId: "e1a2b3c4-d5e6-7890-abcd-ef1234567890", name: "Balcony", category: SeatCategoryName.BALCONY, rows: 8, seatsPerRow: 12, createdAt: "2026-01-14T12:00:00Z" },
+	],
+	"b4d5e6f7-a8b9-0123-defa-234567890123": [
+		{ id: "sec-005", eventId: "b4d5e6f7-a8b9-0123-defa-234567890123", name: "Floor Standing", category: SeatCategoryName.GENERAL, rows: 1, seatsPerRow: 3000, createdAt: "2026-01-24T08:00:00Z" },
+		{ id: "sec-006", eventId: "b4d5e6f7-a8b9-0123-defa-234567890123", name: "VIP Lounge", category: SeatCategoryName.VIP, rows: 10, seatsPerRow: 10, createdAt: "2026-01-24T08:00:00Z" },
+	],
+};
 
 const MOCK_EVENTS: Event[] = [
 	{
@@ -24,6 +86,9 @@ const MOCK_EVENTS: Event[] = [
 		imageUrl: "",
 		totalTickets: 2000,
 		soldTickets: 1456,
+		vipTiers: MOCK_VIP_TIERS["e1a2b3c4-d5e6-7890-abcd-ef1234567890"],
+		venueSections: MOCK_VENUE_SECTIONS["e1a2b3c4-d5e6-7890-abcd-ef1234567890"],
+		accessibilityInventory: MOCK_ACCESSIBILITY_INVENTORY["e1a2b3c4-d5e6-7890-abcd-ef1234567890"],
 		createdAt: "2026-01-10T12:00:00Z",
 		updatedAt: "2026-02-20T08:00:00Z",
 	},
@@ -56,7 +121,7 @@ const MOCK_EVENTS: Event[] = [
 		startDate: "2026-03-10T18:00:00Z",
 		endDate: "2026-03-10T21:00:00Z",
 		ticketPrice: 0,
-		currency: "USD",
+		currency: "NGN",
 		organizerId: "org-003",
 		organizerName: "Web3 Lagos",
 		status: EventStatus.PUBLISHED,
@@ -76,7 +141,7 @@ const MOCK_EVENTS: Event[] = [
 		startDate: "2026-06-20T20:00:00Z",
 		endDate: "2026-06-22T04:00:00Z",
 		ticketPrice: 89,
-		currency: "USD",
+		currency: "EUR",
 		organizerId: "org-004",
 		organizerName: "Lumen Events GmbH",
 		status: EventStatus.PUBLISHED,
@@ -84,6 +149,9 @@ const MOCK_EVENTS: Event[] = [
 		imageUrl: "",
 		totalTickets: 5000,
 		soldTickets: 3200,
+		vipTiers: MOCK_VIP_TIERS["b4d5e6f7-a8b9-0123-defa-234567890123"],
+		venueSections: MOCK_VENUE_SECTIONS["b4d5e6f7-a8b9-0123-defa-234567890123"],
+		accessibilityInventory: MOCK_ACCESSIBILITY_INVENTORY["b4d5e6f7-a8b9-0123-defa-234567890123"],
 		createdAt: "2026-01-20T08:00:00Z",
 		updatedAt: "2026-02-22T10:00:00Z",
 	},
@@ -96,7 +164,7 @@ const MOCK_EVENTS: Event[] = [
 		startDate: "2026-05-03T08:00:00Z",
 		endDate: "2026-05-03T12:00:00Z",
 		ticketPrice: 25,
-		currency: "USD",
+		currency: "GBP",
 		organizerId: "org-005",
 		organizerName: "Run for Blocks",
 		status: EventStatus.PUBLISHED,
@@ -104,6 +172,7 @@ const MOCK_EVENTS: Event[] = [
 		imageUrl: "",
 		totalTickets: 500,
 		soldTickets: 312,
+		accessibilityInventory: MOCK_ACCESSIBILITY_INVENTORY["c5e6f7a8-b9c0-1234-efab-345678901234"],
 		createdAt: "2026-02-05T07:00:00Z",
 		updatedAt: "2026-02-19T09:00:00Z",
 	},
@@ -175,8 +244,8 @@ const MOCK_EVENTS: Event[] = [
 		location: "Tokyo, Japan",
 		startDate: "2026-05-18T10:00:00Z",
 		endDate: "2026-05-19T20:00:00Z",
-		ticketPrice: 35,
-		currency: "USD",
+		ticketPrice: 3500,
+		currency: "JPY",
 		organizerId: "org-009",
 		organizerName: "GameFi Tokyo",
 		status: EventStatus.PUBLISHED,
@@ -216,7 +285,7 @@ const MOCK_EVENTS: Event[] = [
 		startDate: "2026-03-14T17:30:00Z",
 		endDate: "2026-03-14T21:00:00Z",
 		ticketPrice: 0,
-		currency: "USD",
+		currency: "EUR",
 		organizerId: "org-011",
 		organizerName: "Stellar Amsterdam",
 		status: EventStatus.PUBLISHED,
@@ -316,7 +385,7 @@ const MOCK_EVENTS: Event[] = [
 		startDate: "2026-06-15T10:00:00Z",
 		endDate: "2026-06-15T20:00:00Z",
 		ticketPrice: 45,
-		currency: "USD",
+		currency: "EUR",
 		organizerId: "org-001",
 		organizerName: "Stellar Foundation",
 		status: EventStatus.PUBLISHED,
@@ -369,21 +438,15 @@ const MOCK_EVENTS: Event[] = [
 	},
 ];
 
-/**
- * Simulates fetching events from the backend API with filtering and pagination.
- * Introduces an artificial delay to simulate network latency.
- */
 export async function fetchEvents(
 	filters: EventFilters,
 	page: number = 1,
 	limit: number = 9,
 ): Promise<PaginatedResponse<Event>> {
-	// Simulate network delay
 	await new Promise((resolve) => setTimeout(resolve, 800));
 
 	let filtered = [...MOCK_EVENTS];
 
-	// Search filter (title + description)
 	if (filters.search.trim()) {
 		const q = filters.search.toLowerCase();
 		filtered = filtered.filter(
@@ -394,14 +457,12 @@ export async function fetchEvents(
 		);
 	}
 
-	// Category filter
 	if (filters.categories.length > 0) {
 		filtered = filtered.filter((e) =>
 			filters.categories.includes(e.category),
 		);
 	}
 
-	// Date range filter
 	if (filters.dateFrom) {
 		const from = new Date(filters.dateFrom);
 		filtered = filtered.filter((e) => new Date(e.startDate) >= from);
@@ -411,7 +472,6 @@ export async function fetchEvents(
 		filtered = filtered.filter((e) => new Date(e.startDate) <= to);
 	}
 
-	// Price range filter
 	if (filters.priceMin) {
 		const min = parseFloat(filters.priceMin);
 		if (!isNaN(min)) {
@@ -425,18 +485,15 @@ export async function fetchEvents(
 		}
 	}
 
-	// Status filter
 	if (filters.status) {
 		filtered = filtered.filter((e) => e.status === filters.status);
 	}
 
-	// Sort by start date (nearest first)
 	filtered.sort(
 		(a, b) =>
 			new Date(a.startDate).getTime() - new Date(b.startDate).getTime(),
 	);
 
-	// Pagination
 	const total = filtered.length;
 	const totalPages = Math.max(1, Math.ceil(total / limit));
 	const safePage = Math.min(page, totalPages);

@@ -11,6 +11,9 @@ import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
 import { Event, EventStatus } from 'src/events/entities/event.entity';
 import { StellarService } from 'src/stellar';
+import { EncryptionService } from '../../common/encryption/encryption.service';
+import { ENCRYPTION_PROVIDER } from '../../common/encryption/encryption.service';
+import { LocalEncryptionProvider } from '../../common/encryption/providers/local-encryption.provider';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -37,6 +40,11 @@ function makeEvent(overrides: Partial<Event> = {}): Event {
     maxAttendees: null,
     escrowPublicKey: null,
     escrowSecretEncrypted: null,
+    imageUrl: null,
+    fundingGoal: null,
+    category: undefined as any,
+    ageRestriction: undefined as any,
+    categories: [],
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -106,6 +114,13 @@ describe('EscrowService', () => {
             }),
           },
         },
+        {
+          provide: ENCRYPTION_PROVIDER,
+          useFactory: (configService: ConfigService) =>
+            new LocalEncryptionProvider(configService),
+          inject: [ConfigService],
+        },
+        EncryptionService,
       ],
     }).compile();
 

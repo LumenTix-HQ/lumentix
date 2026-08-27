@@ -8,11 +8,26 @@ import {
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 
+interface HttpExceptionResponseBody {
+  message?: string | string[];
+  error?: string;
+}
+
+interface ErrorResponse {
+  statusCode: number;
+  message: string | string[];
+  allMessages: string[];
+  error: string;
+  timestamp: string;
+  path: string;
+  method: string;
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
 
-  catch(exception: any, host: ArgumentsHost) {
+  catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
@@ -22,32 +37,31 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    let message = 'Internal server error';
+    let message: string | string[] = 'Internal server error';
     let error = 'Internal Server Error';
 
     if (exception instanceof HttpException) {
       const res = exception.getResponse();
       if (typeof res === 'string') {
         message = res;
-      } else if (typeof res === 'object') {
-        message = (res as any).message || message;
-        error = (res as any).error || error;
+      } else if (typeof res === 'object' && res !== null) {
+        const body = res as HttpExceptionResponseBody;
+        if (body.message) message = body.message;
+        if (body.error) error = body.error;
       }
     } else if (exception instanceof Error) {
       message = exception.message;
-      // In production, we might want to hide the actual message if it's not an HttpException
       if (process.env.NODE_ENV === 'production') {
         message = 'An unexpected error occurred';
       }
     }
 
-    // Standardised response format
-    const errorResponse = {
+    const allMessages = Array.isArray(message) ? message : [message];
+
+    const errorResponse: ErrorResponse = {
       statusCode: status,
-      message: Array.isArray(message) ? message[0] : message, // If it's a validation error array, take the first one or keep as is? 
-      // Actually, standard is usually to keep the array if it's validation, but the user requested consistent shape.
-      // Let's keep the message as is (could be array or string) but ensure the rest is consistent.
-      allMessages: Array.isArray(message) ? message : [message],
+      message: allMessages[0] ?? message,
+      allMessages,
       error,
       timestamp: new Date().toISOString(),
       path: request.url,
@@ -55,13 +69,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
 
     if (status >= 500) {
+      const errorMessage =
+        exception instanceof Error ? exception.message : String(exception);
+      const errorStack =
+        exception instanceof Error ? exception.stack : undefined;
       this.logger.error(
-        `${request.method} ${request.url} ${status} Error: ${exception.message}`,
-        exception.stack,
+        `${request.method} ${request.url} ${status} Error: ${errorMessage}`,
+        errorStack,
       );
     }
 
     response.status(status).json(errorResponse);
   }
 }
-
