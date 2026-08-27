@@ -1,28 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ConfigService } from '@nestjs/config';
-import { DataSource, Repository } from 'typeorm';
-import Redis from 'ioredis';
-import { StellarService } from '../stellar/stellar.service';
-import {
-  TelemetryMetric,
-  TelemetryNodeStatus,
-} from './entities/telemetry-metric.entity';
-import { RecordMetricDatapointDto } from './dto/record-metric-datapoint.dto';
+import { Repository, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
+import { TelemetryMetric, MetricType } from './entities/telemetry-metric.entity';
+import { RecordMetricDto } from './dto/record-metric.dto';
 
-export interface ServicePingResult {
-  service: string;
-  status: TelemetryNodeStatus;
-  latencyMs: number;
-  checkedAt: Date;
-  error?: string;
-}
-
-export interface TelemetryStatusSummary {
-  nodes: ServicePingResult[];
-  averageLatencyMs: Record<string, number>;
-  uptimePercentage: Record<string, number>;
-  recentDatapoints: TelemetryMetric[];
+export interface HealthStatus {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  apiLatencyMs: number;
+  errorRate: number;
+  timestamp: Date;
 }
 
 @Injectable()
@@ -32,128 +18,117 @@ export class TelemetryService {
   constructor(
     @InjectRepository(TelemetryMetric)
     private readonly metricRepository: Repository<TelemetryMetric>,
-    private readonly dataSource: DataSource,
-    private readonly configService: ConfigService,
-    private readonly stellarService: StellarService,
   ) {}
 
-  async pingSystemServices(): Promise<ServicePingResult[]> {
-    const results = await Promise.all([
-      this.pingService('database', () => this.dataSource.query('SELECT 1')),
-      this.pingService('redis', () => this.pingRedis()),
-      this.pingService('stellar', () => this.stellarService.checkConnectivity()),
-    ]);
+  async recordMetric(dto: RecordMetricDto): Promise<TelemetryMetric> {
+    const metric = this.metricRepository.create({
+      metricType: dto.metricType,
+      service: dto.service,
+      value: dto.value,
+      unit: dto.unit ?? null,
+      tags: dto.tags ?? null,
+    });
 
-    await Promise.all(
-      results.map((result) =>
-        this.recordMetricDatapoint({
-          service: result.service,
-          metricType: 'ping_latency',
-          value: result.latencyMs,
-          unit: 'ms',
-          status: result.status,
-          metadata: result.error ? { error: result.error } : undefined,
-        }),
-      ),
+    const saved = await this.metricRepository.save(metric);
+    this.logger.debug(
+      `Recorded ${dto.metricType} for ${dto.service}: ${dto.value}${dto.unit ?? ''}`,
     );
 
-    return results;
+    return saved;
   }
 
-  async recordMetricDatapoint(
-    dto: RecordMetricDatapointDto,
-  ): Promise<TelemetryMetric> {
-    const datapoint = this.metricRepository.create({
-      service: dto.service,
-      metricType: dto.metricType ?? 'custom',
-      value: dto.value,
-      unit: dto.unit ?? 'ms',
-      status: dto.status ?? null,
-      metadata: dto.metadata ?? null,
-    });
-    return this.metricRepository.save(datapoint);
-  }
-
-  async fetchTelemetryStatus(): Promise<TelemetryStatusSummary> {
-    const nodes = await this.pingSystemServices();
-
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const recentMetrics = await this.metricRepository
-      .createQueryBuilder('metric')
-      .where('metric.recordedAt >= :since', { since })
-      .andWhere('metric.metricType = :metricType', {
-        metricType: 'ping_latency',
-      })
-      .getMany();
-
-    const averageLatencyMs: Record<string, number> = {};
-    const uptimePercentage: Record<string, number> = {};
-
-    const byService = new Map<string, TelemetryMetric[]>();
-    for (const metric of recentMetrics) {
-      const list = byService.get(metric.service) ?? [];
-      list.push(metric);
-      byService.set(metric.service, list);
-    }
-
-    for (const [service, metrics] of byService.entries()) {
-      const totalLatency = metrics.reduce((sum, m) => sum + m.value, 0);
-      averageLatencyMs[service] = totalLatency / metrics.length;
-
-      const upCount = metrics.filter((m) => m.status === 'up').length;
-      uptimePercentage[service] = (upCount / metrics.length) * 100;
-    }
-
-    const recentDatapoints = await this.metricRepository.find({
-      order: { recordedAt: 'DESC' },
-      take: 50,
-    });
-
-    return { nodes, averageLatencyMs, uptimePercentage, recentDatapoints };
-  }
-
-  private async pingService(
+  async recordDataPoint(
+    metricType: MetricType,
     service: string,
-    check: () => Promise<unknown>,
-  ): Promise<ServicePingResult> {
-    const startedAt = Date.now();
-    try {
-      await check();
-      return {
-        service,
-        status: 'up',
-        latencyMs: Date.now() - startedAt,
-        checkedAt: new Date(),
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Service unreachable';
-      this.logger.warn(`Ping failed for ${service}: ${message}`);
-      return {
-        service,
-        status: 'down',
-        latencyMs: Date.now() - startedAt,
-        checkedAt: new Date(),
-        error: message,
-      };
-    }
+    value: number,
+    unit?: string,
+    tags?: Record<string, string>,
+  ): Promise<TelemetryMetric> {
+    return this.recordMetric({
+      metricType,
+      service,
+      value,
+      unit,
+      tags,
+    });
   }
 
-  private async pingRedis(): Promise<void> {
-    const redis = new Redis({
-      host: this.configService.get<string>('REDIS_HOST') ?? 'localhost',
-      port: this.configService.get<number>('REDIS_PORT') ?? 6379,
-      connectTimeout: 2000,
-      lazyConnect: true,
+  async pingSystemServices(): Promise<HealthStatus> {
+    const now = new Date();
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+
+    const recentMetrics = await this.metricRepository.find({
+      where: {
+        createdAt: MoreThanOrEqual(fiveMinutesAgo),
+      },
+      order: { createdAt: 'DESC' },
+      take: 100,
     });
 
-    try {
-      await redis.connect();
-      const pong = await redis.ping();
-      if (pong !== 'PONG') {
-        throw new Error('Redis ping did not return PONG');
-      }
-    } finally {
-      await redis.quit().catch(() => undefined);
+    if (recentMetrics.length === 0) {
+      return {
+        status: 'unhealthy',
+        apiLatencyMs: 0,
+        errorRate: 1,
+        timestamp: now,
+      };
     }
+
+    const latencyMetrics = recentMetrics.filter(
+      (m) => m.metricType === MetricType.API_LATENCY,
+    );
+    const errorMetrics = recentMetrics.filter(
+      (m) => m.metricType === MetricType.ERROR_RATE,
+    );
+
+    const avgLatency =
+      latencyMetrics.length > 0
+        ? latencyMetrics.reduce((sum, m) => sum + Number(m.value), 0) /
+          latencyMetrics.length
+        : 0;
+
+    const avgErrorRate =
+      errorMetrics.length > 0
+        ? errorMetrics.reduce((sum, m) => sum + Number(m.value), 0) /
+          errorMetrics.length
+        : 0;
+
+    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
+    if (avgLatency > 1000 || avgErrorRate > 0.05) {
+      status = 'degraded';
+    }
+    if (avgLatency > 5000 || avgErrorRate > 0.1) {
+      status = 'unhealthy';
+    }
+
+    return {
+      status,
+      apiLatencyMs: Math.round(avgLatency),
+      errorRate: Number((avgErrorRate * 100).toFixed(2)),
+      timestamp: now,
+    };
+  }
+
+  async fetchTelemetryStatus(
+    metricType?: MetricType,
+    service?: string,
+    hoursBack: number = 1,
+  ): Promise<TelemetryMetric[]> {
+    const cutoffTime = new Date();
+    cutoffTime.setHours(cutoffTime.getHours() - hoursBack);
+
+    const qb = this.metricRepository
+      .createQueryBuilder('metric')
+      .where('metric.createdAt >= :cutoff', { cutoff: cutoffTime });
+
+    if (metricType) {
+      qb.andWhere('metric.metricType = :metricType', { metricType });
+    }
+
+    if (service) {
+      qb.andWhere('metric.service = :service', { service });
+    }
+
+    return qb.orderBy('metric.createdAt', 'DESC').take(500).getMany();
   }
 }

@@ -1,14 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { TelemetryMetric } from './entities/telemetry-metric.entity';
 import { TelemetryService } from './telemetry.service';
 import { TelemetryController } from './telemetry.controller';
-import { StellarModule } from '../stellar/stellar.module';
+import { TelemetryMetric } from './entities/telemetry-metric.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TelemetryMetric]), StellarModule],
-  controllers: [TelemetryController],
+  imports: [TypeOrmModule.forFeature([TelemetryMetric])],
   providers: [TelemetryService],
+  controllers: [TelemetryController],
   exports: [TelemetryService],
 })
 export class TelemetryModule {}

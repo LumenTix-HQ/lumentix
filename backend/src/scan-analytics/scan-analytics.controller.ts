@@ -9,82 +9,93 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ScanAnalyticsService } from './scan-analytics.service';
-import { RecordGateScanDto } from './dto/record-gate-scan.dto';
-import { Roles, Role } from '../common/decorators/roles.decorator';
-import { RolesGuard } from '../common/guards/roles.guard';
+import { RecordScanDto, FetchRealtimeScanSpeedDto } from './dto/record-scan.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '../users/enums/user-role.enum';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 
-@ApiTags('Gate Scan Analytics')
-@ApiBearerAuth()
+@ApiTags('Scan Analytics')
 @Controller('events/:eventId/scan-analytics')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-@ApiResponse({ status: 403, description: 'Forbidden' })
 export class ScanAnalyticsController {
-  constructor(private readonly scanAnalyticsService: ScanAnalyticsService) {}
+  constructor(private readonly scanService: ScanAnalyticsService) {}
 
-  @Post('scans')
-  @Roles(Role.ORGANIZER, Role.ADMIN)
-  @ApiOperation({ summary: 'Record a gate scan', description: 'Organizer/Admin-only. Logs a check-in scan event for a gate.' })
-  @ApiResponse({ status: 201, description: 'Scan event recorded' })
-  recordScan(
+  @Post('record-scan')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Record a ticket scan',
+    description: 'Records a ticket scan event with timing and success status.',
+  })
+  @ApiResponse({ status: 201, description: 'Scan recorded' })
+  async recordScan(
     @Param('eventId', ParseUUIDPipe) eventId: string,
-    @Body() dto: RecordGateScanDto,
+    @Body() dto: RecordScanDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    return this.scanAnalyticsService.recordGateScan(eventId, dto, req.user.id);
+    return this.scanService.recordScan(dto);
   }
 
-  @Get('velocity')
-  @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Calculate scan velocity', description: 'Organizer-only. Scans-per-minute over a configurable window, optionally scoped to a single gate.' })
-  @ApiQuery({ name: 'gateId', required: false })
-  @ApiQuery({ name: 'windowMinutes', required: false, type: Number })
-  @ApiResponse({ status: 200, description: 'Scan velocity result' })
-  calculateVelocity(
+  @Get('scan-velocity')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Calculate scan velocity',
+    description:
+      'Organizer-only. Returns the scans per minute for the event or specific gate.',
+  })
+  @ApiResponse({ status: 200, description: 'Scan velocity' })
+  async getScanVelocity(
     @Param('eventId', ParseUUIDPipe) eventId: string,
-    @Req() req: AuthenticatedRequest,
     @Query('gateId') gateId?: string,
-    @Query('windowMinutes') windowMinutes?: string,
   ) {
-    return this.scanAnalyticsService.calculateScanVelocity(
+    const velocity = await this.scanService.calculateScanVelocity(
       eventId,
-      req.user.id,
       gateId,
-      windowMinutes ? Number(windowMinutes) : undefined,
     );
+    return { eventId, gateId: gateId || null, scansPerMinute: velocity };
   }
 
   @Get('throughput')
-  @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Track gate throughput', description: 'Organizer-only. Per-gate scan throughput to help optimize staffing.' })
-  @ApiQuery({ name: 'windowMinutes', required: false, type: Number })
-  @ApiResponse({ status: 200, description: 'Per-gate throughput stats' })
-  trackThroughput(
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Track gate throughput',
+    description:
+      'Organizer-only. Returns queue velocity stats for staffing optimization.',
+  })
+  @ApiResponse({ status: 200, description: 'Throughput statistics' })
+  async getGateThroughput(
     @Param('eventId', ParseUUIDPipe) eventId: string,
-    @Req() req: AuthenticatedRequest,
-    @Query('windowMinutes') windowMinutes?: string,
-  ) {
-    return this.scanAnalyticsService.trackGateThroughput(
-      eventId,
-      req.user.id,
-      windowMinutes ? Number(windowMinutes) : undefined,
-    );
-  }
-
-  @Get('realtime')
-  @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Fetch real-time scan speed', description: 'Organizer-only. Live scans-per-minute over the last 60 seconds.' })
-  @ApiQuery({ name: 'gateId', required: false })
-  @ApiResponse({ status: 200, description: 'Real-time scan speed' })
-  fetchRealtimeSpeed(
-    @Param('eventId', ParseUUIDPipe) eventId: string,
-    @Req() req: AuthenticatedRequest,
     @Query('gateId') gateId?: string,
   ) {
-    return this.scanAnalyticsService.fetchRealtimeScanSpeed(eventId, req.user.id, gateId);
+    return this.scanService.trackGateThroughput(eventId, gateId);
+  }
+
+  @Get('realtime-speed')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Fetch realtime scan speed',
+    description:
+      'Organizer-only. Returns recent scan metrics for dashboard display.',
+  })
+  @ApiResponse({ status: 200, description: 'Scan metrics' })
+  async getRealtimeScanSpeed(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Query('gateId') gateId?: string,
+    @Query('minutesBack', { transform: (v) => parseInt(v, 10) })
+    minutesBack: number = 5,
+  ) {
+    return this.scanService.fetchRealtimeScanSpeed(
+      eventId,
+      gateId,
+      minutesBack,
+    );
   }
 }

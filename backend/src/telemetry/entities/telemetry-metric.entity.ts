@@ -6,34 +6,37 @@ import {
   Index,
 } from 'typeorm';
 
-export type TelemetryServiceName = 'database' | 'redis' | 'stellar' | string;
-export type TelemetryMetricType = 'ping_latency' | 'custom';
-export type TelemetryNodeStatus = 'up' | 'down' | 'degraded';
+export enum MetricType {
+  API_LATENCY = 'API_LATENCY',
+  API_LOAD = 'API_LOAD',
+  NODE_STATUS = 'NODE_STATUS',
+  RESPONSE_TIME = 'RESPONSE_TIME',
+  ERROR_RATE = 'ERROR_RATE',
+  DB_QUERY_TIME = 'DB_QUERY_TIME',
+}
 
-@Index(['service', 'recordedAt'])
-@Entity({ name: 'telemetry_metrics' })
+@Index(['metricType', 'createdAt'])
+@Index(['service', 'createdAt'])
+@Entity('telemetry_metrics')
 export class TelemetryMetric {
   @PrimaryGeneratedColumn('uuid')
-  id!: string;
+  id: string;
+
+  @Column({ type: 'varchar', length: 32 })
+  metricType: MetricType;
 
   @Column({ type: 'varchar', length: 64 })
-  service!: TelemetryServiceName;
+  service: string;
 
-  @Column({ type: 'varchar', length: 32, default: 'custom' })
-  metricType!: TelemetryMetricType;
+  @Column({ type: 'decimal', precision: 18, scale: 3 })
+  value: number;
 
-  @Column({ type: 'float' })
-  value!: number;
-
-  @Column({ type: 'varchar', length: 16, default: 'ms' })
-  unit!: string;
-
-  @Column({ type: 'varchar', length: 16, nullable: true })
-  status!: TelemetryNodeStatus | null;
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  unit: string | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  metadata!: Record<string, unknown> | null;
+  tags: Record<string, string> | null;
 
-  @CreateDateColumn({ type: 'timestamptz' })
-  recordedAt!: Date;
+  @CreateDateColumn()
+  createdAt: Date;
 }
