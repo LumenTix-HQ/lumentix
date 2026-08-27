@@ -27,6 +27,7 @@ import {
   ApiResponse,
   ApiBody,
   ApiConsumes,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Express } from 'express';
@@ -48,6 +49,7 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 import { TicketsService } from '../tickets/tickets.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { Event } from './entities/event.entity';
+import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 
 @ApiTags('Events')
 @ApiBearerAuth()
@@ -370,6 +372,10 @@ export class EventsController {
   @Get(':eventId/tickets')
   @Roles(Role.ORGANIZER)
   @ApiOperation({ summary: 'List tickets for an event' })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)', type: Number })
+  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default 10)', type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, description: 'Sort column (default createdAt)' })
+  @ApiQuery({ name: 'order', required: false, enum: ['ASC', 'DESC'], description: 'Sort order (default DESC)' })
   @ApiResponse({ status: 200, description: 'Event tickets returned' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
@@ -377,7 +383,7 @@ export class EventsController {
   async getEventTickets(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
-    @Query() paginationDto: any,
+    @Query() paginationDto: PaginationDto,
   ) {
     return this.ticketsService.findByEvent(eventId, req.user.id, paginationDto);
   }

@@ -13,6 +13,7 @@ import {
   Req,
   Res,
   UseGuards,
+  UseInterceptors,
   Inject,
   forwardRef,
 } from '@nestjs/common';
@@ -36,8 +37,7 @@ import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { PaymentsService } from './payments.service';
 import { RefundService } from './refunds/refund.service';
 import { EscrowService } from './services/escrow.service';
-import { Roles, Role } from '../common/decorators/roles.decorator';
-import { RolesGuard } from '../common/guards/roles.guard';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
 @ApiTags('Payments')
 @ApiBearerAuth()
@@ -149,6 +149,7 @@ export class PaymentsController {
   }
 
   @Post('intent')
+  @UseInterceptors(IdempotencyInterceptor)
   @Throttle({ default: { limit: 5, ttl: 60_000 } }) // 5 per minute
   @ApiOperation({ summary: 'Create payment intent' })
   @ApiResponse({ status: 201, description: 'Payment intent created' })
@@ -177,6 +178,7 @@ export class PaymentsController {
   }
 
   @Post('series/:seriesId/season-pass')
+  @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
     summary: 'Create season pass payment intent',
     description: 'Authenticated. Creates a season pass intent for an event series.',
