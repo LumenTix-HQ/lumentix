@@ -31,6 +31,9 @@ import { RegistrationsModule } from './registrations/registrations.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { SocialModule } from './social/social.module';
 import { InsuranceModule } from './insurance/insurance.module';
+import { ReviewsModule } from './reviews/reviews.module';
+import { VenuesModule } from './venues/venues.module';
+import { GamificationModule } from './gamification/gamification.module';
 
 @Module({
   imports: [
@@ -111,6 +114,9 @@ import { InsuranceModule } from './insurance/insurance.module';
     LoyaltyModule,
     SocialModule,
     InsuranceModule,
+    ReviewsModule,
+    VenuesModule,
+    GamificationModule,
   ],
   controllers: [AppController],
   providers: [
