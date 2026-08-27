@@ -11,8 +11,13 @@ async function proxyRequest(
   const url = new URL(path, BACKEND_URL);
   url.search = request.nextUrl.search;
 
+  const contentType = request.headers.get('content-type') ?? 'application/json';
+  // Multipart bodies carry binary data and a boundary token; decoding them as
+  // text corrupts the payload, so they are forwarded as raw bytes instead.
+  const isBinaryBody = !contentType.includes('application/json');
+
   const headers = new Headers();
-  headers.set('Content-Type', request.headers.get('content-type') ?? 'application/json');
+  headers.set('Content-Type', contentType);
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
@@ -23,7 +28,7 @@ async function proxyRequest(
   };
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    init.body = await request.text();
+    init.body = isBinaryBody ? await request.arrayBuffer() : await request.text();
   }
 
   const backendResponse = await fetch(url.toString(), init);
