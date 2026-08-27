@@ -1,4 +1,6 @@
 use crate::error::LumentixError;
+use crate::types::{Event, Ticket, TicketTransferRecord, INSTANCE_LIFETIME, PERSISTENT_LIFETIME};
+use soroban_sdk::{Address, Env, Vec};
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
     CarbonFootprint,
@@ -444,6 +446,10 @@ pub fn append_ticket_transfer_history(env: &Env, ticket_id: u64, record: TicketT
 }
 
 /// Get the full transfer history for a ticket
+pub fn get_ticket_transfer_history(
+    env: &Env,
+    ticket_id: u64,
+) -> Vec<TicketTransferRecord> {
 pub fn get_ticket_transfer_history(env: &Env, ticket_id: u64) -> Vec<TicketTransferRecord> {
     let key = (TRANSFER_HISTORY_PREFIX, ticket_id);
     let history: Vec<TicketTransferRecord> = env

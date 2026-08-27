@@ -1,3 +1,4 @@
+use soroban_sdk::{contracttype, Address, String, Vec};
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 pub const INSTANCE_LIFETIME: u32 = 535_680; // ~30 days
@@ -82,6 +83,18 @@ pub struct ReferralLinkRecord {
     pub pending_rewards: i128,
     pub total_rewards_paid: i128,
     pub total_discount_awarded: i128,
+}
+
+/// A single record in a ticket's transfer history
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TicketTransferRecord {
+    /// Address that sent the ticket
+    pub from: Address,
+    /// Address that received the ticket
+    pub to: Address,
+    /// Ledger timestamp when the transfer occurred
+    pub timestamp: u64,
 }
 
 /// A single record in a ticket's transfer history

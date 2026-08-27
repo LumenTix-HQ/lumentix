@@ -39,6 +39,7 @@ use crate::events::{
   EventCertificateIssued, CertificationStandardUpdated,
 };
 use crate::storage;
+use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
     CancellationReason,
@@ -868,6 +869,19 @@ impl LumentixContract {
 
         validation::validate_time_range(starts_at, ends_at)?;
 
+        // Record transfer in history
+        storage::append_ticket_transfer_history(
+            &env,
+            ticket_id,
+            TicketTransferRecord {
+                from: from.clone(),
+                to: to.clone(),
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+
+        // Emit TicketTransferred event
+        TicketTransferred::emit(&env, ticket_id, ticket.event_id, from, to);
         storage::set_transfer_blackout(
             &env,
             event_id,
@@ -881,6 +895,17 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Return the full ownership transfer history for a ticket.
+    /// Each entry records the previous owner, new owner, and ledger timestamp of the transfer.
+    /// Returns an empty Vec if the ticket exists but has never been transferred.
+    /// Returns TicketNotFound if the ticket does not exist.
+    pub fn get_ticket_transfer_history(
+        env: Env,
+        ticket_id: u64,
+    ) -> Result<Vec<TicketTransferRecord>, LumentixError> {
+        // Verify the ticket exists before returning history
+        storage::get_ticket(&env, ticket_id)?;
+        Ok(storage::get_ticket_transfer_history(&env, ticket_id))
     /// Return whether the current ledger time is inside the configured transfer blackout window.
     pub fn is_transfer_blackout_active(env: Env, event_id: u64) -> Result<bool, LumentixError> {
         storage::get_event(&env, event_id)?;

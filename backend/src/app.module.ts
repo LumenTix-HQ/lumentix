@@ -31,6 +31,8 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
+import { SocialModule } from './social/social.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InsuranceModule } from './insurance/insurance.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -127,6 +129,12 @@ import { InternalRoutingModule } from './internal/internal.module';
     TicketsModule,
     AdminModule,
     RegistrationsModule,
+    LoyaltyModule,
+    SocialModule,
+    InsuranceModule,
+    ReviewsModule,
+    VenuesModule,
+    GamificationModule,
     AnalyticsModule,
     SchedulingModule,
     CategoriesModule,

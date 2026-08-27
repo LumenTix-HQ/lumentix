@@ -360,6 +360,8 @@ export class LoyaltyService {
     }
   }
 
+  // ── Private Helpers ────────────────────────────────────────────────────────
+
   // ── Calculate Loyalty Points ────────────────────────────────────────────────
 
   /**
