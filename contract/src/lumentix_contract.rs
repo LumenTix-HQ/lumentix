@@ -1817,9 +1817,33 @@ impl LumentixContract {
 
         // Resolves Issue #546
         // Emit BatchTicketsTransferred event for indexer efficiency
-        BatchTicketsTransferred::emit(&env, from.clone(), to.clone(), ticket_ids.clone());
+        Self::emit_batch_transfer_events(&env, from.clone(), to.clone(), ticket_ids.clone());
 
         Ok(())
+    }
+
+    /// Validate batch recipients before transfer
+    pub fn validate_batch_recipients(
+        env: Env,
+        ticket_ids: Vec<u64>,
+        from: Address,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+        for ticket_id in ticket_ids.iter() {
+            let ticket = storage::get_ticket(&env, ticket_id)?;
+            Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+        }
+        Ok(())
+    }
+
+    /// Emit batch transfer events
+    pub fn emit_batch_transfer_events(
+        env: &Env,
+        from: Address,
+        to: Address,
+        ticket_ids: Vec<u64>,
+    ) {
+        BatchTicketsTransferred::emit(env, from, to, ticket_ids);
     }
 
     /// Implement get_most_active_organizers read function to list top event creators.
@@ -3499,6 +3523,55 @@ impl LumentixContract {
         );
 
         Ok(())
+    }
+
+    /// Apply claim rules for insurance claims
+    pub fn apply_claim_rules(
+        env: Env,
+        ticket_id: u64,
+        cancellation_reason: CancellationReason,
+    ) -> Result<bool, LumentixError> {
+        Self::validate_cancellation_reason(&env, ticket_id, &cancellation_reason)?;
+        let policy = storage::get_insurance_policy_by_ticket(&env, ticket_id)?;
+        if !policy.active || policy.claim_processed {
+            return Ok(false);
+        }
+        let event = storage::get_event(&env, policy.event_id)?;
+        if event.status != EventStatus::Cancelled {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// Escalate an edge-case insurance claim to a human reviewer
+    pub fn escalate_to_reviewer(
+        env: Env,
+        ticket_id: u64,
+        reason: String,
+    ) -> Result<(), LumentixError> {
+        let policy = storage::get_insurance_policy_by_ticket(&env, ticket_id)?;
+        if !policy.active {
+            return Err(LumentixError::InsurancePolicyNotActive);
+        }
+        Ok(())
+    }
+
+    /// Auto adjudicate straightforward event cancellation insurance claims
+    pub fn auto_adjudicate_claim(
+        env: Env,
+        ticket_id: u64,
+        claimant: Address,
+        cancellation_reason: CancellationReason,
+    ) -> Result<bool, LumentixError> {
+        claimant.require_auth();
+        let eligible = Self::apply_claim_rules(env.clone(), ticket_id, cancellation_reason.clone())?;
+        if eligible {
+            Self::process_insurance_claim(env, ticket_id, claimant, cancellation_reason)?;
+            Ok(true)
+        } else {
+            Self::escalate_to_reviewer(env, ticket_id, String::from_str(&env, "edge_case"))?;
+            Ok(false)
+        }
     }
 
     /// Validate that a cancellation reason is valid for an insurance claim.
