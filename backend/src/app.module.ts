@@ -48,6 +48,7 @@ import { TelemetryModule } from './telemetry/telemetry.module';
 import { MerchModule } from './merch/merch.module';
 import { TicketDesignModule } from './ticket-design/ticket-design.module';
 import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
+import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
 
@@ -139,6 +140,7 @@ import { InternalRoutingModule } from './internal/internal.module';
     MerchModule,
     TicketDesignModule,
     ScanAnalyticsModule,
+    TermsOfServiceModule,
     InternalModule,
     InternalRoutingModule,
   ],

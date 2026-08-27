@@ -60,6 +60,22 @@ jobs:
           name: coverage-report
           path: backend/coverage/
 
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high
+
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest

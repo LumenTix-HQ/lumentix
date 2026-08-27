@@ -511,8 +511,16 @@ export class PaymentsService {
       },
     });
 
-    for (const payment of expired) {
-      await this.markFailed(payment, 'Payment expired');
+    const results = await Promise.allSettled(
+      expired.map((payment) => this.markFailed(payment, 'Payment expired')),
+    );
+
+    const failures = results.filter((r) => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.error(
+        `${failures.length}/${expired.length} stale payments failed to mark as failed:`,
+        failures.map((f) => (f as PromiseRejectedResult).reason),
+      );
     }
   }
 

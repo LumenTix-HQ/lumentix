@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { decodeJwtPayload } from '@/lib/auth/token';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -13,16 +14,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       router.push('/login?redirect=/admin/users');
       return;
     }
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      if (payload.role !== 'admin') {
-        router.push('/');
-        return;
-      }
-      setAuthorized(true);
-    } catch {
+    const payload = decodeJwtPayload(token);
+    if (!payload) {
       router.push('/login');
+      return;
     }
+    if (payload.role !== 'admin') {
+      router.push('/');
+      return;
+    }
+    setAuthorized(true);
   }, [router]);
 
   if (!authorized) return null;

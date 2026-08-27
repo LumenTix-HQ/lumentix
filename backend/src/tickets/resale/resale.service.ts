@@ -162,6 +162,7 @@ export class ResaleService {
     }
 
     const previousOwnerId = ticket.ownerId;
+    const saleCurrency = ticket.listingCurrency ?? 'XLM';
     ticket.ownerId = buyerId;
     ticket.isListed = false;
     ticket.listingPrice = null;
@@ -175,7 +176,7 @@ export class ResaleService {
       sellerId: previousOwnerId,
       buyerId,
       salePrice,
-      currency: ticket.listingCurrency ?? 'XLM',
+      currency: saleCurrency,
       originalPrice,
       organizerFee,
       sellerPayout,
@@ -202,7 +203,7 @@ export class ResaleService {
         email: seller.email,
         ticketId: ticket.id,
         amount: sellerPayout,
-        currency: ticket.listingCurrency ?? 'XLM',
+        currency: saleCurrency,
       });
     }
 

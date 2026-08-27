@@ -126,16 +126,16 @@ export class DisputeArbitrationService {
       );
     }
 
-    // Verify all arbitrators exist and are active
-    for (const arbUserId of arbitratorIds) {
-      const arb = await this.arbitratorRepo.findOne({
-        where: { userId: arbUserId, isActive: true },
-      });
-      if (!arb) {
-        throw new NotFoundException(
-          `Active arbitrator not found for userId "${arbUserId}".`,
-        );
-      }
+    // Verify all arbitrators exist and are active (single batched query)
+    const activeArbitrators = await this.arbitratorRepo.find({
+      where: arbitratorIds.map((userId) => ({ userId, isActive: true })),
+    });
+    const foundIds = new Set(activeArbitrators.map((a) => a.userId));
+    const missingIds = arbitratorIds.filter((id) => !foundIds.has(id));
+    if (missingIds.length > 0) {
+      throw new NotFoundException(
+        `Active arbitrators not found for userIds: ${missingIds.join(', ')}`,
+      );
     }
 
     // Merge new arbitrator IDs with existing (avoid duplicates)
