@@ -35,6 +35,10 @@ export class LoyaltyAccount {
   @Column({ type: 'timestamptz', nullable: true, default: null })
   lastActivityAt: Date | null;
 
+  /** Currently active tier, tracked so demotions can be detected */
+  @Column({ type: 'varchar', length: 16, default: 'Bronze' })
+  currentTier: string;
+
   @CreateDateColumn()
   createdAt: Date;
 
