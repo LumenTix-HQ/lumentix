@@ -158,6 +158,18 @@ export class TicketsController {
     return this.ticketsService.confirmTransfer(ticketId, req.user.id, dto);
   }
 
+  @Post('batch-transfer')
+  @ApiOperation({
+    summary: 'Batch transfer multiple tickets to different recipients',
+    description: 'Allow a single wallet to transfer multiple tickets to different recipients in one transaction.',
+  })
+  batchTransfer(
+    @Body() body: { transfers: Array<{ ticketId: string; recipientUserId: string }> },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.batch_transfer_tickets(req.user.id, body.transfers);
+  }
+
   @Post('verify-qr')
   @UseGuards(RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

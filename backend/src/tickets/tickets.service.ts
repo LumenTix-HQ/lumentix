@@ -524,6 +524,125 @@ export class TicketsService {
   }
 
   /**
+   * Validates a batch of ticket transfers to different recipients.
+   */
+  async validate_batch_recipients(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    if (!transfers || transfers.length === 0) {
+      errors.push('Transfer batch cannot be empty.');
+      return { valid: false, errors };
+    }
+
+    const ticketIds = transfers.map((t) => t.ticketId);
+    if (new Set(ticketIds).size !== ticketIds.length) {
+      errors.push('Duplicate ticket IDs found in batch.');
+    }
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) {
+        errors.push(`Ticket ${item.ticketId} not found.`);
+        continue;
+      }
+      if (ticket.ownerId !== senderUserId) {
+        errors.push(`Sender does not own ticket ${item.ticketId}.`);
+      }
+      if (ticket.status !== 'valid') {
+        errors.push(`Ticket ${item.ticketId} is not valid for transfer.`);
+      }
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) {
+        errors.push(`Recipient ${item.recipientUserId} not found for ticket ${item.ticketId}.`);
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Emits events and audit logs for a batch of ticket transfers.
+   */
+  async emit_batch_transfer_events(
+    senderUserId: string,
+    completedTransfers: Array<{ ticketId: string; recipientUserId: string; eventId: string }>,
+  ): Promise<void> {
+    for (const t of completedTransfers) {
+      await this.auditService.log({
+        action: AuditAction.TICKET_TRANSFERRED,
+        userId: senderUserId,
+        resourceId: t.ticketId,
+        meta: {
+          ticketId: t.ticketId,
+          fromUserId: senderUserId,
+          toUserId: t.recipientUserId,
+          eventId: t.eventId,
+          batch: true,
+        },
+      });
+
+      await this.notificationService.notifyUser(t.recipientUserId, {
+        title: 'Ticket Received',
+        body: `You received a ticket for event ${t.eventId}`,
+        type: 'ticket_transferred',
+        data: { ticketId: t.ticketId },
+      });
+    }
+  }
+
+  /**
+   * Transfers multiple tickets to different recipients in one operation.
+   */
+  async batch_transfer_tickets(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ success: boolean; transferredCount: number; errors?: string[] }> {
+    const validationResult = await this.validate_batch_recipients(senderUserId, transfers);
+    if (!validationResult.valid) {
+      throw new BadRequestException(`Batch transfer validation failed: ${validationResult.errors.join('; ')}`);
+    }
+
+    const completed: Array<{ ticketId: string; recipientUserId: string; eventId: string }> = [];
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) continue;
+
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) continue;
+
+      ticket.ownerId = recipient.id;
+      if (recipient.stellarPublicKey) {
+        ticket.ownerPublicKey = recipient.stellarPublicKey;
+      }
+      ticket.transferHistory = [
+        ...(ticket.transferHistory ?? []),
+        {
+          from: senderUserId,
+          to: recipient.id,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await this.ticketRepo.save(ticket);
+      completed.push({
+        ticketId: ticket.id,
+        recipientUserId: recipient.id,
+        eventId: ticket.eventId,
+      });
+    }
+
+    await this.emit_batch_transfer_events(senderUserId, completed);
+
+    return {
+      success: true,
+      transferredCount: completed.length,
+    };
+  }
+
+  /**
    * Push a transfer history record onto a ticket's persistent transfer log.
    * Creates the history array if it doesn't exist yet.
    */

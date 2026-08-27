@@ -88,6 +88,19 @@ export class InsuranceController {
     return this.insuranceService.processInsuranceClaim(req.user.id, dto);
   }
 
+  @Post('auto-adjudicate')
+  @ApiOperation({
+    summary: 'Auto-adjudicate an insurance claim',
+    description:
+      'Automatically process straightforward event cancellation insurance claims using rule-based criteria before escalating edge cases to human reviewers.',
+  })
+  autoAdjudicateClaim(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ProcessInsuranceClaimDto,
+  ) {
+    return this.insuranceService.auto_adjudicate_claim(req.user.id, dto);
+  }
+
   // ── validate_cancellation_reason ──────────────────────────────────────────
 
   @Get('validate')

@@ -192,6 +192,82 @@ export class InsuranceService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // auto_adjudicate_claim & claim rules
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Apply rule-based criteria to determine if an insurance claim can be auto-adjudicated.
+   * Straightforward event cancellations are auto-approved, while edge cases require human reviewer.
+   */
+  async apply_claim_rules(
+    ticketId: string,
+    cancellationReason: CancellationReason,
+  ): Promise<{ autoApprove: boolean; reason?: string; requiresReview: boolean }> {
+    const isValid = await this.validateCancellationReason(ticketId, cancellationReason);
+    if (!isValid) {
+      return {
+        autoApprove: false,
+        reason: `Invalid cancellation reason "${cancellationReason}" or inactive policy/event.`,
+        requiresReview: true,
+      };
+    }
+
+    const AUTO_APPROVED_REASONS = new Set<CancellationReason>([
+      CancellationReason.EVENT_CANCELLED,
+      CancellationReason.ORGANIZER_CANCELLATION,
+      CancellationReason.WEATHER,
+    ]);
+
+    if (AUTO_APPROVED_REASONS.has(cancellationReason)) {
+      return { autoApprove: true, requiresReview: false };
+    }
+
+    return {
+      autoApprove: false,
+      reason: `Cancellation reason "${cancellationReason}" requires human reviewer evaluation.`,
+      requiresReview: true,
+    };
+  }
+
+  /**
+   * Escalate an edge-case insurance claim to a human reviewer.
+   */
+  async escalate_to_reviewer(
+    policyId: string,
+    reason: string,
+  ): Promise<{ escalated: boolean; policyId: string; reason: string }> {
+    this.logger.warn(`Escalating insurance claim for policy ${policyId} to human reviewer: ${reason}`);
+    await this.auditService.log({
+      action: 'INSURANCE_CLAIM_ESCALATED',
+      resourceId: policyId,
+      meta: { reason },
+    });
+    return { escalated: true, policyId, reason };
+  }
+
+  /**
+   * Automatically process straightforward insurance claims using rule-based criteria before escalating edge cases.
+   */
+  async auto_adjudicate_claim(
+    userId: string,
+    dto: ProcessInsuranceClaimDto,
+  ): Promise<InsuranceClaimResultDto | { escalated: boolean; policyId: string; reason: string }> {
+    const ruleResult = await this.apply_claim_rules(dto.ticketId, dto.cancellationReason);
+
+    if (ruleResult.autoApprove) {
+      return this.processInsuranceClaim(userId, dto);
+    }
+
+    const policy = await this.policyRepo.findOne({ where: { ticketId: dto.ticketId } });
+    const policyId = policy?.id ?? dto.ticketId;
+
+    return this.escalate_to_reviewer(
+      policyId,
+      ruleResult.reason ?? 'Claim criteria flagged for human reviewer evaluation',
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // process_insurance_claim
   // ─────────────────────────────────────────────────────────────────────────
 
