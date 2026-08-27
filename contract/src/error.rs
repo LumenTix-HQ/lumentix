@@ -408,4 +408,16 @@ pub enum LumentixError {
     PromoCodeUserLimitReached = 219,
     /// Discount basis points must be between 1 and 10000
     InvalidPromoDiscount = 220,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Age Verification errors (221–224)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No age proof has been issued for this subject
+    AgeProofNotFound = 221,
+    /// The subject's age proof has expired and must be re-issued
+    AgeProofExpired = 222,
+    /// The submitted age proof does not satisfy the event's minimum age
+    AgeVerificationFailed = 223,
+    /// Purchase rejected: event requires age verification the buyer has not completed
+    UnderageEventPurchase = 224,
 }

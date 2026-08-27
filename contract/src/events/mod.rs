@@ -1677,3 +1677,39 @@ impl PromoCodeApplied {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGE VERIFICATION EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a trusted verifier issues an age proof for a subject.
+/// Never carries the subject's date of birth — only the age threshold met.
+pub struct AgeProofIssued;
+impl AgeProofIssued {
+    pub fn emit(env: &Env, subject: Address, min_age: u32, expires_at: u64) {
+        env.events()
+            .publish((symbol_short!("ageproof"),), (subject, min_age, expires_at));
+    }
+}
+
+/// Emitted when an age proof is checked against an event's minimum age.
+pub struct AgeProofVerified;
+impl AgeProofVerified {
+    pub fn emit(env: &Env, subject: Address, min_age_required: u32, verified: bool) {
+        env.events().publish(
+            (symbol_short!("ageverif"),),
+            (subject, min_age_required, verified),
+        );
+    }
+}
+
+/// Emitted when a ticket purchase is rejected for failing age verification.
+pub struct UnderagePurchaseRejected;
+impl UnderagePurchaseRejected {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, min_age_required: u32) {
+        env.events().publish(
+            (symbol_short!("agereject"),),
+            (event_id, buyer, min_age_required),
+        );
+    }
+}

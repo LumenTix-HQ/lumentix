@@ -14,7 +14,7 @@ use crate::types::{
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 
-  CertificationStandard, EventCertificate,
+  CertificationStandard, EventCertificate, AgeProof,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -2220,6 +2220,53 @@ pub fn get_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Addr
 pub fn set_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Address, usage: u32) {
     let key = (PROMO_USER_USAGE_PREFIX, event_id, code.clone(), user.clone());
     env.storage().persistent().set(&key, &usage);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AGE VERIFICATION STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+const AGE_PROOF_PREFIX: &str = "AGEPROOF_";
+const EVENT_MIN_AGE_PREFIX: &str = "EVMINAGE_";
+
+pub fn set_age_proof(env: &Env, subject: &Address, proof: &AgeProof) {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    env.storage().persistent().set(&key, proof);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_age_proof(env: &Env, subject: &Address) -> Option<AgeProof> {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    let proof = env.storage().persistent().get(&key);
+    if proof.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    proof
+}
+
+/// Minimum age required to purchase a ticket to this event. 0 means no
+/// age restriction is configured.
+pub fn get_event_min_age(env: &Env, event_id: u64) -> u32 {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    let min_age: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    min_age
+}
+
+pub fn set_event_min_age(env: &Env, event_id: u64, min_age: u32) {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    env.storage().persistent().set(&key, &min_age);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);

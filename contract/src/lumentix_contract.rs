@@ -2,7 +2,8 @@
 
 use crate::error::LumentixError;
 use crate::events::{
-    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AnonymousSurveySubmitted,
+    AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AgeProofIssued,
+    AgeProofVerified, AnonymousSurveySubmitted,
     AttendanceMemorabiliaMinted,
     AttendanceVerificationFailed,
     AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
@@ -36,7 +37,7 @@ use crate::events::{
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
 
-  EventCertificateIssued, CertificationStandardUpdated,
+  EventCertificateIssued, CertificationStandardUpdated, UnderagePurchaseRejected,
 };
 use crate::storage;
 use crate::types::{Event, EventStatus, Ticket, TicketTransferRecord, PERSISTENT_LIFETIME};
@@ -55,7 +56,7 @@ use crate::types::{
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
-    CertificationStandard,
+    CertificationStandard, AgeProof,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Map, String, Vec};
@@ -425,6 +426,8 @@ impl LumentixContract {
             return Err(LumentixError::EventPaused);
         }
 
+        Self::reject_underage_purchase(env.clone(), event_id, buyer.clone())?;
+
         let now = env.ledger().timestamp();
         Self::cleanup_expired_waitlist_offers(&env, event_id, now);
         let reserved_for_waitlist = storage::get_waitlist_reserved(&env, event_id);
@@ -551,6 +554,8 @@ impl LumentixContract {
         if event.paused {
             return Err(LumentixError::EventPaused);
         }
+
+        Self::reject_underage_purchase(env.clone(), event_id, buyer.clone())?;
 
         let now = env.ledger().timestamp();
         Self::cleanup_expired_waitlist_offers(&env, event_id, now);
@@ -6132,6 +6137,117 @@ impl LumentixContract {
             return Err(LumentixError::Unauthorized);
         }
         storage::set_zkp_params(&env, &params);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // AGE VERIFICATION FOR AGE-RESTRICTED EVENTS (Issue #970)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Set (or clear, with 0) the minimum age required to purchase a ticket
+    /// to this event. Only the event's organizer can configure this.
+    pub fn set_event_age_restriction(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        min_age: u32,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        storage::set_event_min_age(&env, event_id, min_age);
+        Ok(())
+    }
+
+    /// Issue an on-chain age proof for `subject`, attesting they meet
+    /// `min_age` without ever recording their date of birth. Only the
+    /// contract admin (standing in for a trusted KYC/age-verification
+    /// provider) may issue proofs; the admin is expected to have verified
+    /// the subject's real age off-chain before calling this.
+    ///
+    /// `commitment` binds this proof to the specific (subject, min_age)
+    /// attestation — e.g. `sha256(subject || min_age || verifier_secret)` —
+    /// so the proof cannot be replayed for a different subject or threshold.
+    pub fn generate_age_proof(
+        env: Env,
+        admin: Address,
+        subject: Address,
+        min_age: u32,
+        commitment: BytesN<32>,
+        valid_for_secs: u64,
+    ) -> Result<(), LumentixError> {
+        admin.require_auth();
+
+        let stored_admin = storage::get_admin(&env);
+        if admin != stored_admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        let expires_at = now + valid_for_secs;
+
+        let proof = AgeProof {
+            subject: subject.clone(),
+            min_age,
+            commitment,
+            issued_at: now,
+            expires_at,
+        };
+
+        storage::set_age_proof(&env, &subject, &proof);
+        AgeProofIssued::emit(&env, subject, min_age, expires_at);
+
+        Ok(())
+    }
+
+    /// Verify that `subject` holds a current, non-expired age proof that
+    /// meets `min_age_required`. The subject's date of birth is never read
+    /// or exposed — only the previously-attested threshold is compared.
+    pub fn verify_age_proof_on_chain(
+        env: Env,
+        subject: Address,
+        min_age_required: u32,
+    ) -> Result<bool, LumentixError> {
+        let proof = storage::get_age_proof(&env, &subject).ok_or(LumentixError::AgeProofNotFound)?;
+
+        let now = env.ledger().timestamp();
+        if now > proof.expires_at {
+            AgeProofVerified::emit(&env, subject, min_age_required, false);
+            return Err(LumentixError::AgeProofExpired);
+        }
+
+        if proof.min_age < min_age_required {
+            AgeProofVerified::emit(&env, subject, min_age_required, false);
+            return Err(LumentixError::AgeVerificationFailed);
+        }
+
+        AgeProofVerified::emit(&env, subject, min_age_required, true);
+        Ok(true)
+    }
+
+    /// Guard called during ticket purchase: rejects the purchase if the
+    /// event is age-restricted and `buyer` does not hold a valid age proof
+    /// meeting the requirement. Events with no age restriction configured
+    /// (min_age of 0) are unaffected.
+    pub fn reject_underage_purchase(
+        env: Env,
+        event_id: u64,
+        buyer: Address,
+    ) -> Result<(), LumentixError> {
+        let min_age_required = storage::get_event_min_age(&env, event_id);
+        if min_age_required == 0 {
+            return Ok(());
+        }
+
+        if Self::verify_age_proof_on_chain(env.clone(), buyer.clone(), min_age_required).is_err() {
+            UnderagePurchaseRejected::emit(&env, event_id, buyer, min_age_required);
+            return Err(LumentixError::UnderageEventPurchase);
+        }
+
         Ok(())
     }
 
