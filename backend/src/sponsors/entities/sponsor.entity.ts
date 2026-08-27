@@ -51,6 +51,25 @@ export class Sponsor {
   @Column({ nullable: true, type: 'varchar' })
   websiteUrl: string | null;
 
+  /**
+   * Relative weight used by the banner rotation algorithm — higher weight
+   * means the sponsor's banner is shown more often. Defaults to 1 (equal odds).
+   */
+  @Column({ type: 'int', default: 1 })
+  weight: number;
+
+  /**
+   * Whether this sponsor's banner is eligible for rotation on the event page.
+   */
+  @Column({ default: true })
+  isActive: boolean;
+
+  @Column({ type: 'int', default: 0 })
+  impressionCount: number;
+
+  @Column({ type: 'int', default: 0 })
+  clickCount: number;
+
   @CreateDateColumn()
   createdAt: Date;
 }
