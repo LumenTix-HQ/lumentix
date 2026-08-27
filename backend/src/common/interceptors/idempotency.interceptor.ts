@@ -9,7 +9,7 @@ import { Response } from 'express';
 import { of } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import Redis from 'ioredis';
-import { REDIS_CLIENT } from '../redis/redis.module';
+import { REDIS_CLIENT } from '../redis/redis.provider';
 import { AuthenticatedRequest } from '../interfaces/authenticated-request.interface';
 
 const IDEMPOTENCY_TTL_SECONDS = 86_400; // 24 hours
