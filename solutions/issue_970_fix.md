@@ -1,0 +1,1 @@
+Solution proposal for Implement ZKP-based age verification for age-restricted events
