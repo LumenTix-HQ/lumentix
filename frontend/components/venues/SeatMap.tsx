@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Seat } from "@/types/event";
+import { announceCartUpdate, injectAriaLabels } from "@/lib/a11y";
 
 interface SeatMapProps {
   seats: Seat[];
@@ -28,12 +29,21 @@ export default function SeatMap({ seats, sectionName, onSelectSeat, selectedSeat
         <div className="text-[10px] text-gray-600 mb-4 -mt-2">STAGE</div>
 
         {/* Seats */}
-        <div className="flex flex-col gap-1.5">
+        <div
+          className="flex flex-col gap-1.5"
+          role="group"
+          aria-label={`Seat map for ${sectionName}`}
+        >
           {rows.map((rowNum) => {
             const rowSeats = seats.filter(s => s.row === rowNum).sort((a, b) => a.number - b.number);
             return (
-              <div key={rowNum} className="flex items-center gap-1.5">
-                <span className="w-5 text-[10px] text-gray-600 text-right">
+              <div
+                key={rowNum}
+                className="flex items-center gap-1.5"
+                role="group"
+                aria-label={`Row ${String.fromCharCode(64 + rowNum)}`}
+              >
+                <span className="w-5 text-[10px] text-gray-600 text-right" aria-hidden="true">
                   {String.fromCharCode(64 + rowNum)}
                 </span>
                 <div className="flex gap-1.5">
@@ -47,7 +57,14 @@ export default function SeatMap({ seats, sectionName, onSelectSeat, selectedSeat
                       <button
                         key={seat.id}
                         disabled={!isAvailable}
-                        onClick={() => isAvailable && onSelectSeat(seat)}
+                        onClick={() => {
+                          if (!isAvailable) return;
+                          onSelectSeat(seat);
+                          announceCartUpdate(injectAriaLabels.seat(seat, true));
+                        }}
+                        aria-label={injectAriaLabels.seat(seat, isSelected)}
+                        aria-pressed={isSelected}
+                        aria-disabled={!isAvailable}
                         className={`
                           w-[${SEAT_SIZE}px] h-[${SEAT_SIZE}px] rounded-t-lg text-[9px] font-bold
                           transition-all duration-200 flex items-center justify-center
