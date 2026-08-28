@@ -31,6 +31,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
+import { OwnershipTransferDto, ProvenanceChainDto } from './dto/provenance.dto';
 
 @Injectable()
 export class TicketsService {
@@ -368,7 +369,56 @@ export class TicketsService {
     }
 
     ticket.ownerId = newOwnerId;
+    const recordedTicket = await this.record_ownership_transfer(ticketId, {
+      fromUserId: callerOwnerId,
+      toUserId: newOwnerId,
+      fromPublicKey: ticket.ownerPublicKey,
+      toPublicKey: null,
+      transactionHash: null,
+      timestamp: new Date().toISOString(),
+    });
+    ticket.transferHistory = recordedTicket.transferHistory;
     return this.ticketRepo.save(ticket);
+  }
+
+  async record_ownership_transfer(
+    ticketId: string,
+    transfer: Omit<OwnershipTransferDto, 'sequence'>,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    ticket.transferHistory = [
+      ...(ticket.transferHistory ?? []),
+      {
+        from: transfer.fromUserId,
+        to: transfer.toUserId,
+        timestamp: transfer.timestamp,
+        fromPublicKey: transfer.fromPublicKey,
+        toPublicKey: transfer.toPublicKey,
+        transactionHash: transfer.transactionHash,
+      },
+    ];
+    return this.ticketRepo.save(ticket);
+  }
+
+  async fetch_provenance_chain(ticketId: string): Promise<ProvenanceChainDto> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    return {
+      ticketId: ticket.id,
+      assetCode: ticket.assetCode,
+      issuedAt: ticket.createdAt.toISOString(),
+      currentOwnerId: ticket.ownerId,
+      chain: (ticket.transferHistory ?? []).map((transfer, index) => ({
+        sequence: index + 1,
+        fromUserId: transfer.from,
+        toUserId: transfer.to,
+        fromPublicKey: transfer.fromPublicKey ?? null,
+        toPublicKey: transfer.toPublicKey ?? null,
+        transactionHash: transfer.transactionHash ?? null,
+        timestamp: transfer.timestamp,
+      })),
+    };
   }
 
   /**
@@ -501,6 +551,9 @@ export class TicketsService {
         {
           from: previousOwnerId,
           to: recipient.id,
+          fromPublicKey: ticket.ownerPublicKey,
+          toPublicKey: recipient.stellarPublicKey,
+          transactionHash: dto.transactionHash,
           timestamp: new Date().toISOString(),
         },
       ];

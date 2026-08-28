@@ -113,6 +113,7 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
                       key={section.id}
                       seats={mockSeats}
                       sectionName={`${section.name} (${section.category})`}
+                      eventId={event.id}
                       onSelectSeat={handleSelectSeat}
                       selectedSeatId={selectedSeatId}
                     />

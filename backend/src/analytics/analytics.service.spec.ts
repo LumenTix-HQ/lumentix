@@ -7,6 +7,8 @@ import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { Registration, RegistrationStatus } from '../registrations/entities/registration.entity';
 import { AgeVerification } from '../age-verification/entities/age-verification.entity';
 import { User } from '../users/entities/user.entity';
+import { MerchItem } from '../merch/entities/merch-item.entity';
+import { MerchReservation } from '../merch/entities/merch-reservation.entity';
 
 describe('AnalyticsService', () => {
 	let service: AnalyticsService;
@@ -43,6 +45,14 @@ describe('AnalyticsService', () => {
 				{
 					provide: getRepositoryToken(User),
 					useValue: {},
+				},
+				{
+					provide: getRepositoryToken(MerchItem),
+					useValue: { find: jest.fn() },
+				},
+				{
+					provide: getRepositoryToken(MerchReservation),
+					useValue: { find: jest.fn() },
 				},
 			],
 		}).compile();
@@ -131,5 +141,28 @@ describe('AnalyticsService', () => {
 		const attendance = await service.analyzeAttendancePatterns('event-1', 'org-1');
 
 		expect(attendance).toBeNull();
+	});
+
+	it('aggregates revenue by ticket tier, promo code, merch, and date range', async () => {
+		eventRepo.findOne.mockResolvedValue({ id: 'event-1', organizerId: 'org-1' });
+		paymentRepo.find.mockResolvedValue([
+			{ amount: 100, productType: 'ticket', ticketTier: 'VIP', promoCode: 'WELCOME', createdAt: new Date('2026-04-01T01:00:00.000Z') },
+			{ amount: 50, productType: 'ticket', ticketTier: 'General', promoCode: null, createdAt: new Date('2026-04-02T01:00:00.000Z') },
+		]);
+		module.get(getRepositoryToken(MerchReservation)).find.mockResolvedValue([
+			{ status: 'purchased', purchasedAt: new Date('2026-04-02T02:00:00.000Z'), merchItem: { eventId: 'event-1', name: 'Hoodie', price: 40 } },
+		]);
+
+		const report = await service.aggregate_revenue_data(
+			'event-1', 'org-1', '2026-04-01T00:00:00.000Z', '2026-04-03T00:00:00.000Z',
+		);
+
+		expect(report.totalRevenue).toBe(190);
+		expect(report.ticketTiers).toEqual(expect.arrayContaining([
+			expect.objectContaining({ name: 'VIP', quantity: 1, revenue: 100 }),
+		]));
+		expect(report.promoCodes).toEqual([expect.objectContaining({ name: 'WELCOME', revenue: 100 })]);
+		expect(report.merchSales).toEqual([expect.objectContaining({ name: 'Hoodie', quantity: 1, revenue: 40 })]);
+		expect(report.timeSeries).toHaveLength(2);
 	});
 });

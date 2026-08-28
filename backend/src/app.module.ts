@@ -53,6 +53,8 @@ import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
+import { RateLimitModule } from './common/rate-limit.module';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 
 @Module({
@@ -63,6 +65,7 @@ import { InternalRoutingModule } from './internal/internal.module';
       validationSchema: envValidationSchema,
       validationOptions: { abortEarly: false },
     }),
+    RateLimitModule,
 
     // ── Redis-backed rate limiting — shared across all instances ──────────────
     ThrottlerModule.forRootAsync({
@@ -160,6 +163,10 @@ import { InternalRoutingModule } from './internal/internal.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
     },
     {
       provide: APP_INTERCEPTOR,

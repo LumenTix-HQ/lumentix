@@ -3,6 +3,8 @@ import {
   Get,
   Param,
   Query,
+  Res,
+  BadRequestException,
   UseGuards,
   Req,
   ParseUUIDPipe,
@@ -24,6 +26,7 @@ import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+import { Response } from 'express';
 
 @ApiTags('Analytics')
 @ApiBearerAuth()
@@ -143,6 +146,24 @@ export class AnalyticsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<RevenueDashboardDto> {
     return this.analyticsService.getRevenueDashboard(eventId, req.user.id);
+  }
+
+  @Get('events/:eventId/revenue/report')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Export detailed revenue report' })
+  async exportRevenueReport(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Query('format') format: 'csv' | 'pdf' = 'csv',
+    @Query('startDate') startDate: string | undefined,
+    @Query('endDate') endDate: string | undefined,
+    @Req() req: AuthenticatedRequest,
+    @Res() response: Response,
+  ): Promise<void> {
+    if (format !== 'csv' && format !== 'pdf') throw new BadRequestException('format must be csv or pdf');
+    const report = await this.analyticsService.export_revenue_report(eventId, req.user.id, format, startDate, endDate);
+    response.setHeader('Content-Type', report.contentType);
+    response.setHeader('Content-Disposition', `attachment; filename="${report.filename}"`);
+    response.send(report.body);
   }
 
   @Get('organizers/me/bi-dashboard')

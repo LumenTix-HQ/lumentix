@@ -45,6 +45,15 @@ export class Payment {
   @Column({ default: 'XLM' })
   currency: string;
 
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  ticketTier: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  promoCode: string | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'ticket' })
+  productType: 'ticket' | 'merch';
+
   @Column({ nullable: true, type: 'varchar' })
   transactionHash: string | null;
 

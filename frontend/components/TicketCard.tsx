@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import QRModal from "./QRModal";
 import { getAccessToken } from "@/lib/auth/auth";
 
@@ -10,6 +10,16 @@ export interface Ticket {
   eventDate: string;
   status: "confirmed" | "cancelled" | "pending";
   qrUrl?: string;
+}
+
+interface ProvenanceTransfer {
+  sequence: number;
+  fromUserId: string;
+  toUserId: string;
+  fromPublicKey: string | null;
+  toPublicKey: string | null;
+  transactionHash: string | null;
+  timestamp: string;
 }
 
 interface TicketCardProps {
@@ -65,9 +75,27 @@ export default function TicketCard({ ticket }: TicketCardProps) {
   const [downloading, setDownloading] = useState(false);
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
   const [downloadingIcs, setDownloadingIcs] = useState(false);
+  const [provenance, setProvenance] = useState<ProvenanceTransfer[]>([]);
+  const [provenanceLoading, setProvenanceLoading] = useState(true);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
   const icsUrl = `${apiUrl}/tickets/${ticket.id}/ical`;
+
+  useEffect(() => {
+    let active = true;
+    fetch(`${apiUrl}/tickets/${ticket.id}/provenance`)
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((data: { chain?: ProvenanceTransfer[] }) => {
+        if (active) setProvenance(data.chain ?? []);
+      })
+      .catch(() => {
+        if (active) setProvenance([]);
+      })
+      .finally(() => {
+        if (active) setProvenanceLoading(false);
+      });
+    return () => { active = false; };
+  }, [apiUrl, ticket.id]);
 
   const handleDownloadPdf = async () => {
     setDownloading(true);
@@ -149,6 +177,10 @@ export default function TicketCard({ ticket }: TicketCardProps) {
           })}
         </p>
 
+        {provenanceLoading ? (
+          <div className="h-12 rounded-lg bg-gray-700/40 animate-pulse" aria-label="Loading ownership history" />
+        ) : render_provenance_timeline(provenance)}
+
         <div className="flex flex-col gap-2 mt-1">
           <div className="flex gap-2">
             {ticket.qrUrl && (
@@ -228,5 +260,35 @@ export default function TicketCard({ ticket }: TicketCardProps) {
         />
       )}
     </>
+  );
+}
+
+export function render_provenance_timeline(transfers: ProvenanceTransfer[]) {
+  return (
+    <details className="rounded-lg border border-gray-700 bg-gray-900/40 px-3 py-2">
+      <summary className="cursor-pointer text-sm font-medium text-gray-300">
+        Ownership history <span className="text-gray-500">({transfers.length} transfer{transfers.length === 1 ? "" : "s"})</span>
+      </summary>
+      {transfers.length === 0 ? (
+        <p className="mt-3 text-xs text-gray-500">Original issue. No secondary transfers recorded.</p>
+      ) : (
+        <ol className="mt-3 space-y-3 border-l border-gray-700 pl-3">
+          {transfers.map((transfer) => (
+            <li key={`${transfer.sequence}-${transfer.timestamp}`} className="relative text-xs">
+              <span className="absolute -left-[17px] top-1 h-2 w-2 rounded-full bg-blue-500" />
+              <p className="text-gray-300">Transfer {transfer.sequence}</p>
+              <p className="text-gray-500">
+                {transfer.fromUserId} to {transfer.toUserId} on {new Date(transfer.timestamp).toLocaleDateString()}
+              </p>
+              {transfer.transactionHash && (
+                <p className="mt-1 truncate text-gray-600" title={transfer.transactionHash}>
+                  Stellar transaction: {transfer.transactionHash}
+                </p>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
   );
 }
