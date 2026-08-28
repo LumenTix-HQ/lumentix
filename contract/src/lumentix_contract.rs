@@ -6689,4 +6689,38 @@ impl LumentixContract {
 
         Ok(discounted_amount)
     }
+
+    /// Check whether an owner is eligible for a milestone achievement badge.
+    pub fn check_milestone_eligibility(
+        env: Env,
+        owner: soroban_sdk::Address,
+        events_attended: u32,
+        loyalty_points: u32,
+    ) -> bool {
+        crate::achievement_badge::check_milestone_eligibility(
+            &env, &owner, events_attended, loyalty_points,
+        )
+    }
+
+    /// Mint a soulbound achievement badge NFT to an eligible owner.
+    pub fn mint_achievement_badge(
+        env: Env,
+        owner: soroban_sdk::Address,
+        milestone: soroban_sdk::String,
+        events_attended: u32,
+        loyalty_points: u32,
+        expires_at: u64,
+    ) -> crate::achievement_badge::AchievementBadge {
+        crate::achievement_badge::mint_achievement_badge(
+            &env, owner, milestone, events_attended, loyalty_points, expires_at,
+        )
+    }
+
+    /// Revoke an expired or invalid achievement badge by ID.
+    pub fn revoke_expired_badge(
+        env: Env,
+        badge_id: u64,
+    ) -> crate::achievement_badge::AchievementBadge {
+        crate::achievement_badge::revoke_expired_badge(&env, badge_id)
+    }
 }
