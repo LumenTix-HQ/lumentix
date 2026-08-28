@@ -95,7 +95,7 @@ export class VenuesController {
   ) {
     const isAdmin = req.user.role === Role.ADMIN;
     return this.venuesService.deleteVenue(id, req.user.id, isAdmin);
-import { Controller, Get, Post, Put, Body, Param, UseGuards, Req, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, UseGuards, Req, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { VenuesService } from './venues.service';
 import { CreateVenueLayoutDto } from './dto/create-venue-layout.dto';
@@ -169,5 +169,16 @@ export class VenuesController {
   @ApiResponse({ status: 200, description: 'Available seats' })
   getAvailable(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.venuesService.getAvailableSeats(eventId);
+  }
+
+  @Post('seats/:seatId/reserve')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Temporarily reserve a seat', description: 'Holds a seat while checkout is completed.' })
+  reserveSeat(
+    @Param('seatId', ParseUUIDPipe) seatId: string,
+    @Query('durationSeconds') durationSeconds: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.venuesService.reserve_seat_temporarily(seatId, req.user.id, durationSeconds ? Number(durationSeconds) : undefined);
   }
 }

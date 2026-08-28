@@ -72,6 +72,10 @@ export interface Seat {
 	number: number;
 	status: "available" | "held" | "booked";
 	heldBy: string | null;
+	price?: number;
+	pricingTier?: string;
+	obstructedView?: boolean;
+	holdExpiresAt?: string | null;
 }
 
 export interface AccessibilityInventory {

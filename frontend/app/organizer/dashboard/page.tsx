@@ -78,6 +78,7 @@ export default function OrganizerDashboardPage() {
     escrowActual,
     isLoading: analyticsLoading,
     error: analyticsError,
+    report,
   } = useEventAnalytics(selectedEvent?.id ?? null);
 
   const fetchEvents = useCallback(async (token: string) => {
@@ -160,6 +161,26 @@ export default function OrganizerDashboardPage() {
     a.href = url;
     a.download = `event-${selectedEvent.id}-summary.csv`;
     a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportReport = async (format: 'csv' | 'pdf') => {
+    if (!selectedEvent) return;
+    const token = localStorage.getItem('lumentix_access_token');
+    if (!token) return;
+    const response = await fetch(`${apiBase}/analytics/events/${selectedEvent.id}/revenue/report?format=${format}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      setActionMessage(`Error: Failed to export ${format.toUpperCase()} report`);
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `revenue-${selectedEvent.id}.${format}`;
+    anchor.click();
     URL.revokeObjectURL(url);
   };
 
@@ -345,6 +366,31 @@ export default function OrganizerDashboardPage() {
                 currency="XLM"
               />
 
+              {report && (
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-5 space-y-5">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-300">Revenue breakdown</h3>
+                      <p className="text-xs text-gray-500 mt-1">Tickets, promotions, and merchandise</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => handleExportReport('csv')} className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-gray-700">CSV</button>
+                      <button type="button" onClick={() => handleExportReport('pdf')} className="rounded-lg border border-gray-600 px-3 py-2 text-xs font-medium text-gray-300 hover:bg-gray-700">PDF</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <BreakdownMetric label="Ticket revenue" value={report.ticketRevenue} />
+                    <BreakdownMetric label="Merch revenue" value={report.merchRevenue} />
+                    <BreakdownMetric label="Total revenue" value={report.totalRevenue} />
+                  </div>
+                  <div className="grid gap-5 sm:grid-cols-3">
+                    <BreakdownList title="Ticket tiers" rows={report.ticketTiers} />
+                    <BreakdownList title="Promo codes" rows={report.promoCodes} />
+                    <BreakdownList title="Merch sales" rows={report.merchSales} />
+                  </div>
+                </div>
+              )}
+
               {/* Escrow balance */}
               <EscrowBalanceCard
                 expected={escrowExpected}
@@ -401,6 +447,14 @@ export default function OrganizerDashboardPage() {
       </div>
     </main>
   );
+}
+
+function BreakdownMetric({ label, value }: { label: string; value: number }) {
+  return <div className="border-l-2 border-indigo-500 pl-3"><p className="text-xs text-gray-500">{label}</p><p className="text-lg font-semibold text-white">{value.toLocaleString()} XLM</p></div>;
+}
+
+function BreakdownList({ title, rows }: { title: string; rows: { name: string; quantity: number; revenue: number }[] }) {
+  return <div><h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">{title}</h4>{rows.length === 0 ? <p className="text-sm text-gray-600">No data</p> : <ul className="space-y-2">{rows.map((row) => <li key={row.name} className="flex justify-between gap-2 text-sm"><span className="truncate text-gray-300">{row.name} <span className="text-gray-600">x{row.quantity}</span></span><span className="shrink-0 text-gray-400">{row.revenue.toLocaleString()}</span></li>)}</ul>}</div>;
 }
 
 function generateFallbackHistory(total: number): { label: string; value: number }[] {

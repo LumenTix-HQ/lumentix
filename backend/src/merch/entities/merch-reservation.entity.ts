@@ -32,6 +32,9 @@ export class MerchReservation {
   @Column({ type: 'varchar', length: 16, default: 'reserved' })
   status!: MerchReservationStatus;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  purchasedAt!: Date | null;
+
   @CreateDateColumn()
   reservedAt!: Date;
 
