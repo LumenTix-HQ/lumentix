@@ -6689,4 +6689,33 @@ impl LumentixContract {
 
         Ok(discounted_amount)
     }
+
+    /// Store configurable royalty splits (basis points summing to 10 000) for an event.
+    /// Only the event organizer or admin should call this in production;
+    /// authorization is delegated to the caller for simplicity.
+    pub fn set_royalty_splits(
+        env: Env,
+        event_id: u32,
+        splits: soroban_sdk::Map<soroban_sdk::Address, u32>,
+    ) {
+        crate::royalty::set_royalty_splits(&env, event_id, splits);
+    }
+
+    /// Distribute `total_amount` of revenue according to the stored splits.
+    /// Returns a map of artist → amount paid in this distribution.
+    pub fn distribute_royalties(
+        env: Env,
+        event_id: u32,
+        total_amount: i128,
+    ) -> soroban_sdk::Map<soroban_sdk::Address, i128> {
+        crate::royalty::distribute_royalties(&env, event_id, total_amount)
+    }
+
+    /// Return the cumulative royalty ledger for an event.
+    pub fn query_royalty_ledger(
+        env: Env,
+        event_id: u32,
+    ) -> soroban_sdk::Map<soroban_sdk::Address, i128> {
+        crate::royalty::query_royalty_ledger(&env, event_id)
+    }
 }

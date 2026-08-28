@@ -225,6 +225,7 @@ pub mod error;
 pub mod events;
 pub mod lumentix_contract;
 pub mod models;
+pub mod royalty;
 pub mod storage;
 pub mod types;
 pub mod validation;
