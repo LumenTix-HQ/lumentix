@@ -6,6 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Inject } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
+import {
+  MarketplaceQueryDto,
+  MarketplaceResponseDto,
+} from './dto/marketplace-query.dto';
 import { Repository } from 'typeorm';
 import { TicketEntity } from '../entities/ticket.entity';
 import { Event } from '../../events/entities/event.entity';
@@ -20,9 +27,15 @@ import {
 } from './resale-transaction.entity';
 import { ListTicketForResaleDto } from './dto/list-ticket-resale.dto';
 import { BuyResaleTicketDto } from './dto/buy-resale-ticket.dto';
+import { SetPriceCeilingDto } from './dto/set-price-ceiling.dto';
+import { VerifyResalePriceDto } from './dto/verify-resale-price.dto';
+import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto';
 
-const MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
+const DEFAULT_DEFAULT_MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
 const ORGANIZER_FEE_BPS = 500; // 5% = 500 basis points
+
+/** #861: marketplace cache lifetime. The issue specifies 60s. */
+const MARKETPLACE_CACHE_TTL_MS = 60_000;
 
 @Injectable()
 export class ResaleService {
@@ -40,6 +53,8 @@ export class ResaleService {
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
+    @Inject(CACHE_MANAGER)
+    private readonly cache: Cache,
   ) {}
 
   async listTicketForResale(
@@ -57,11 +72,11 @@ export class ResaleService {
     if (!event) throw new NotFoundException('Event not found');
 
     const originalPrice = Number(event.ticketPrice);
-    const maxAllowed = originalPrice * MAX_RESALE_MULTIPLIER;
+    const maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
 
     if (dto.price > maxAllowed) {
       throw new BadRequestException(
-        `Resale price cannot exceed ${MAX_RESALE_MULTIPLIER * 100}% of the original ticket price. ` +
+        `Resale price cannot exceed ${DEFAULT_MAX_RESALE_MULTIPLIER * 100}% of the original ticket price. ` +
         `Original price: ${originalPrice} ${event.currency}, max allowed: ${maxAllowed.toFixed(2)} ${dto.currency}.`,
       );
     }
@@ -78,6 +93,10 @@ export class ResaleService {
       resourceId: ticketId,
       meta: { price: dto.price, currency: dto.currency, originalPrice },
     });
+
+    // #861: listing state changed — drop cached marketplace pages so a sold
+    // or withdrawn ticket stops appearing as available.
+    await this.invalidateMarketplaceCache();
 
     return {
       isListed: true,
@@ -108,7 +127,7 @@ export class ResaleService {
     const salePrice = Number(ticket.listingPrice);
     const originalPrice = Number(event.ticketPrice);
 
-    const maxAllowed = originalPrice * MAX_RESALE_MULTIPLIER;
+    const maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
     if (salePrice > maxAllowed) {
       throw new BadRequestException(
         'This listing exceeds the maximum allowed resale price and has been invalidated.',
@@ -143,6 +162,7 @@ export class ResaleService {
     }
 
     const previousOwnerId = ticket.ownerId;
+    const saleCurrency = ticket.listingCurrency ?? 'XLM';
     ticket.ownerId = buyerId;
     ticket.isListed = false;
     ticket.listingPrice = null;
@@ -156,7 +176,7 @@ export class ResaleService {
       sellerId: previousOwnerId,
       buyerId,
       salePrice,
-      currency: ticket.listingCurrency ?? 'XLM',
+      currency: saleCurrency,
       originalPrice,
       organizerFee,
       sellerPayout,
@@ -183,9 +203,13 @@ export class ResaleService {
         email: seller.email,
         ticketId: ticket.id,
         amount: sellerPayout,
-        currency: ticket.listingCurrency ?? 'XLM',
+        currency: saleCurrency,
       });
     }
+
+    // #861: listing state changed — drop cached marketplace pages so a sold
+    // or withdrawn ticket stops appearing as available.
+    await this.invalidateMarketplaceCache();
 
     return {
       ticket: savedTicket,
@@ -216,7 +240,105 @@ export class ResaleService {
       resourceId: ticketId,
     });
 
+    // #861: listing state changed — drop cached marketplace pages so a sold
+    // or withdrawn ticket stops appearing as available.
+    await this.invalidateMarketplaceCache();
+
     return { cancelled: true };
+  }
+
+  /**
+   * #861: public marketplace listing of every active resale ticket.
+   *
+   * Reads from `tickets` rather than `resale_transactions`: a transaction row
+   * records a completed or cancelled sale, whereas an *active listing* is a
+   * ticket with `isListed = true`. Querying transactions would return sold
+   * inventory and miss everything currently for sale.
+   *
+   * Unauthenticated, so it returns only what a buyer needs to decide — no
+   * seller identifiers beyond a display name, no ticket secrets.
+   */
+  async getMarketplaceListings(query: MarketplaceQueryDto): Promise<MarketplaceResponseDto> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const cacheKey = `resale:marketplace:${query.eventId ?? 'all'}:${page}:${limit}`;
+    const cached = await this.cache.get<MarketplaceResponseDto>(cacheKey);
+    if (cached) return cached;
+
+    const qb = this.ticketRepo
+      .createQueryBuilder('ticket')
+      .innerJoin(Event, 'event', 'event.id = ticket.eventId')
+      .leftJoin(User, 'seller', 'seller.id = ticket.ownerId')
+      .where('ticket.isListed = :isListed', { isListed: true })
+      .select([
+        'ticket.id AS "ticketId"',
+        'ticket.eventId AS "eventId"',
+        'ticket.listingPrice AS "askPrice"',
+        'ticket.listingCurrency AS "currency"',
+        'ticket.listedAt AS "listedAt"',
+        'event.title AS "eventTitle"',
+        'event.startDate AS "eventDate"',
+        'seller.displayName AS "sellerDisplayName"',
+      ]);
+
+    if (query.eventId) {
+      qb.andWhere('ticket.eventId = :eventId', { eventId: query.eventId });
+    }
+
+    // Count before pagination so `total` reflects the filter, not the page.
+    const total = await qb.getCount();
+
+    const rows = await qb
+      .orderBy('ticket.listedAt', 'DESC')
+      .offset((page - 1) * limit)
+      .limit(limit)
+      .getRawMany();
+
+    const response: MarketplaceResponseDto = {
+      data: rows.map((r) => ({
+        ticketId: r.ticketId,
+        eventId: r.eventId,
+        eventTitle: r.eventTitle,
+        eventDate: r.eventDate ?? null,
+        // Postgres returns DECIMAL as a string; without this the client gets
+        // "12.5000000" where it expects a number.
+        askPrice: r.askPrice === null ? 0 : Number(r.askPrice),
+        currency: r.currency ?? 'XLM',
+        sellerDisplayName: r.sellerDisplayName ?? 'Anonymous',
+        listedAt: r.listedAt,
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
+
+    await this.cache.set(cacheKey, response, MARKETPLACE_CACHE_TTL_MS);
+    return response;
+  }
+
+  /**
+   * #861: drop every cached marketplace page.
+   *
+   * Called after any listing or sale. Invalidating by prefix rather than by
+   * key because the same listing appears on an unknown number of paginated and
+   * filtered variants — evicting only the obvious key would leave stale pages
+   * serving tickets that are already sold.
+   */
+  async invalidateMarketplaceCache(): Promise<void> {
+    const store: any = (this.cache as any).store;
+    try {
+      if (typeof store?.keys === 'function') {
+        const keys: string[] = await store.keys('resale:marketplace:*');
+        await Promise.all(keys.map((k) => this.cache.del(k)));
+        return;
+      }
+    } catch (err) {
+      this.logger.warn(`Marketplace cache invalidation failed: ${String(err)}`);
+    }
+    // A cache that cannot be swept is not a correctness failure — entries
+    // expire in 60s regardless, which is the bound the issue asks for.
   }
 
   async getResaleHistory(
@@ -251,6 +373,156 @@ export class ResaleService {
     return {
       totalEarnings: Number(result?.totalEarnings ?? 0),
       transactions: Number(result?.transactions ?? 0),
+    };
+  }
+
+  // ── Price Ceiling Management ──────────────────────────────────────────────
+
+  /** Per-event price ceiling overrides: eventId -> ceilingMultiplierBps */
+  private readonly priceCeilings: Map<string, { ceilingMultiplierBps: number; absoluteCeiling: number }> = new Map();
+
+  /**
+   * Set a custom price ceiling for an event.
+   * Only the event organizer can set this.
+   * `ceilingMultiplierBps` is the max multiplier in basis points (e.g., 15000 = 150%).
+   * `absoluteCeiling` is a hard cap (0 = disabled).
+   */
+  async setPriceCeiling(
+    organizerId: string,
+    dto: SetPriceCeilingDto,
+  ): Promise<{
+    eventId: string;
+    ceilingMultiplierBps: number;
+    absoluteCeiling: number;
+    effectiveMaxMultiple: number;
+  }> {
+    const event = await this.eventRepo.findOne({ where: { id: dto.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.organizerId !== organizerId) throw new ForbiddenException('Not the event organizer');
+
+    const multiplier = dto.ceilingMultiplierBps;
+    if (multiplier < 100 || multiplier > 100000) {
+      throw new BadRequestException('ceilingMultiplierBps must be between 100 (1%) and 100000 (1000%)');
+    }
+
+    this.priceCeilings.set(dto.eventId, {
+      ceilingMultiplierBps: multiplier,
+      absoluteCeiling: dto.absoluteCeiling,
+    });
+
+    const effectiveMaxMultiple = multiplier / 10000;
+
+    this.logger.log(
+      `Price ceiling set for event ${dto.eventId}: ${effectiveMaxMultiple}x ` +
+        `(${multiplier} bps), absolute cap: ${dto.absoluteCeiling}`,
+    );
+
+    await this.auditService.log({
+      action: AuditAction.RESALE_LISTED,
+      userId: organizerId,
+      resourceId: dto.eventId,
+      meta: {
+        ceilingMultiplierBps: multiplier,
+        absoluteCeiling: dto.absoluteCeiling,
+        effectiveMaxMultiple,
+      },
+    });
+
+    return {
+      eventId: dto.eventId,
+      ceilingMultiplierBps: multiplier,
+      absoluteCeiling: dto.absoluteCeiling,
+      effectiveMaxMultiple,
+    };
+  }
+
+  /**
+   * Verify whether a proposed resale price is compliant with the price ceiling.
+   * Returns true if the price is within bounds.
+   */
+  async verifyResalePrice(
+    dto: VerifyResalePriceDto,
+  ): Promise<{ compliant: boolean; proposedPrice: number; maxAllowedPrice: number; reason: string }> {
+    const event = await this.eventRepo.findOne({ where: { id: dto.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const originalPrice = Number(event.ticketPrice);
+    const ceiling = this.priceCeilings.get(dto.eventId);
+
+    let maxAllowed: number;
+
+    if (ceiling) {
+      const multiplierMax = originalPrice * (ceiling.ceilingMultiplierBps / 10000);
+      maxAllowed = ceiling.absoluteCeiling > 0
+        ? Math.min(multiplierMax, ceiling.absoluteCeiling)
+        : multiplierMax;
+    } else {
+      maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
+    }
+
+    const compliant = dto.proposedPrice <= maxAllowed;
+
+    return {
+      compliant,
+      proposedPrice: dto.proposedPrice,
+      maxAllowedPrice: Math.round(maxAllowed * 100) / 100,
+      reason: compliant
+        ? 'Price is within the allowed ceiling'
+        : `Price exceeds maximum allowed (${Math.round(maxAllowed * 100) / 100})`,
+    };
+  }
+
+  /**
+   * Enforce resale price compliance by capping a proposed price to the ceiling.
+   * Returns the adjusted (enforced) price.
+   */
+  async enforceResaleCompliance(
+    enforcerId: string,
+    dto: EnforceResaleComplianceDto,
+  ): Promise<{
+    originalPrice: number;
+    enforcedPrice: number;
+    wasAdjusted: boolean;
+    maxAllowedPrice: number;
+  }> {
+    const event = await this.eventRepo.findOne({ where: { id: dto.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+
+    const originalPrice = Number(event.ticketPrice);
+    const ceiling = this.priceCeilings.get(dto.eventId);
+
+    let maxAllowed: number;
+
+    if (ceiling) {
+      const multiplierMax = originalPrice * (ceiling.ceilingMultiplierBps / 10000);
+      maxAllowed = ceiling.absoluteCeiling > 0
+        ? Math.min(multiplierMax, ceiling.absoluteCeiling)
+        : multiplierMax;
+    } else {
+      maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
+    }
+
+    const wasAdjusted = dto.proposedPrice > maxAllowed;
+    const enforcedPrice = wasAdjusted ? maxAllowed : dto.proposedPrice;
+
+    if (wasAdjusted) {
+      await this.auditService.log({
+        action: AuditAction.RESALE_LISTED,
+        userId: enforcerId,
+        resourceId: dto.eventId,
+        meta: {
+          originalProposed: dto.proposedPrice,
+          enforcedPrice,
+          maxAllowedPrice: maxAllowed,
+        },
+      });
+    }
+
+    return {
+      originalPrice: dto.proposedPrice,
+      enforcedPrice: Math.round(enforcedPrice * 100) / 100,
+      wasAdjusted,
+      maxAllowedPrice: Math.round(maxAllowed * 100) / 100,
     };
   }
 

@@ -65,6 +65,25 @@ pub struct TicketTransferRecord {
     pub timestamp: u64,
 }
 
+/// Organizer-defined transfer lock window for an event.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransferBlackout {
+    pub starts_at: u64,
+    pub ends_at: u64,
+}
+
+/// Tracks referral link ownership and reward accrual for a single event.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReferralLinkRecord {
+    pub link_code: String,
+    pub successful_purchases: u32,
+    pub pending_rewards: i128,
+    pub total_rewards_paid: i128,
+    pub total_discount_awarded: i128,
+}
+
 /// Fee collected event for tracking platform fees
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +167,8 @@ pub struct Seat {
     pub occupied: bool,
     pub held_until: u64,
     pub held_by: Option<Address>,
+    pub x: Option<u32>,
+    pub y: Option<u32>,
 }
 
 // ── Multi-Currency ─────────────────────────────────────────────────────────
@@ -431,6 +452,27 @@ pub struct IdentityProof {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Age Verification (Zero-Knowledge-Style Age Proofs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// An on-chain attestation that `subject` meets a minimum age threshold.
+///
+/// Issued by a trusted verifier (the contract admin, standing in for a KYC
+/// provider) after checking the subject's real date of birth off-chain. The
+/// date of birth itself is never submitted to or stored by the contract —
+/// only the age threshold cleared and a `commitment` hash binding this proof
+/// to the specific (subject, min_age) pair the verifier attested to.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgeProof {
+    pub subject: Address,
+    pub min_age: u32,
+    pub commitment: BytesN<32>,
+    pub issued_at: u64,
+    pub expires_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Cross-Chain Ticket Portability
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -505,6 +547,34 @@ pub struct EventMerchandise {
     pub remaining_supply: u32,
     pub organizer: Address,
     pub active: bool,
+}
+
+/// Pre-ordered merchandise voucher linked to a ticket
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MerchVoucher {
+    pub voucher_id: u64,
+    pub buyer: Address,
+    pub ticket_id: u64,
+    pub merchandise_id: u64,
+    pub issued_at: u64,
+    pub redeemed: bool,
+}
+
+/// Bid for an upgraded seat or VIP tier
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeatUpgradeBid {
+    pub bid_id: u64,
+    pub event_id: u64,
+    pub ticket_id: u64,
+    pub bidder: Address,
+    pub target_tier: String,
+    pub bid_amount: i128,
+    pub timestamp: u64,
+    pub resolved: bool,
+    pub won: bool,
+    pub refunded: bool,
 }
 
 /// A commemorative NFT collectible for a special event
@@ -591,6 +661,49 @@ pub struct SecurityIncident {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// DID / Decentralized Identity Ticket Linking
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TicketDidAssociation {
+    pub ticket_id: u64,
+    pub credential_id: u64,
+    pub subject: Address,
+    pub linked_at: u64,
+    pub revoked: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Resale Price Ceiling for Secondary Marketplace
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResalePriceCeiling {
+    pub event_id: u64,
+    pub ceiling_multiplier_bps: u32,
+    pub absolute_ceiling: i128,
+    pub set_by: Address,
+    pub set_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Attendance Memorabilia / NFT Claim Tracking
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemorabiliaClaim {
+    pub nft_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub attendee: Address,
+    pub claimed_at: u64,
+    pub metadata_hash: BytesN<32>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Personalization Engine
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -600,4 +713,295 @@ pub struct UserPreferences {
     pub user: Address,
     pub preferred_categories: Vec<String>,
     pub max_price: i128,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Email Campaign System
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of an email campaign
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EmailCampaignStatus {
+    Draft,
+    Scheduled,
+    Sending,
+    Sent,
+    Cancelled,
+}
+
+/// An email campaign created by an organizer to send newsletters to attendees
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailCampaign {
+    pub id: u64,
+    pub organizer: Address,
+    /// Optional event filter — None means all events by this organizer
+    pub event_id: Option<u64>,
+    pub subject: String,
+    pub body_html: String,
+    pub status: EmailCampaignStatus,
+    pub created_at: u64,
+    pub scheduled_at: Option<u64>,
+    pub sent_at: Option<u64>,
+    pub recipient_count: u32,
+}
+
+/// Analytics record for a sent email campaign
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailCampaignAnalytics {
+    pub campaign_id: u64,
+    pub total_sent: u32,
+    pub total_delivered: u32,
+    pub total_opened: u32,
+    pub total_clicked: u32,
+    pub total_bounced: u32,
+    pub total_unsubscribed: u32,
+    pub last_updated_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Refund Automation Pipeline (Issue #674)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Status of a bulk refund batch
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RefundBatchStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// Tracks progress of a bulk refund pipeline for a cancelled event
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundBatch {
+    pub batch_id: u64,
+    pub event_id: u64,
+    pub total_tickets: u32,
+    pub refunded_count: u32,
+    pub failed_count: u32,
+    pub status: RefundBatchStatus,
+    pub initiated_at: u64,
+    pub completed_at: Option<u64>,
+    pub initiated_by: Address,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Chain Ticket Bridge Lock (Issue #675)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Represents a ticket locked on the source chain for bridging
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CrossChainLock {
+    pub lock_id: u64,
+    pub ticket_id: u64,
+    pub event_id: u64,
+    pub owner: Address,
+    pub target_chain: String,
+    pub destination_address: String,
+    pub locked_at: u64,
+    pub expires_at: u64,
+    pub verified: bool,
+    pub unlocked: bool,
+    pub bridge_proof: Option<String>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event Certification (Issue #654)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A blockchain-issued certification standard an event can be certified against.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CertificationStandard {
+    /// Certifies the event and its tickets are verified as authentic/non-counterfeit.
+    AuthenticityVerified,
+    /// Certifies the event meets the platform's quality-assurance criteria.
+    QualityAssured,
+    /// Certifies the event meets the platform's safety-compliance criteria.
+    SafetyCompliant,
+}
+
+/// A certificate issued for an event under a specific standard.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventCertificate {
+    pub certificate_id: u64,
+    pub event_id: u64,
+    pub organizer: Address,
+    pub standard: CertificationStandard,
+    pub issued_at: u64,
+    pub revoked: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anonymous Event Feedback Surveys
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A single anonymous survey response.
+///
+/// Deliberately does **not** store the respondent's wallet address or ticket
+/// ID — only a one-way `nullifier` hash derived from the ticket is kept, so
+/// double-submission from the same ticket can be rejected without the stored
+/// record ever revealing which ticket (and therefore which wallet) answered.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnonymousSurveyResponse {
+    pub id: u64,
+    pub event_id: u64,
+    /// One rating (1–5) per survey question.
+    pub ratings: Vec<u32>,
+    pub comment: String,
+    pub submitted_at: u64,
+}
+
+/// Aggregated, privacy-preserving results compiled from all anonymous
+/// responses recorded for an event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SurveyResults {
+    pub event_id: u64,
+    pub total_responses: u32,
+    /// Average rating × 100 per question index (parallel to `ratings`).
+    pub average_ratings_x100: Vec<u32>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A community vote to decide which candidate (artist, track, speaker, etc.)
+/// fills a specific schedule slot at an event. Open to any ticket holder of
+/// the event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVote {
+    pub vote_id: u64,
+    pub event_id: u64,
+    pub slot_name: String,
+    /// Candidate names, e.g. artists/tracks/speakers competing for the slot.
+    pub candidates: Vec<String>,
+    /// Vote tally, parallel to `candidates`.
+    pub vote_counts: Vec<u32>,
+    pub voting_deadline: u64,
+    pub finalized: bool,
+    pub winning_candidate: Option<String>,
+}
+
+/// A single ticket holder's vote on a schedule slot (duplicate-vote guard).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduleVoteCastRecord {
+    pub vote_id: u64,
+    pub voter: Address,
+    pub candidate_index: u32,
+    pub timestamp: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A discount code scoped to a single event, with an expiration date and
+/// both a global and a per-user usage limit (0 means unlimited).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PromoCode {
+    pub event_id: u64,
+    pub code: String,
+    pub discount_bps: u32,
+    pub expires_at: u64,
+    pub max_global_uses: u32,
+    pub max_uses_per_user: u32,
+    pub total_uses: u32,
+    pub active: bool,
+    pub created_by: Address,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WalletConnect Session Management
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Lifecycle state of a WalletConnect-style session.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WalletSessionStatus {
+    /// Session proposed but not yet approved by the wallet owner.
+    Pending,
+    /// Session approved and usable until `expires_at`.
+    Active,
+    /// Session terminated by the wallet owner.
+    Disconnected,
+}
+
+/// A dApp <-> wallet pairing recorded on-chain so that session state
+/// survives client restarts and can be audited.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WalletSession {
+    pub session_id: u64,
+    /// The wallet address that owns (and must authorize) this session.
+    pub wallet: Address,
+    /// Human-readable name of the requesting dApp.
+    pub dapp_name: String,
+    /// Opaque pairing topic supplied by the client.
+    pub session_topic: String,
+    pub status: WalletSessionStatus,
+    pub created_at: u64,
+    /// Set when the session moves to `Active`; zero while pending.
+    pub approved_at: u64,
+    /// Absolute expiry. Zero while pending; set at approval time.
+    pub expires_at: u64,
+    /// Requested lifetime, retained so approval can compute `expires_at`.
+    pub ttl_seconds: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Offline Ticket Validation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A pre-computed proof that lets a gate scanner validate a ticket while
+/// disconnected from the network. Cached by the organizer ahead of the event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidationProof {
+    pub ticket_id: u64,
+    pub event_id: u64,
+    /// Ticket owner at the time the proof was cached.
+    pub owner: Address,
+    /// sha256 over (event_id, ticket_id, owner, issued_at) — the value a
+    /// scanner compares against without needing chain access.
+    pub proof_hash: BytesN<32>,
+    pub issued_at: u64,
+    /// Proofs stop being honoured after this timestamp.
+    pub valid_until: u64,
+}
+
+/// One scan captured by a gate device while offline, replayed on reconnect.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OfflineScanRecord {
+    pub ticket_id: u64,
+    /// Proof hash the device matched against at scan time.
+    pub proof_hash: BytesN<32>,
+    /// When the gate actually scanned the ticket.
+    pub scanned_at: u64,
+    /// Device or staff identifier that performed the scan.
+    pub scanner_id: String,
+}
+
+/// Outcome of syncing a single offline scan.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OfflineScanResult {
+    pub ticket_id: u64,
+    /// True when the scan was applied and the ticket marked used.
+    pub accepted: bool,
+    /// Error discriminant explaining a rejection; zero when accepted.
+    pub reason_code: u32,
 }

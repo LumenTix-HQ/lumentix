@@ -6,18 +6,16 @@ import { RolesGuard } from './roles.guard';
 import { Event } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
 import { RoleRequest } from '../users/entities/role-request.entity';
-import { AuthModule } from '../auth/auth.module';
-import { StellarModule } from '../stellar/stellar.module';
-
-@Module({
-  imports: [TypeOrmModule.forFeature([Event, User, RoleRequest]), AuthModule, StellarModule],
 import { StellarWebhookModule } from '../stellar/stellar-webhook.module';
+import { AuditModule } from '../audit/audit.module';
+import { MailerModule } from '../mailer/mailer.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Event, User, RoleRequest]),
-    AuthModule,
     StellarWebhookModule,
+    AuditModule,
+    MailerModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, RolesGuard],

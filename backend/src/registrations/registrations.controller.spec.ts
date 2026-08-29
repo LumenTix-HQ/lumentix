@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RegistrationsController } from './registrations.controller';
 import { RegistrationsService } from './registrations.service';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
+import { Reflector } from '@nestjs/core';
 
 describe('RegistrationsController', () => {
   let controller: RegistrationsController;
@@ -31,6 +33,15 @@ describe('RegistrationsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  it('register() should have IdempotencyInterceptor', () => {
+    const reflector = new Reflector();
+    const interceptors = reflector.get(
+      '__interceptors__',
+      controller.register,
+    );
+    expect(interceptors).toContain(IdempotencyInterceptor);
   });
 
   it('register() calls service.register with correct params', async () => {

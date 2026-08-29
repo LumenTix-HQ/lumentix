@@ -2,10 +2,8 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   HttpCode,
   HttpStatus,
-  Inject,
   Param,
   ParseUUIDPipe,
   Post,
@@ -13,6 +11,7 @@ import {
   Req,
   Res,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { Response } from 'express';
 import {
@@ -29,22 +28,20 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ListRegistrationsDto } from './dto/list-registrations.dto';
 import { RegistrationsService } from './registrations.service';
-import { REDIS_CLIENT } from '../common/redis/redis.module';
-import Redis from 'ioredis';
-
-const IDEMPOTENCY_TTL_SECONDS = 86_400; // 24 hours
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
 @ApiTags('Registrations')
 @ApiBearerAuth()
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Resource not found' })
 export class RegistrationsController {
-  constructor(
-    private readonly service: RegistrationsService,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-  ) {}
+  constructor(private readonly service: RegistrationsService) {}
 
   @Post('events/:id/register')
+  @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
     summary: 'Register for an event',
     description:
@@ -67,51 +64,17 @@ export class RegistrationsController {
     @Param('id', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
     @Res() res: Response,
-    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    // Idempotency cache lookup
-    if (idempotencyKey) {
-      const cacheKey = `idempotency:${req.user.id}:${idempotencyKey}`;
-      const cached = await this.redis.get(cacheKey);
-      if (cached) {
-        const payload = JSON.parse(cached) as { status: number; body: unknown };
-        return res
-          .status(payload.status)
-          .setHeader('X-Idempotent-Replay', 'true')
-          .json(payload.body);
-      }
-
-      const result = await this.service.register(eventId, req.user.id);
-      const body =
-        result.waitlistPosition !== undefined
-          ? {
-              status: 'waitlisted',
-              position: result.waitlistPosition,
-              registration: result.registration,
-            }
-          : result.registration;
-
-      // Cache the response for 24 hours
-      await this.redis.set(
-        cacheKey,
-        JSON.stringify({ status: result.httpStatus, body }),
-        'EX',
-        IDEMPOTENCY_TTL_SECONDS,
-      );
-
-      return res.status(result.httpStatus).json(body);
-    }
-
     const result = await this.service.register(eventId, req.user.id);
-    return res.status(result.httpStatus).json(
+    const body =
       result.waitlistPosition !== undefined
         ? {
             status: 'waitlisted',
             position: result.waitlistPosition,
             registration: result.registration,
           }
-        : result.registration,
-    );
+        : result.registration;
+    return res.status(result.httpStatus).json(body);
   }
 
   @Get('events/:id/registrations')
@@ -142,17 +105,17 @@ export class RegistrationsController {
   @ApiParam({ name: 'id', description: 'Event UUID' })
   @ApiResponse({ status: 200, description: 'CSV file' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 429, description: 'Rate limit exceeded (10/hour per organizer)' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded (5/minute per organizer)' })
   async exportCsv(
     @Param('id', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
     @Res() res: Response,
   ) {
-    const rateKey = `export-limit:${req.user.id}`;
+    const rateKey = `export-rate:${req.user.id}`;
     const count = await this.redis.incr(rateKey);
-    if (count === 1) await this.redis.expire(rateKey, 3600);
-    if (count > 10) {
-      return res.status(429).json({ message: 'Export rate limit exceeded. Maximum 10 exports per hour.' });
+    if (count === 1) await this.redis.expire(rateKey, 60);
+    if (count > 5) {
+      return res.status(429).json({ message: 'Export rate limit exceeded. Maximum 5 exports per minute.' });
     }
 
     const csv = await this.service.exportRegistrationsCsv(eventId, req.user.id);
@@ -174,6 +137,24 @@ export class RegistrationsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.service.listForUser(req.user.id, dto);
+  }
+
+  @Post('registrations/:id/confirm-waitlist')
+  @ApiOperation({
+    summary: 'Confirm a waitlist promotion',
+    description:
+      'Authenticated. Confirms a waitlisted registration when a spot becomes available.',
+  })
+  @ApiParam({ name: 'id', description: 'Registration UUID' })
+  @ApiResponse({ status: 200, description: 'Registration confirmed from waitlist' })
+  @ApiResponse({ status: 400, description: 'Registration is not waitlisted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Registration not found' })
+  confirmWaitlist(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.service.confirmWaitlist(id, req.user.id);
   }
 
   @Delete('registrations/:id')

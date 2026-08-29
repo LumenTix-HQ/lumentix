@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, In } from 'typeorm';
+import { Horizon } from '@stellar/stellar-sdk';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { paginate } from '../common/pagination/pagination.helper';
@@ -22,7 +23,6 @@ import { StellarService } from '../stellar/stellar.service';
 import { User } from '../users/entities/user.entity';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { EscrowService } from './services/escrow.service';
-import { Payment, PaymentStatus } from './entities/payment.entity';
 import { WebhooksService } from '../webhooks/webhooks.service';
 
 @Injectable()
@@ -57,6 +57,39 @@ export class PaymentsService {
     return payment;
   }
 
+  async getPaymentStatus(paymentId: string) {
+    const payment = await this.getPaymentById(paymentId);
+
+    let ticket: {
+      id: string;
+      status: string;
+      pdfUrl: string | null;
+      qrCodeDataUrl: string | null;
+    } | null = null;
+
+    if (payment.status === PaymentStatus.CONFIRMED && payment.eventId) {
+      const ticketRecord = await this.ticketRepository.findOne({
+        where: { eventId: payment.eventId, ownerId: payment.userId },
+      });
+      if (ticketRecord) {
+        ticket = {
+          id: ticketRecord.id,
+          status: ticketRecord.status,
+          pdfUrl: ticketRecord.pdfUrl,
+          qrCodeDataUrl: null,
+        };
+      }
+    }
+
+    return {
+      paymentId: payment.id,
+      status: payment.status,
+      transactionHash: payment.transactionHash,
+      confirmedAt: payment.status === PaymentStatus.CONFIRMED ? payment.updatedAt : null,
+      ticket,
+    };
+  }
+
   async getHistory(userId: string, dto: PaginationDto) {
     const qb = this.paymentsRepository
       .createQueryBuilder('payment')
@@ -80,8 +113,8 @@ export class PaymentsService {
     eventId: string,
     userId: string,
     currency?: string,
-    _usePathPayment?: boolean,
-    _sourceAsset?: string,
+    usePathPayment?: boolean,
+    sourceAsset?: string,
   ) {
     const event = await this.eventsService.getEventById(eventId);
 
@@ -191,6 +224,41 @@ export class PaymentsService {
       },
     });
 
+    // Include path payment info for non-XLM currencies
+    let pathPayment: {
+      sendAsset: string;
+      sendAmount: string;
+      path: string[];
+    } | null = null;
+
+    if (
+      (usePathPayment || selectedCurrency !== 'XLM') &&
+      sourceAsset &&
+      sourceAsset !== selectedCurrency
+    ) {
+      try {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        const userPublicKey = user?.stellarPublicKey ?? null;
+        if (userPublicKey) {
+          const pathResult = await this.stellarService.findPaymentPath(
+            userPublicKey,
+            sourceAsset,
+            selectedCurrency,
+            String(finalPrice),
+          );
+          if (pathResult) {
+            pathPayment = {
+              sendAsset: sourceAsset,
+              sendAmount: pathResult.source_amount ?? String(finalPrice),
+              path: pathResult.path ?? [],
+            };
+          }
+        }
+      } catch {
+        // Path payment info is optional; proceed without it
+      }
+    }
+
     return {
       paymentId: saved.id,
       memo: saved.id,
@@ -198,6 +266,7 @@ export class PaymentsService {
       currency: saved.currency,
       escrowWallet: event.escrowPublicKey,
       expiresAt: saved.expiresAt,
+      ...(pathPayment && { pathPayment }),
     };
   }
 
@@ -266,7 +335,7 @@ export class PaymentsService {
     const saved = await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
-      action: AuditAction.PAYMENT_INTENT_CREATED,
+      action: AuditAction.SEASON_PASS_INTENT_CREATED,
       userId,
       resourceId: saved.id,
       meta: {
@@ -288,18 +357,26 @@ export class PaymentsService {
   }
 
   async confirmPayment(
-    input: ConfirmPaymentDto | string,
+    { transactionHash }: ConfirmPaymentDto,
     userId: string,
   ): Promise<Payment> {
-    const transactionHash =
-      typeof input === 'string' ? input : input.transactionHash;
 
-    let txRecord: any;
+    let txRecord: Horizon.ServerApi.TransactionRecord;
     try {
       txRecord = await this.stellarService.getTransaction(transactionHash);
     } catch {
       throw new BadRequestException(
         `Transaction "${transactionHash}" not found on the Stellar network.`,
+      );
+    }
+
+    // Reject duplicate transaction hash submissions (replay attack prevention)
+    const existingByHash = await this.paymentsRepository.findOne({
+      where: { transactionHash },
+    });
+    if (existingByHash) {
+      throw new ConflictException(
+        'This transaction has already been used to confirm a payment.',
       );
     }
 
@@ -328,6 +405,7 @@ export class PaymentsService {
     }
 
     let targetEscrowPublicKey: string | null = null;
+    let event: Event | null = null;
     if (payment.isSeasonPass) {
       const series = await this.eventSeriesRepository.findOne({
         where: { id: payment.seriesId as string },
@@ -337,7 +415,7 @@ export class PaymentsService {
       }
       targetEscrowPublicKey = series.escrowPublicKey;
     } else {
-      const event = await this.eventsService.getEventById(payment.eventId as string);
+      event = await this.eventsService.getEventById(payment.eventId as string);
       if (!event.escrowPublicKey) {
         throw new ConflictException('Escrow wallet is not configured for this event.');
       }
@@ -395,7 +473,9 @@ export class PaymentsService {
       },
     });
 
-    this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+    if (event) {
+      this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+    }
 
     return confirmed;
   }
@@ -414,6 +494,31 @@ export class PaymentsService {
     );
   }
 
+  async findPaymentPaths(
+    sourcePublicKey: string,
+    sourceAsset: string,
+    destAsset: string,
+    destAmount: string,
+  ) {
+    const records = await this.stellarService.findPaymentPath(
+      sourcePublicKey,
+      sourceAsset,
+      destAsset,
+      destAmount,
+    );
+
+    return records.map((record: Horizon.ServerApi.PaymentPathRecord, index: number) => ({
+      rank: index + 1,
+      sourceAmount: record.source_amount,
+      sourceAsset: sourceAsset,
+      destinationAmount: record.destination_amount,
+      destinationAsset: destAsset,
+      path: (record.path ?? []).map((a: { asset_code?: string; asset_issuer?: string }) =>
+        a.asset_code ? `${a.asset_code}:${a.asset_issuer}` : 'native',
+      ),
+    }));
+  }
+
   async expireStalePayments(): Promise<void> {
     const expired = await this.paymentsRepository.find({
       where: {
@@ -422,9 +527,26 @@ export class PaymentsService {
       },
     });
 
-    for (const payment of expired) {
-      await this.markFailed(payment, 'Payment expired');
+    const results = await Promise.allSettled(
+      expired.map((payment) => this.markFailed(payment, 'Payment expired')),
+    );
+
+    const failures = results.filter((r) => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.error(
+        `${failures.length}/${expired.length} stale payments failed to mark as failed:`,
+        failures.map((f) => (f as PromiseRejectedResult).reason),
+      );
     }
+  }
+
+  async mergeEscrowToOrganizer(eventId: string, organizerId: string) {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+    return this.escrowService.mergeEscrowToOrganizer(eventId, event.organizerId);
   }
 
   private async resolvePaymentOperations(txRecord: any): Promise<PaymentOperation[]> {
@@ -481,17 +603,8 @@ export class PaymentsService {
           currency: payment.currency,
           reason,
         });
+        this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
       }
-      const event = await this.eventsService.getEventById(payment.eventId);
-      await this.notificationService.queuePaymentFailedEmail({
-        userId: payment.userId,
-        email: '',
-        eventTitle: event.title,
-        amount: Number(payment.amount),
-        currency: payment.currency,
-        reason,
-      });
-      this.webhooksService.queueDelivery(event, saved).catch(() => undefined);
     } catch (error) {
       console.error(
         `Failed to queue payment failure email for ${payment.id}:`,

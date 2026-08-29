@@ -255,6 +255,82 @@ impl BatchTicketsTransferred {
     }
 }
 
+/// Event emitted when organizers update a transfer blackout window.
+pub struct TransferBlackoutUpdated;
+
+impl TransferBlackoutUpdated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        starts_at: u64,
+        ends_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("txblack"),),
+            (event_id, organizer, starts_at, ends_at),
+        );
+    }
+}
+
+/// Event emitted when an organizer or admin overrides a transfer lock.
+pub struct TransferLockBypassed;
+
+impl TransferLockBypassed {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        ticket_id: u64,
+        operator: Address,
+        from: Address,
+        to: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("txbypass"),),
+            (event_id, ticket_id, operator, from, to),
+        );
+    }
+}
+
+/// Event emitted when a referral link is generated for an event.
+pub struct ReferralLinkGenerated;
+
+impl ReferralLinkGenerated {
+    pub fn emit(env: &Env, event_id: u64, referrer: Address, link_code: String) {
+        env.events()
+            .publish((symbol_short!("reflink"),), (event_id, referrer, link_code));
+    }
+}
+
+/// Event emitted when a referred purchase is processed.
+pub struct ReferralPurchaseProcessed;
+
+impl ReferralPurchaseProcessed {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        referrer: Address,
+        buyer: Address,
+        discounted_price: i128,
+        reward_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("refproc"),),
+            (event_id, referrer, buyer, discounted_price, reward_amount),
+        );
+    }
+}
+
+/// Event emitted when pending referral rewards are credited to the referrer ledger state.
+pub struct ReferralRewardsCredited;
+
+impl ReferralRewardsCredited {
+    pub fn emit(env: &Env, event_id: u64, referrer: Address, amount: i128) {
+        env.events()
+            .publish((symbol_short!("refcredit"),), (event_id, referrer, amount));
+    }
+}
+
 /// Event emitted when a ticket is marked as used (checked in)
 pub struct TicketUsed;
 
@@ -1025,7 +1101,6 @@ impl MerchandiseCreated {
     ) {
         env.events().publish(
             (symbol_short!("merch_crt"),),
-            (soroban_sdk::Symbol::new(env, "merccreate"),),
             (
                 merchandise_id,
                 event_id,
@@ -1231,6 +1306,448 @@ impl UserJourneyOptimized {
         env.events().publish(
             (soroban_sdk::Symbol::new(env, "user_journey_optimized"),),
             (user, step_count, timestamp),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DID TICKET LINKING EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct TicketDidLinked;
+impl TicketDidLinked {
+    pub fn emit(
+        env: &Env,
+        ticket_id: u64,
+        credential_id: u64,
+        subject: Address,
+        linked_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("tckdidlk"),),
+            (ticket_id, credential_id, subject, linked_at),
+        );
+    }
+}
+
+pub struct TicketDidRevoked;
+impl TicketDidRevoked {
+    pub fn emit(env: &Env, ticket_id: u64, credential_id: u64, admin: Address) {
+        env.events().publish(
+            (symbol_short!("tckdidrv"),),
+            (ticket_id, credential_id, admin),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESALE PRICE CEILING EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct PriceCeilingSet;
+impl PriceCeilingSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        ceiling_multiplier_bps: u32,
+        absolute_ceiling: i128,
+        set_by: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("prceil"),),
+            (event_id, ceiling_multiplier_bps, absolute_ceiling, set_by),
+        );
+    }
+}
+
+pub struct ResalePriceVerified;
+impl ResalePriceVerified {
+    pub fn emit(env: &Env, event_id: u64, proposed_price: i128, compliant: bool) {
+        env.events().publish(
+            (symbol_short!("rslprvrf"),),
+            (event_id, proposed_price, compliant),
+        );
+    }
+}
+
+pub struct ResaleComplianceEnforced;
+impl ResaleComplianceEnforced {
+    pub fn emit(env: &Env, event_id: u64, ticket_id: u64, adjusted_price: i128, enforced_by: Address) {
+        env.events().publish(
+            (symbol_short!("rslcompl"),),
+            (event_id, ticket_id, adjusted_price, enforced_by),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ATTENDANCE MEMORABILIA EVENTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct CheckinProofValidated;
+impl CheckinProofValidated {
+    pub fn emit(env: &Env, ticket_id: u64, event_id: u64, attendee: Address, valid: bool) {
+        env.events().publish(
+            (symbol_short!("chkprfva"),),
+            (ticket_id, event_id, attendee, valid),
+        );
+    }
+}
+
+pub struct AttendanceMemorabiliaMinted;
+impl AttendanceMemorabiliaMinted {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        attendee: Address,
+        minted_at: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("attmemnt"),),
+            (nft_id, ticket_id, event_id, attendee, minted_at),
+        );
+    }
+}
+
+pub struct MemorabiliaClaimed;
+impl MemorabiliaClaimed {
+    pub fn emit(
+        env: &Env,
+        nft_id: u64,
+        ticket_id: u64,
+        event_id: u64,
+        attendee: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("memclm"),),
+            (nft_id, ticket_id, event_id, attendee),
+        );
+    }
+}
+
+pub struct MerchandiseLinkedToTicket;
+impl MerchandiseLinkedToTicket {
+    pub fn emit(
+        env: &Env,
+        ticket_id: u64,
+        merchandise_id: u64,
+        buyer: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("merclnk"),),
+            (ticket_id, merchandise_id, buyer),
+        );
+    }
+}
+
+pub struct MerchandisePreordered;
+impl MerchandisePreordered {
+    pub fn emit(
+        env: &Env,
+        voucher_id: u64,
+        ticket_id: u64,
+        merchandise_id: u64,
+        buyer: Address,
+        price: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("mercord"),),
+            (voucher_id, ticket_id, merchandise_id, buyer, price),
+        );
+    }
+}
+
+pub struct WaitlistSpotReleased;
+impl WaitlistSpotReleased {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        recipient: Address,
+        spots: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("wspotrel"),),
+            (event_id, recipient, spots),
+        );
+    }
+}
+
+pub struct WaitlistOfferExpired;
+impl WaitlistOfferExpired {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        buyer: Address,
+    ) {
+        env.events().publish(
+            (symbol_short!("woffexp"),),
+            (event_id, buyer),
+        );
+    }
+}
+
+pub struct SeatUpgradeBidPlaced;
+impl SeatUpgradeBidPlaced {
+    pub fn emit(
+        env: &Env,
+        bid_id: u64,
+        event_id: u64,
+        ticket_id: u64,
+        bidder: Address,
+        bid_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgbidpl"),),
+            (bid_id, event_id, ticket_id, bidder, bid_amount),
+        );
+    }
+}
+
+pub struct SeatUpgradeBidResolved;
+impl SeatUpgradeBidResolved {
+    pub fn emit(
+        env: &Env,
+        bid_id: u64,
+        event_id: u64,
+        ticket_id: u64,
+        won: bool,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgbidrs"),),
+            (bid_id, event_id, ticket_id, won),
+        );
+    }
+}
+
+pub struct SeatUpgradeBidRefunded;
+impl SeatUpgradeBidRefunded {
+    pub fn emit(
+        env: &Env,
+        bid_id: u64,
+        bidder: Address,
+        amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("upgbidrf"),),
+            (bid_id, bidder, amount),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Event Certification (Issue #654)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct EventCertificateIssued;
+impl EventCertificateIssued {
+    pub fn emit(env: &Env, certificate_id: u64, event_id: u64, organizer: Address) {
+        env.events().publish(
+            (symbol_short!("certiss"),),
+            (certificate_id, event_id, organizer),
+        );
+    }
+}
+
+pub struct CertificationStandardUpdated;
+impl CertificationStandardUpdated {
+    pub fn emit(env: &Env, standard: crate::types::CertificationStandard, enabled: bool) {
+        env.events()
+            .publish((symbol_short!("certstd"),), (standard, enabled));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anonymous Event Feedback Surveys
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an anonymous survey response is submitted. Intentionally
+/// carries no respondent identity — only the aggregate shape of the
+/// response — to preserve the anonymity of the on-chain record.
+pub struct AnonymousSurveySubmitted;
+impl AnonymousSurveySubmitted {
+    pub fn emit(env: &Env, survey_id: u64, event_id: u64, question_count: u32, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("survsubm"),),
+            (survey_id, event_id, question_count, timestamp),
+        );
+    }
+}
+
+/// Emitted when aggregated survey results are compiled for an event
+pub struct SurveyResultsCompiled;
+impl SurveyResultsCompiled {
+    pub fn emit(env: &Env, event_id: u64, total_responses: u32, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("survcomp"),),
+            (event_id, total_responses, timestamp),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a new schedule slot vote is opened for an event
+pub struct ScheduleVoteInitialized;
+impl ScheduleVoteInitialized {
+    pub fn emit(
+        env: &Env,
+        vote_id: u64,
+        event_id: u64,
+        slot_name: String,
+        candidate_count: u32,
+        voting_deadline: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("schedinit"),),
+            (vote_id, event_id, slot_name, candidate_count, voting_deadline),
+        );
+    }
+}
+
+/// Emitted when a ticket holder casts a vote on a schedule slot
+pub struct ScheduleVoteCast;
+impl ScheduleVoteCast {
+    pub fn emit(env: &Env, vote_id: u64, voter: Address, candidate_index: u32, new_count: u32) {
+        env.events().publish(
+            (symbol_short!("schedcast"),),
+            (vote_id, voter, candidate_index, new_count),
+        );
+    }
+}
+
+/// Emitted when a schedule vote is finalized and a winning candidate is set
+pub struct ScheduleVoteFinalized;
+impl ScheduleVoteFinalized {
+    pub fn emit(env: &Env, vote_id: u64, event_id: u64, winning_candidate: String, votes: u32) {
+        env.events().publish(
+            (symbol_short!("schedfin"),),
+            (vote_id, event_id, winning_candidate, votes),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer creates a new promo code for an event
+pub struct PromoCodeCreated;
+impl PromoCodeCreated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        code: String,
+        discount_bps: u32,
+        expires_at: u64,
+        max_global_uses: u32,
+        max_uses_per_user: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("promocrea"),),
+            (
+                event_id,
+                code,
+                discount_bps,
+                expires_at,
+                max_global_uses,
+                max_uses_per_user,
+            ),
+        );
+    }
+}
+
+/// Emitted when a promo code discount is applied to a purchase
+pub struct PromoCodeApplied;
+impl PromoCodeApplied {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        code: String,
+        user: Address,
+        original_amount: i128,
+        discounted_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("promoappl"),),
+            (event_id, code, user, original_amount, discounted_amount),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WalletConnect session events
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a dApp session is proposed for a wallet.
+pub struct WalletConnectInitiated;
+
+impl WalletConnectInitiated {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address, dapp_name: String) {
+        env.events()
+            .publish((symbol_short!("wcinit"),), (session_id, wallet, dapp_name));
+    }
+}
+
+/// Emitted when a wallet owner approves a pending session.
+pub struct WalletSessionApproved;
+
+impl WalletSessionApproved {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address, expires_at: u64) {
+        env.events()
+            .publish((symbol_short!("wcapprv"),), (session_id, wallet, expires_at));
+    }
+}
+
+/// Emitted when a session is torn down by its wallet owner.
+pub struct WalletDisconnected;
+
+impl WalletDisconnected {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address) {
+        env.events()
+            .publish((symbol_short!("wcdisc"),), (session_id, wallet));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Offline validation events
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer caches a batch of validation proofs.
+pub struct ValidationProofsCached;
+
+impl ValidationProofsCached {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, cached_count: u32, valid_until: u64) {
+        env.events().publish(
+            (symbol_short!("vpcached"),),
+            (event_id, organizer, cached_count, valid_until),
+        );
+    }
+}
+
+/// Emitted for each offline scan successfully replayed on-chain.
+pub struct OfflineScanSynced;
+
+impl OfflineScanSynced {
+    pub fn emit(env: &Env, event_id: u64, ticket_id: u64, validator: Address, scanned_at: u64) {
+        env.events().publish(
+            (symbol_short!("offsync"),),
+            (event_id, ticket_id, validator, scanned_at),
+        );
+    }
+}
+
+/// Emitted once per `sync_offline_scans` call summarising the batch.
+pub struct OfflineScansSyncCompleted;
+
+impl OfflineScansSyncCompleted {
+    pub fn emit(env: &Env, event_id: u64, validator: Address, accepted: u32, rejected: u32) {
+        env.events().publish(
+            (symbol_short!("offdone"),),
+            (event_id, validator, accepted, rejected),
         );
     }
 }

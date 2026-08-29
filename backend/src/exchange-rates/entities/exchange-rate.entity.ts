@@ -26,4 +26,8 @@ export class ExchangeRate {
   /** Timestamp when this rate was fetched from the external provider */
   @CreateDateColumn()
   fetchedAt: Date;
+
+  /** Set to true by the stale-rate detection cron job when fetchedAt exceeds the threshold */
+  @Column({ default: false })
+  isStale: boolean;
 }

@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  Unique,
 } from 'typeorm';
 
 export enum PaymentStatus {
@@ -15,7 +16,8 @@ export enum PaymentStatus {
 }
 
 @Index(['userId', 'status'])
-@Index(['eventId', 'status']) // NEW
+@Index(['eventId', 'status'])
+@Unique(['transactionHash'])
 @Entity('payments')
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
@@ -27,16 +29,18 @@ export class Payment {
 
   
   @Index() // NEW
+  @Index()
   @Column({ nullable: true })
   eventId: string | null;
 
+  @Index()
   @Column({ nullable: true })
   seriesId: string | null;
 
   @Column({ default: false })
   isSeasonPass: boolean;
 
-  @Index() // NEW
+  @Index()
   @Column()
   userId: string;
 
@@ -46,9 +50,28 @@ export class Payment {
   @Column({ default: 'XLM' })
   currency: string;
 
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  ticketTier: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  promoCode: string | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'ticket' })
+  productType: 'ticket' | 'merch';
+
   @Column({ nullable: true, type: 'varchar' })
   transactionHash: string | null;
 
+  /**
+   * The signed Stellar transaction XDR, persisted before submission to
+   * Horizon so a network timeout doesn't strand the payment with no way to
+   * retry without rebuilding (and re-signing) the transaction. Cleared once
+   * the payment reaches a terminal state (CONFIRMED or FAILED).
+   */
+  @Column({ nullable: true, type: 'text' })
+  signedXdr: string | null;
+
+  @Index()
   @Column({
     type: 'enum',
     enum: PaymentStatus,
@@ -56,7 +79,6 @@ export class Payment {
   })
   status: PaymentStatus;
 
-  @Index()
   @Column({ type: 'timestamptz', nullable: true })
   expiresAt: Date | null;
 

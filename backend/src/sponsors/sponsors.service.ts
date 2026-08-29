@@ -13,12 +13,16 @@ import { ContributionsService } from './contributions.service';
 import { EventsService } from '../events/events.service';
 import { CreateSponsorTierDto } from './dto/create-sponsor-tier.dto';
 import { UpdateSponsorTierDto } from './dto/update-sponsor-tier.dto';
+import { SponsorReportDto } from './dto/sponsor-report.dto';
 import { Event, EventStatus } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
 import { EscrowService } from '../payments/services/escrow.service';
 import { StellarService } from '../stellar/stellar.service';
 import { AuditService } from '../audit/audit.service';
 import { Role } from '../common/decorators/roles.decorator';
+
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 
 @Injectable()
 export class SponsorsService {
@@ -38,6 +42,7 @@ export class SponsorsService {
     private readonly escrowService: EscrowService,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async confirmSponsorPayment(transactionHash: string): Promise<boolean> {
@@ -220,18 +225,102 @@ export class SponsorsService {
   }
 
   async getEventLeaderboard(eventId: string): Promise<any[]> {
-    const rows = await this.sponsorRepo
-      .createQueryBuilder('s')
-      .select('s.userId', 'userId')
-      .addSelect('s.displayName', 'displayName')
-      .addSelect('s.logoUrl', 'logoUrl')
-      .addSelect('s.websiteUrl', 'websiteUrl')
-      .addSelect('SUM(s.amount)', 'totalContribution')
-      .where('s.eventId = :eventId', { eventId })
-      .groupBy('s.userId, s.displayName, s.logoUrl, s.websiteUrl')
-      .orderBy('SUM(s.amount)', 'DESC')
+    const cacheKey = `leaderboard:${eventId}`;
+    const cached = await this.cacheManager.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const contributions = await this.contributionRepository
+      .createQueryBuilder('contribution')
+      .innerJoin('contribution.tier', 'tier')
+      .innerJoinAndSelect('contribution.sponsor', 'sponsor')
+      .select([
+        'sponsor.displayName as "displayName"',
+        'sponsor.logoUrl as "logoUrl"',
+        'tier.name as "tierName"',
+        'SUM(contribution.amount) as "totalXlm"',
+      ])
+      .where('tier.eventId = :eventId', { eventId })
+      .andWhere('contribution.status = :status', {
+        status: ContributionStatus.CONFIRMED,
+      })
+      .groupBy(
+        'sponsor.displayName, sponsor.logoUrl, tier.name',
+      )
+      .orderBy('"totalXlm"', 'DESC')
       .getRawMany();
-    return rows.map((r, i) => ({ ...r, rank: i + 1 }));
+
+    const leaderboard = contributions.map((c, i) => ({
+      rank: i + 1,
+      ...c,
+      totalXlm: Number(c.totalXlm),
+    }));
+
+    await this.cacheManager.set(cacheKey, leaderboard, 300);
+    return leaderboard;
+  }
+
+  /**
+   * Returns this event's active sponsor banners in a weighted-random display
+   * order (Efraimidis-Spirakis weighted sampling) — higher `weight` sponsors
+   * are more likely to sort first on any given rotation.
+   */
+  async rotateSponsorBanners(eventId: string): Promise<Sponsor[]> {
+    const sponsors = await this.sponsorRepo.find({
+      where: { eventId, isActive: true },
+    });
+
+    return sponsors
+      .map((sponsor) => ({
+        sponsor,
+        key: Math.pow(Math.random(), 1 / Math.max(sponsor.weight, 1)),
+      }))
+      .sort((a, b) => b.key - a.key)
+      .map(({ sponsor }) => sponsor);
+  }
+
+  async recordSponsorImpression(sponsorId: string): Promise<void> {
+    const result = await this.sponsorRepo.increment(
+      { id: sponsorId },
+      'impressionCount',
+      1,
+    );
+    if (!result.affected) {
+      throw new NotFoundException(`Sponsor with id "${sponsorId}" not found`);
+    }
+  }
+
+  async recordSponsorClick(sponsorId: string): Promise<void> {
+    const result = await this.sponsorRepo.increment(
+      { id: sponsorId },
+      'clickCount',
+      1,
+    );
+    if (!result.affected) {
+      throw new NotFoundException(`Sponsor with id "${sponsorId}" not found`);
+    }
+  }
+
+  async generateSponsorReport(
+    eventId: string,
+    requesterId: string,
+  ): Promise<SponsorReportDto> {
+    await this.assertEventOrganizer(eventId, requesterId);
+
+    const sponsors = await this.sponsorRepo.find({ where: { eventId } });
+
+    return {
+      eventId,
+      sponsors: sponsors.map((sponsor) => ({
+        sponsorId: sponsor.id,
+        displayName: sponsor.displayName,
+        impressions: sponsor.impressionCount,
+        clicks: sponsor.clickCount,
+        clickThroughRate:
+          sponsor.impressionCount > 0
+            ? Number((sponsor.clickCount / sponsor.impressionCount).toFixed(4))
+            : 0,
+      })),
+    };
   }
 
   async getSponsorProfile(userId: string): Promise<any> {

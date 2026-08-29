@@ -16,7 +16,10 @@ import { Payment } from '../payments/entities/payment.entity';
 import { SponsorContribution } from '../sponsors/entities/sponsor-contribution.entity';
 import { RefundModule } from '../payments/refunds/refund.module';
 import { EventImage } from './entities/event-image.entity';
+import { BullModule } from '@nestjs/bull';
+import { CancelEventProcessor } from './jobs/cancel-event.processor';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { StellarModule } from '../stellar';
 
 @Module({
   imports: [
@@ -27,9 +30,13 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
     AuditModule,
     forwardRef(() => RefundModule),
     WebhooksModule,
+    StellarModule,
+    BullModule.registerQueue({
+      name: 'events',
+    }),
   ],
   controllers: [EventsController],
-  providers: [EventsService, EventStateService, EventCacheService],
+  providers: [EventsService, EventStateService, EventCacheService, CancelEventProcessor],
   exports: [EventsService],
 })
 export class EventsModule {}

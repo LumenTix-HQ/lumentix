@@ -14,7 +14,10 @@ import { BruteForceGuard } from '../common/guards/brute-force.guard';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { WalletChallenge } from './entities/wallet-challenge.entity';
+import { RedisModule } from '../redis/redis.module';
 import { MailerModule } from '../mailer/mailer.module';
+import { AuditModule } from '../audit/audit.module';
+import { PasswordResetCleanupTask } from './tasks/password-reset-cleanup.task';
 import type { StringValue } from 'ms';
 
 @Module({
@@ -22,6 +25,8 @@ import type { StringValue } from 'ms';
     UsersModule,
     TypeOrmModule.forFeature([PasswordResetToken, RefreshToken, WalletChallenge]),
     MailerModule,
+    AuditModule,
+    RedisModule,
     PassportModule,
     ConfigModule,
     JwtModule.registerAsync({
@@ -38,7 +43,14 @@ import type { StringValue } from 'ms';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, GoogleStrategy, BruteForceService, BruteForceGuard],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    GoogleStrategy,
+    BruteForceService,
+    BruteForceGuard,
+    PasswordResetCleanupTask,
+  ],
   exports: [BruteForceService, BruteForceGuard],
   controllers: [AuthController],
 })

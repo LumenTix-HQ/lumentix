@@ -102,4 +102,60 @@ export class LoyaltyController {
       body.eventId,
     );
   }
+
+  // ── GET /loyalty/calculate-points ───────────────────────────────────────────
+
+  @Get('calculate-points')
+  @ApiOperation({
+    summary: 'Calculate loyalty points',
+    description:
+      'Calculates loyalty points based on purchase history, streak bonus, and early bird bonus.',
+  })
+  @ApiResponse({ status: 200, description: 'Loyalty points calculation returned' })
+  calculateLoyaltyPoints(@Req() req: AuthenticatedRequest) {
+    return this.loyaltyService.calculateLoyaltyPoints(req.user.id);
+  }
+
+  // ── POST /loyalty/upgrade-tier ──────────────────────────────────────────────
+
+  @Post('upgrade-tier')
+  @ApiOperation({
+    summary: 'Upgrade loyalty tier',
+    description:
+      'Automatically upgrades loyalty tier based on total earned points and issues a tier-upgrade discount code if eligible.',
+  })
+  @ApiResponse({ status: 200, description: 'Tier upgrade result returned' })
+  upgradeLoyaltyTier(@Req() req: AuthenticatedRequest) {
+    return this.loyaltyService.upgradeLoyaltyTier(req.user.id);
+  }
+
+  // ── GET /loyalty/tier-discounts/:eventId ───────────────────────────────────
+
+  @Get('tier-discounts/:eventId')
+  @ApiOperation({
+    summary: 'Apply tier discounts to an event',
+    description:
+      'Returns the automatic tier-based discount percentage for a given event based on loyalty tier.',
+  })
+  @ApiParam({ name: 'eventId', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Tier discount info returned' })
+  applyTierDiscounts(
+    @Req() req: AuthenticatedRequest,
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+  ) {
+    return this.loyaltyService.applyTierDiscounts(req.user.id, eventId);
+  }
+
+  // ── POST /loyalty/tier-status ───────────────────────────────────────────────
+
+  @Post('tier-status')
+  @ApiOperation({
+    summary: 'Evaluate tier status',
+    description:
+      'Re-evaluates the loyalty tier against the current points balance, applying promotion or demotion and notifying the user if it changed.',
+  })
+  @ApiResponse({ status: 201, description: 'Tier status evaluated' })
+  evaluateTierStatus(@Req() req: AuthenticatedRequest) {
+    return this.loyaltyService.evaluateTierStatus(req.user.id);
+  }
 }

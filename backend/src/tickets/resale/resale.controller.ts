@@ -22,11 +22,15 @@ import { AuthenticatedRequest } from '../../common/interfaces/authenticated-requ
 import { ResaleService } from './resale.service';
 import { ListTicketForResaleDto } from './dto/list-ticket-resale.dto';
 import { BuyResaleTicketDto } from './dto/buy-resale-ticket.dto';
+import { SetPriceCeilingDto } from './dto/set-price-ceiling.dto';
+import { VerifyResalePriceDto } from './dto/verify-resale-price.dto';
+import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto';
 
 @ApiTags('Resale Marketplace')
 @ApiBearerAuth()
 @Controller('resale')
 @UseGuards(JwtAuthGuard)
+@ApiResponse({ status: 401, description: 'Unauthorized' })
 @ApiResponse({ status: 429, description: 'Too Many Requests' })
 export class ResaleController {
   constructor(private readonly resaleService: ResaleService) {}
@@ -40,6 +44,7 @@ export class ResaleController {
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 201, description: 'Ticket listed for resale' })
   @ApiResponse({ status: 400, description: 'Price exceeds maximum allowed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Not ticket owner' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async listForResale(
@@ -59,6 +64,9 @@ export class ResaleController {
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 201, description: 'Resale ticket purchased' })
   @ApiResponse({ status: 400, description: 'Invalid transaction or price exceeds limit' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 409, description: 'Ticket is no longer available' })
+  @ApiResponse({ status: 422, description: 'Payment could not be processed' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async buyResaleTicket(
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
@@ -76,6 +84,7 @@ export class ResaleController {
   })
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 200, description: 'Listing cancelled' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Not ticket owner' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   async cancelResaleListing(
@@ -93,6 +102,8 @@ export class ResaleController {
   })
   @ApiParam({ name: 'ticketId', description: 'Ticket UUID' })
   @ApiResponse({ status: 200, description: 'Resale history returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
   async getResaleHistory(
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
   ) {
@@ -108,7 +119,65 @@ export class ResaleController {
       'Organizer-only. Returns total earnings from the 5% resale fee across all events.',
   })
   @ApiResponse({ status: 200, description: 'Earnings returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   async getOrganizerEarnings(@Req() req: AuthenticatedRequest) {
     return this.resaleService.getOrganizerResaleEarnings(req.user.id);
+  }
+
+  // ── POST /resale/price-ceiling ─────────────────────────────────────────────
+
+  @Post('price-ceiling')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Set a price ceiling for an event',
+    description:
+      'Organizer-only. Sets a maximum resale price ceiling to prevent scalping. ceilingMultiplierBps is in basis points (e.g., 15000 = 150%).',
+  })
+  @ApiResponse({ status: 201, description: 'Price ceiling set' })
+  @ApiResponse({ status: 400, description: 'Invalid multiplier or absolute ceiling' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Not the event organizer' })
+  async setPriceCeiling(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: SetPriceCeilingDto,
+  ) {
+    return this.resaleService.setPriceCeiling(req.user.id, dto);
+  }
+
+  // ── POST /resale/verify-price ──────────────────────────────────────────────
+
+  @Post('verify-price')
+  @ApiOperation({
+    summary: 'Verify a resale price against the ceiling',
+    description:
+      'Checks whether a proposed resale price is compliant with the price ceiling for the event.',
+  })
+  @ApiResponse({ status: 200, description: 'Compliance check result' })
+  @ApiResponse({ status: 400, description: 'Invalid price request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  async verifyResalePrice(@Body() dto: VerifyResalePriceDto) {
+    return this.resaleService.verifyResalePrice(dto);
+  }
+
+  // ── POST /resale/enforce-compliance ────────────────────────────────────────
+
+  @Post('enforce-compliance')
+  @ApiOperation({
+    summary: 'Enforce resale price compliance',
+    description:
+      'Caps a proposed resale price to the maximum allowed ceiling. Returns the enforced price.',
+  })
+  @ApiResponse({ status: 200, description: 'Enforced price returned' })
+  @ApiResponse({ status: 400, description: 'Invalid price request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  async enforceResaleCompliance(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: EnforceResaleComplianceDto,
+  ) {
+    return this.resaleService.enforceResaleCompliance(req.user.id, dto);
   }
 }

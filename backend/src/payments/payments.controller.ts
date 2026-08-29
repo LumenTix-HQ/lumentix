@@ -3,15 +3,21 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
+  UseInterceptors,
   Inject,
   forwardRef,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -22,22 +28,27 @@ import {
 } from '@nestjs/swagger';
 import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { PaymentsService } from './payments.service';
 import { RefundService } from './refunds/refund.service';
+import { EscrowService } from './services/escrow.service';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
 @ApiTags('Payments')
 @ApiBearerAuth()
 @Controller('payments')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     @Inject(forwardRef(() => RefundService))
     private readonly refundService: RefundService,
+    private readonly escrowService: EscrowService,
   ) {}
 
   @Get('history')
@@ -85,26 +96,61 @@ export class PaymentsController {
     );
   }
 
-  @Get(':id/status')
+  @Get('paths')
   @SkipThrottle()
-  @ApiOperation({ summary: 'Get payment status' })
+  @ApiOperation({
+    summary: 'Find optimal payment paths',
+    description: 'Finds all available Stellar payment paths for multi-asset purchases. Returns ranked paths by cost.',
+  })
+  @ApiQuery({ name: 'sourceAsset', required: true })
+  @ApiQuery({ name: 'destAsset', required: true })
+  @ApiQuery({ name: 'amount', required: true })
+  @ApiResponse({ status: 200, description: 'Payment paths found' })
+  @ApiResponse({ status: 404, description: 'No paths found' })
+  getPaymentPaths(
+    @Query('sourceAsset') sourceAsset: string,
+    @Query('destAsset') destAsset: string,
+    @Query('amount') amount: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.findPaymentPaths(
+      (req.user as any).stellarPublicKey,
+      sourceAsset,
+      destAsset,
+      amount,
+    );
+  }
+
+  @Get(':id/status')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Get payment status with ticket data' })
+  @ApiResponse({ status: 200, description: 'Payment status with optional ticket data' })
+  @ApiResponse({ status: 304, description: 'Not modified (ETag matched)' })
   async getStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+    @Headers('if-none-match') ifNoneMatch?: string,
   ) {
     const payment = await this.paymentsService.getPaymentById(id);
     if (payment.userId !== req.user.id) {
       throw new ForbiddenException('You do not have access to this payment');
     }
-    return {
-      id: payment.id,
-      status: payment.status,
-      expiresAt: payment.expiresAt,
-    };
+
+    const etag = `"${payment.updatedAt.getTime()}"`;
+    res.setHeader('ETag', etag);
+
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      res.status(HttpStatus.NOT_MODIFIED).send();
+      return;
+    }
+
+    return this.paymentsService.getPaymentStatus(id);
   }
 
   @Post('intent')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @UseInterceptors(IdempotencyInterceptor)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } }) // 5 per minute
   @ApiOperation({ summary: 'Create payment intent' })
   @ApiResponse({ status: 201, description: 'Payment intent created' })
   createIntent(
@@ -133,6 +179,7 @@ export class PaymentsController {
   }
 
   @Post('series/:seriesId/season-pass')
+  @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
     summary: 'Create season pass payment intent',
     description: 'Authenticated. Creates a season pass intent for an event series.',
@@ -159,5 +206,24 @@ export class PaymentsController {
       throw new ForbiddenException('You do not own this payment.');
     }
     return this.refundService.refundSinglePayment(id);
+  }
+
+  @Post('events/:eventId/merge-escrow')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Merge escrow to organizer after all refunds',
+    description:
+      'Organizer/admin endpoint. Merges the escrow account back to the organizer after all refunds are complete for a cancelled event.',
+  })
+  @ApiParam({ name: 'eventId', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Escrow merged successfully' })
+  @ApiResponse({ status: 400, description: 'Refunds still pending or escrow already merged' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async mergeEscrow(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.paymentsService.mergeEscrowToOrganizer(eventId, req.user.id);
   }
 }

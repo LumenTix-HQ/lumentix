@@ -1,117 +1,146 @@
-import { Processor, Process } from '@nestjs/bull';
-import { Logger } from '@nestjs/common';
+import { Processor, Process, InjectQueue } from '@nestjs/bull';
+import { Job, Queue } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Job } from 'bull';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 import * as crypto from 'crypto';
-import * as https from 'https';
-import * as http from 'http';
 import { WebhookDelivery } from '../entities/webhook-delivery.entity';
-
-export const WEBHOOK_QUEUE = 'webhook-delivery';
+import { WebhookDeadLetter } from '../entities/webhook-dead-letter.entity';
+import { Event } from '../../events/entities/event.entity';
 
 export interface WebhookJobData {
-  deliveryId: string;
-  url: string;
+  eventId: string;
+  paymentId: string;
   payload: Record<string, unknown>;
-  secret: string;
-  attempt: number;
+  /** 1-indexed attempt number; defaults to 1 for the initial delivery. */
+  attempt?: number;
 }
 
-@Processor(WEBHOOK_QUEUE)
-export class WebhookDeliveryJob {
-  private readonly logger = new Logger(WebhookDeliveryJob.name);
+/** Default retry/backoff configuration, overridable via env vars. */
+export const DEFAULT_MAX_RETRY_ATTEMPTS = 5;
+export const DEFAULT_BASE_BACKOFF_MS = 5000;
+export const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
+@Processor('webhooks')
+export class WebhookDeliveryJob {
   constructor(
     @InjectRepository(WebhookDelivery)
     private readonly deliveryRepo: Repository<WebhookDelivery>,
+    @InjectRepository(WebhookDeadLetter)
+    private readonly deadLetterRepo: Repository<WebhookDeadLetter>,
+    @InjectRepository(Event)
+    private readonly eventRepo: Repository<Event>,
+    private readonly httpService: HttpService,
+    @InjectQueue('webhooks') private readonly webhooksQueue: Queue,
   ) {}
 
-  @Process('deliver')
-  async deliver(job: Job<WebhookJobData>): Promise<void> {
-    const { deliveryId, url, payload, secret, attempt } = job.data;
+  private get maxAttempts(): number {
+    const configured = parseInt(process.env.WEBHOOK_MAX_RETRY_ATTEMPTS ?? '', 10);
+    return Number.isFinite(configured) && configured > 0
+      ? configured
+      : DEFAULT_MAX_RETRY_ATTEMPTS;
+  }
 
-    const body = JSON.stringify(payload);
+  private get baseBackoffMs(): number {
+    const configured = parseInt(process.env.WEBHOOK_RETRY_BASE_DELAY_MS ?? '', 10);
+    return Number.isFinite(configured) && configured > 0
+      ? configured
+      : DEFAULT_BASE_BACKOFF_MS;
+  }
+
+  /** Exponential backoff delay (ms) for a given attempt number, capped at MAX_BACKOFF_MS. */
+  applyBackoffDelay(attempt: number): number {
+    const delay = this.baseBackoffMs * 2 ** (attempt - 1);
+    return Math.min(delay, MAX_BACKOFF_MS);
+  }
+
+  @Process('send')
+  async handle(job: Job<WebhookJobData>): Promise<void> {
+    const { eventId, paymentId, payload } = job.data;
+    const attempt = job.data.attempt ?? 1;
+    const event = await this.eventRepo.findOne({ where: { id: eventId } });
+
+    if (!event || !event.webhookUrl) {
+      return;
+    }
+
     const signature = crypto
-      .createHmac('sha256', secret)
-      .update(body)
+      .createHmac('sha256', process.env.WEBHOOK_SECRET)
+      .update(JSON.stringify(payload))
       .digest('hex');
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-LumenTix-Signature': `sha256=${signature}`,
+    };
 
     let statusCode: number | null = null;
     let responseBody: string | null = null;
 
     try {
-      const result = await this.postRequest(url, body, signature);
-      statusCode = result.statusCode;
-      responseBody = result.body;
-    } catch (err) {
-      this.logger.warn(`Webhook delivery attempt ${attempt} failed for ${deliveryId}: ${err}`);
-
-      const backoffDelays = [1000, 2000, 4000, 8000, 16000];
-      if (attempt < 5) {
-        const delay = backoffDelays[attempt] ?? 16000;
-        await job.queue.add(
-          'deliver',
-          { ...job.data, attempt: attempt + 1 },
-          { delay },
-        );
+      const response = await firstValueFrom(
+        this.httpService.post(event.webhookUrl, payload, { headers }),
+      );
+      statusCode = response.status;
+      responseBody = JSON.stringify(response.data);
+    } catch (error) {
+      if (error.response) {
+        statusCode = error.response.status;
+        responseBody = JSON.stringify(error.response.data);
+      } else {
+        responseBody = error.message;
       }
-
-      await this.deliveryRepo.update(deliveryId, {
-        attempt,
-        statusCode: null,
-        responseBody: String(err),
-      });
-      return;
     }
 
-    await this.deliveryRepo.update(deliveryId, {
+    await this.deliveryRepo.save({
+      eventId,
+      paymentId,
       attempt,
       statusCode,
       responseBody,
     });
 
-    this.logger.log(
-      `Webhook delivered to ${url} — status ${statusCode} (attempt ${attempt})`,
+    const succeeded = statusCode !== null && statusCode >= 200 && statusCode < 300;
+    if (succeeded) {
+      return;
+    }
+
+    if (attempt < this.maxAttempts) {
+      await this.scheduleWebhookRetry({ eventId, paymentId, payload }, attempt);
+    } else {
+      await this.moveToDeadLetter({ eventId, paymentId, payload }, statusCode, responseBody, attempt);
+    }
+  }
+
+  /** Enqueues the next delivery attempt after an exponential backoff delay. */
+  async scheduleWebhookRetry(
+    data: Omit<WebhookJobData, 'attempt'>,
+    previousAttempt: number,
+  ): Promise<void> {
+    const nextAttempt = previousAttempt + 1;
+    const delay = this.applyBackoffDelay(previousAttempt);
+    await this.webhooksQueue.add(
+      'send',
+      { ...data, attempt: nextAttempt },
+      { delay },
     );
   }
 
-  private postRequest(
-    url: string,
-    body: string,
-    signature: string,
-  ): Promise<{ statusCode: number; body: string }> {
-    return new Promise((resolve, reject) => {
-      const parsedUrl = new URL(url);
-      const lib = parsedUrl.protocol === 'https:' ? https : http;
-      const options = {
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
-        path: parsedUrl.pathname + parsedUrl.search,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-          'X-Lumentix-Signature': `sha256=${signature}`,
-        },
-      };
-
-      const req = lib.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () =>
-          resolve({ statusCode: res.statusCode ?? 0, body: data }),
-        );
-      });
-
-      req.on('error', reject);
-      req.setTimeout(10000, () => {
-        req.destroy();
-        reject(new Error('Webhook request timed out'));
-      });
-
-      req.write(body);
-      req.end();
+  /** Persists a delivery that exhausted all retry attempts for manual follow-up. */
+  async moveToDeadLetter(
+    data: Omit<WebhookJobData, 'attempt'>,
+    lastStatusCode: number | null,
+    lastError: string | null,
+    attempts: number,
+  ): Promise<void> {
+    await this.deadLetterRepo.save({
+      eventId: data.eventId,
+      paymentId: data.paymentId,
+      payload: data.payload,
+      lastStatusCode,
+      lastError,
+      attempts,
     });
   }
 }

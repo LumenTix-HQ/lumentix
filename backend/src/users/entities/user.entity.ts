@@ -95,6 +95,28 @@ export class User {
     minRefundAmount?: number | null;
   } | null;
 
+  /**
+   * Per-channel, per-category notification opt-in/out.
+   * Shape: { push: { <category>: boolean }, email: {...}, sms: {...}, in_app: {...} }
+   * A missing category for a channel defaults to enabled.
+   */
+  @Column({
+    type: 'jsonb',
+    default: { push: {}, email: {}, sms: {}, in_app: {} },
+  })
+  channelNotificationPreferences: Record<string, Record<string, boolean>>;
+
+  /**
+   * Quiet hours during which non-critical notifications are suppressed.
+   * `start`/`end` are "HH:mm" in the given IANA `timezone`; an overnight
+   * range (start > end) wraps past midnight.
+   */
+  @Column({
+    type: 'jsonb',
+    default: { enabled: false, start: '22:00', end: '08:00', timezone: 'UTC' },
+  })
+  quietHours: { enabled: boolean; start: string; end: string; timezone: string };
+
   @CreateDateColumn()
   createdAt: Date;
 
@@ -112,4 +134,10 @@ export class User {
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
   deletedAt: Date | null;
+
+  @Column({ nullable: true })
+  displayName: string;
+
+  @Column({ nullable: true })
+  logoUrl: string;
 }

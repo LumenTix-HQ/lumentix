@@ -19,6 +19,7 @@ import { TicketSigningService } from './ticket-signing.service';
 import { TicketPdfService } from './ticket-pdf.service';
 import { IssueTicketResponseDto } from './dto/issue-ticket-response.dto';
 import { BulkIssueResultDto } from './dto/bulk-issue-result.dto';
+import { ConfirmTransferDto } from './dto/confirm-transfer.dto';
 import { TransferTicketDto } from './dto/transfer-ticket.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
@@ -27,8 +28,10 @@ import { EventSeries } from '../events/entities/event-series.entity';
 import { StellarService } from '../stellar/stellar.service';
 import { NotificationService } from '../notifications/notification.service';
 import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
+import { OwnershipTransferDto, ProvenanceChainDto } from './dto/provenance.dto';
 
 @Injectable()
 export class TicketsService {
@@ -114,7 +117,22 @@ export class TicketsService {
       .where('ticket.ownerId = :ownerId', { ownerId })
       .orderBy('ticket.createdAt', 'DESC');
 
-    return paginate(queryBuilder, paginationDto, 'ticket');
+    if (paginationDto?.status) {
+      queryBuilder.andWhere('ticket.status = :status', { status: paginationDto.status });
+    }
+
+    const result = await paginate(queryBuilder, paginationDto, 'ticket');
+
+    const now = new Date();
+    const enriched = result.data.map((ticket: any) => ({
+      ...ticket,
+      isExpired:
+        ticket.status === 'valid' &&
+        ticket.event?.endDate instanceof Date &&
+        ticket.event.endDate < now,
+    }));
+
+    return { ...result, data: enriched };
   }
 
   async issueTicket(paymentId: string): Promise<IssueTicketResponseDto> {
@@ -150,11 +168,19 @@ export class TicketsService {
       const events = await this.eventRepo.find({ where: { seriesId: payment.seriesId as string } });
       if (events.length === 0) throw new BadRequestException('No events found for this series');
 
+      // Batch-fetch existing tickets for all events in this series
+      const eventIds = events.map((e) => e.id);
+      const existingTickets = await this.ticketRepo.find({
+        where: eventIds.map((eventId) => ({
+          transactionHash: payment.transactionHash,
+          eventId,
+        })),
+      });
+      const existingByEventId = new Map(existingTickets.map((t) => [t.eventId, t]));
+
       const tickets: TicketEntity[] = [];
       for (const event of events) {
-        let ticket = await this.ticketRepo.findOne({
-          where: { transactionHash: payment.transactionHash, eventId: event.id },
-        });
+        let ticket = existingByEventId.get(event.id) ?? null;
 
         if (!ticket) {
           ticket = this.ticketRepo.create({
@@ -343,18 +369,67 @@ export class TicketsService {
     }
 
     ticket.ownerId = newOwnerId;
+    const recordedTicket = await this.record_ownership_transfer(ticketId, {
+      fromUserId: callerOwnerId,
+      toUserId: newOwnerId,
+      fromPublicKey: ticket.ownerPublicKey,
+      toPublicKey: null,
+      transactionHash: null,
+      timestamp: new Date().toISOString(),
+    });
+    ticket.transferHistory = recordedTicket.transferHistory;
     return this.ticketRepo.save(ticket);
+  }
+
+  async record_ownership_transfer(
+    ticketId: string,
+    transfer: Omit<OwnershipTransferDto, 'sequence'>,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    ticket.transferHistory = [
+      ...(ticket.transferHistory ?? []),
+      {
+        from: transfer.fromUserId,
+        to: transfer.toUserId,
+        timestamp: transfer.timestamp,
+        fromPublicKey: transfer.fromPublicKey,
+        toPublicKey: transfer.toPublicKey,
+        transactionHash: transfer.transactionHash,
+      },
+    ];
+    return this.ticketRepo.save(ticket);
+  }
+
+  async fetch_provenance_chain(ticketId: string): Promise<ProvenanceChainDto> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    return {
+      ticketId: ticket.id,
+      assetCode: ticket.assetCode,
+      issuedAt: ticket.createdAt.toISOString(),
+      currentOwnerId: ticket.ownerId,
+      chain: (ticket.transferHistory ?? []).map((transfer, index) => ({
+        sequence: index + 1,
+        fromUserId: transfer.from,
+        toUserId: transfer.to,
+        fromPublicKey: transfer.fromPublicKey ?? null,
+        toPublicKey: transfer.toPublicKey ?? null,
+        transactionHash: transfer.transactionHash ?? null,
+        timestamp: transfer.timestamp,
+      })),
+    };
   }
 
   /**
    * Transfer a ticket to a new owner, recording the transfer on-chain (Stellar)
    * and writing an audit event. The DB update is rolled back if Stellar fails.
    */
-  async transfer(
+  async initiateTransfer(
     ticketId: string,
     requesterId: string,
     dto: TransferTicketDto,
-  ): Promise<TicketEntity> {
+  ): Promise<{ xdr: string }> {
     // ── Validate ─────────────────────────────────────────────────────────────
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
@@ -389,72 +464,235 @@ export class TicketsService {
       );
     }
 
-    // ── DB transaction ────────────────────────────────────────────────────────
-    const previousOwnerId = ticket.ownerId;
-    const previousPublicKey = ticket.ownerPublicKey;
+    const recipient = await this.userRepo.findOne({ where: { id: dto.recipientUserId } });
+    if (!recipient) throw new NotFoundException('Recipient user not found');
+    if (!recipient.stellarPublicKey) {
+      throw new BadRequestException('Recipient does not have a linked Stellar wallet.');
+    }
 
+    if (recipient.stellarPublicKey !== dto.recipientPublicKey) {
+      throw new BadRequestException('Recipient public key does not match the one on file.');
+    }
+
+    const xdr = await this.stellarService.buildTicketTransferXdr({
+      sourcePublicKey: ticket.ownerPublicKey as string,
+      destPublicKey: dto.recipientPublicKey,
+      assetCode: ticket.assetCode,
+      assetIssuer: event.escrowPublicKey as string,
+    });
+
+    return { xdr };
+  }
+
+  async confirmTransfer(
+    ticketId: string,
+    requesterId: string,
+    dto: ConfirmTransferDto,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.ownerId !== requesterId) {
+      throw new ForbiddenException('You do not own this ticket');
+    }
+
+    const tx = await this.stellarService.getTransaction(dto.transactionHash);
+
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Associated event not found');
+
+    const recipient = await this.userRepo.findOne({ where: { id: ticket.transferHistory[ticket.transferHistory.length - 1].to } });
+    if (!recipient) throw new NotFoundException('Recipient user not found');
+
+    // ── Validate On-Chain Transaction ────────────────────────────────────────
+    const ops = await this.stellarService.getTransactionOperations(dto.transactionHash);
+    if (ops.length !== 1) {
+      throw new BadRequestException('Transaction must have exactly one operation.');
+    }
+
+    const op = ops[0];
+    if (op.type !== 'payment') {
+      throw new BadRequestException('Transaction must be a payment operation.');
+    }
+
+    if (op.asset_code !== ticket.assetCode) {
+      throw new BadRequestException('Transaction asset code does not match ticket.');
+    }
+
+    if (op.asset_issuer !== event.escrowPublicKey) {
+      throw new BadRequestException('Transaction asset issuer does not match event escrow.');
+    }
+
+    if (op.to !== recipient.stellarPublicKey) {
+      throw new BadRequestException('Transaction destination does not match recipient.');
+    }
+
+    if (op.from !== ticket.ownerPublicKey) {
+      throw new BadRequestException('Transaction source does not match original owner.');
+    }
+
+    if (op.amount !== '0.0000001') {
+      throw new BadRequestException('Transaction amount is incorrect for a ticket transfer.');
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Basic validation, more can be added here (e.g. checking operations)
+    if (!tx) {
+      throw new BadRequestException('Transaction not found on-chain.');
+    }
+
+
+    const previousOwnerId = ticket.ownerId;
     const saved = await this.dataSource.transaction(async (em) => {
-      ticket.ownerId = dto.recipientUserId;
-      ticket.ownerPublicKey = dto.recipientPublicKey;
+      ticket.ownerId = recipient.id;
+      ticket.ownerPublicKey = recipient.stellarPublicKey;
       ticket.transferHistory = [
         ...(ticket.transferHistory ?? []),
         {
           from: previousOwnerId,
-          to: dto.recipientUserId,
+          to: recipient.id,
+          fromPublicKey: ticket.ownerPublicKey,
+          toPublicKey: recipient.stellarPublicKey,
+          transactionHash: dto.transactionHash,
           timestamp: new Date().toISOString(),
         },
       ];
       return em.save(TicketEntity, ticket);
     });
 
-    // ── Stellar transfer (best-effort; roll back DB on failure) ───────────────
-    try {
-      await this.stellarService.transferTicketAsset(ticket, dto.recipientPublicKey);
-    } catch (stellarErr) {
-      this.logger.error(
-        `Stellar transfer failed for ticket ${ticketId}; rolling back DB`,
-        stellarErr,
-      );
-
-      // Roll back the DB change
-      try {
-        await this.dataSource.transaction(async (em) => {
-          saved.ownerId = previousOwnerId;
-          saved.ownerPublicKey = previousPublicKey;
-          saved.transferHistory = ticket.transferHistory.slice(0, -1);
-          await em.save(TicketEntity, saved);
-        });
-      } catch (rollbackErr) {
-        this.logger.error(
-          `Rollback failed for ticket ${ticketId} — manual intervention required`,
-          rollbackErr,
-        );
-      }
-
-      throw new InternalServerErrorException(
-        'Stellar transfer failed; DB changes have been reverted',
-      );
-    }
-
-    // ── Audit event ───────────────────────────────────────────────────────────
-    try {
-      await this.auditService.log({
-        action: 'TICKET_TRANSFERRED',
-        userId: requesterId,
-        resourceId: ticketId,
-        meta: {
-          from: previousOwnerId,
-          to: dto.recipientUserId,
-          recipientPublicKey: dto.recipientPublicKey,
-          eventId: ticket.eventId,
-        },
-      });
-    } catch (auditErr) {
-      // Audit failure is non-fatal; log and continue
-      this.logger.warn(`Audit log failed for TICKET_TRANSFERRED ${ticketId}`, auditErr);
-    }
+    await this.auditService.log({
+      action: AuditAction.TICKET_TRANSFERRED,
+      userId: requesterId,
+      resourceId: ticketId,
+      meta: {
+        from: previousOwnerId,
+        to: recipient.id,
+        recipientPublicKey: recipient.stellarPublicKey,
+        eventId: ticket.eventId,
+        transactionHash: dto.transactionHash,
+      },
+    });
 
     return saved;
+  }
+
+  /**
+   * Validates a batch of ticket transfers to different recipients.
+   */
+  async validate_batch_recipients(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    if (!transfers || transfers.length === 0) {
+      errors.push('Transfer batch cannot be empty.');
+      return { valid: false, errors };
+    }
+
+    const ticketIds = transfers.map((t) => t.ticketId);
+    if (new Set(ticketIds).size !== ticketIds.length) {
+      errors.push('Duplicate ticket IDs found in batch.');
+    }
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) {
+        errors.push(`Ticket ${item.ticketId} not found.`);
+        continue;
+      }
+      if (ticket.ownerId !== senderUserId) {
+        errors.push(`Sender does not own ticket ${item.ticketId}.`);
+      }
+      if (ticket.status !== 'valid') {
+        errors.push(`Ticket ${item.ticketId} is not valid for transfer.`);
+      }
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) {
+        errors.push(`Recipient ${item.recipientUserId} not found for ticket ${item.ticketId}.`);
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Emits events and audit logs for a batch of ticket transfers.
+   */
+  async emit_batch_transfer_events(
+    senderUserId: string,
+    completedTransfers: Array<{ ticketId: string; recipientUserId: string; eventId: string }>,
+  ): Promise<void> {
+    for (const t of completedTransfers) {
+      await this.auditService.log({
+        action: AuditAction.TICKET_TRANSFERRED,
+        userId: senderUserId,
+        resourceId: t.ticketId,
+        meta: {
+          ticketId: t.ticketId,
+          fromUserId: senderUserId,
+          toUserId: t.recipientUserId,
+          eventId: t.eventId,
+          batch: true,
+        },
+      });
+
+      await this.notificationService.notifyUser(t.recipientUserId, {
+        title: 'Ticket Received',
+        body: `You received a ticket for event ${t.eventId}`,
+        type: 'ticket_transferred',
+        data: { ticketId: t.ticketId },
+      });
+    }
+  }
+
+  /**
+   * Transfers multiple tickets to different recipients in one operation.
+   */
+  async batch_transfer_tickets(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ success: boolean; transferredCount: number; errors?: string[] }> {
+    const validationResult = await this.validate_batch_recipients(senderUserId, transfers);
+    if (!validationResult.valid) {
+      throw new BadRequestException(`Batch transfer validation failed: ${validationResult.errors.join('; ')}`);
+    }
+
+    const completed: Array<{ ticketId: string; recipientUserId: string; eventId: string }> = [];
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) continue;
+
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) continue;
+
+      ticket.ownerId = recipient.id;
+      if (recipient.stellarPublicKey) {
+        ticket.ownerPublicKey = recipient.stellarPublicKey;
+      }
+      ticket.transferHistory = [
+        ...(ticket.transferHistory ?? []),
+        {
+          from: senderUserId,
+          to: recipient.id,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await this.ticketRepo.save(ticket);
+      completed.push({
+        ticketId: ticket.id,
+        recipientUserId: recipient.id,
+        eventId: ticket.eventId,
+      });
+    }
+
+    await this.emit_batch_transfer_events(senderUserId, completed);
+
+    return {
+      success: true,
+      transferredCount: completed.length,
+    };
   }
 
   /**
@@ -494,6 +732,61 @@ export class TicketsService {
 
     ticket.status = 'used';
     return this.ticketRepo.save(ticket);
+  }
+
+  async verifyQrCheckIn(qrData: string): Promise<{
+    ticketId: string;
+    status: string;
+    eventId: string;
+    attendeeName: string;
+    attendeeEmail: string;
+    ticketType: string;
+  }> {
+    let parsed: { ticketId: string; signature: string };
+    try {
+      parsed = JSON.parse(qrData);
+    } catch {
+      throw new BadRequestException('Invalid QR code data');
+    }
+
+    if (!parsed.ticketId || !parsed.signature) {
+      throw new BadRequestException('QR code missing ticketId or signature');
+    }
+
+    if (!this.ticketSigningService.verify(parsed.ticketId, parsed.signature)) {
+      throw new UnauthorizedException('Invalid ticket signature');
+    }
+
+    const ticket = await this.ticketRepo.findOne({ where: { id: parsed.ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (ticket.status === 'used') {
+      throw new BadRequestException('Ticket has already been checked in');
+    }
+    if (ticket.status !== 'valid') {
+      throw new BadRequestException('Ticket is no longer valid');
+    }
+
+    ticket.status = 'used';
+    await this.ticketRepo.save(ticket);
+
+    await this.auditService.log({
+      action: 'TICKET_CHECKED_IN' as any,
+      userId: ticket.ownerId,
+      resourceId: ticket.id,
+      meta: { eventId: ticket.eventId, method: 'qr_scan' },
+    });
+
+    const user = await this.userRepo.findOne({ where: { id: ticket.ownerId } });
+
+    return {
+      ticketId: ticket.id,
+      status: 'checked_in',
+      eventId: ticket.eventId,
+      attendeeName: (user as any)?.displayName ?? 'Unknown',
+      attendeeEmail: (user as any)?.email ?? '',
+      ticketType: ticket.assetCode ?? 'general',
+    };
   }
 
   // ── Resale / marketplace ──────────────────────────────────────────────────

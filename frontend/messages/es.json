@@ -1,0 +1,46 @@
+{
+  "Nav": {
+    "events": "Eventos",
+    "categories": "Categorías",
+    "create": "Crear evento",
+    "myTickets": "Mis entradas",
+    "myPayments": "Mis pagos",
+    "profile": "Perfil",
+    "login": "Iniciar sesión",
+    "register": "Registrarse",
+    "logout": "Cerrar sesión"
+  },
+  "HomePage": {
+    "badge": "Construido en Stellar",
+    "title": "Lumentix",
+    "subtitle": "La plataforma de eventos descentralizada donde cada entrada, pago, reseña y póliza de seguro vive en la blockchain.",
+    "discover": "Descubrir eventos",
+    "host": "Organizar un evento",
+    "howItWorks": "Cómo funciona"
+  },
+  "Auth": {
+    "loginTitle": "Bienvenido de nuevo",
+    "loginSubtitle": "Inicia sesión en tu cuenta de LumenTix",
+    "emailAddress": "Correo electrónico",
+    "signIn": "Iniciar sesión",
+    "signingIn": "Iniciando sesión...",
+    "createAccount": "Crear una cuenta",
+    "forgotPassword": "¿Olvidaste tu contraseña?",
+    "fillAllFields": "Por favor completa todos los campos.",
+    "registerTitle": "Crea tu cuenta",
+    "registerSubtitle": "Únete a Lumentix para descubrir y organizar eventos",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "confirmPassword": "Confirmar contraseña",
+    "displayName": "Nombre para mostrar",
+    "submitLogin": "Iniciar sesión",
+    "submitRegister": "Registrarse",
+    "loggingIn": "Iniciando sesión…",
+    "registering": "Creando cuenta…",
+    "noAccount": "¿No tienes una cuenta?",
+    "haveAccount": "¿Ya tienes una cuenta?"
+  },
+  "LocaleSwitcher": {
+    "label": "Idioma"
+  }
+}

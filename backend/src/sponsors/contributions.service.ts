@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
@@ -53,6 +53,7 @@ export class ContributionsService {
     private readonly configService: ConfigService,
     private readonly notificationService: NotificationService,
     private readonly eventsService: EventsService,
+    private readonly dataSource: DataSource,
   ) {
     this.escrowWallet =
       this.configService.get<string>('ESCROW_WALLET_PUBLIC_KEY') ?? '';
@@ -70,29 +71,59 @@ export class ContributionsService {
     tierId: string,
     sponsorId: string,
   ): Promise<ContributionIntent> {
-    const tier = await this.getTierById(tierId);
-
-    // SponsorTier has no currency field — contributions are always in XLM
     const resolvedCurrency: SupportedAsset = 'XLM';
 
-    // Enforce tier capacity
-    await this.assertCapacityAvailable(tier);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    // Persist pending contribution
-    const contribution = this.contributionRepository.create({
-      sponsorId,
-      tierId,
-      amount: tier.price,
-      transactionHash: null,
-      status: ContributionStatus.PENDING,
-    });
-    const saved = await this.contributionRepository.save(contribution);
+    let saved: SponsorContribution;
+    let tierPrice: number;
+
+    try {
+      // Lock the tier row to prevent concurrent over-contribution
+      const [tierRow] = await queryRunner.query(
+        `SELECT t.id, t.price, t."maxSponsors",
+                (SELECT COUNT(*) FROM sponsor_contributions c WHERE c."tierId" = t.id AND c.status = 'confirmed') AS confirmed_count
+         FROM sponsor_tiers t WHERE t.id = $1 FOR UPDATE`,
+        [tierId],
+      );
+
+      if (!tierRow) {
+        throw new NotFoundException(`Sponsor tier "${tierId}" not found.`);
+      }
+
+      const confirmedCount = parseInt(tierRow.confirmed_count, 10);
+      if (confirmedCount >= parseInt(tierRow.maxSponsors, 10)) {
+        throw new ConflictException(
+          `Sponsor tier is full (${tierRow.maxSponsors}/${tierRow.maxSponsors} spots taken).`,
+        );
+      }
+
+      tierPrice = parseFloat(tierRow.price);
+
+      const contribution = queryRunner.manager.create(SponsorContribution, {
+        sponsorId,
+        tierId,
+        amount: tierPrice,
+        transactionHash: null,
+        status: ContributionStatus.PENDING,
+      });
+      saved = await queryRunner.manager.save(SponsorContribution, contribution);
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
 
     await this.auditService.log({
       action: AuditAction.PAYMENT_INTENT_CREATED,
       userId: sponsorId,
       resourceId: saved.id,
-      meta: { tierId, amount: tier.price, currency: resolvedCurrency },
+      meta: { tierId, amount: tierPrice!, currency: resolvedCurrency },
     });
 
     this.logger.log(
@@ -102,7 +133,7 @@ export class ContributionsService {
     return {
       contributionId: saved.id,
       escrowWallet: this.escrowWallet,
-      amount: tier.price,
+      amount: tierPrice!,
       currency: resolvedCurrency,
       memo: saved.id,
     };
@@ -128,93 +159,140 @@ export class ContributionsService {
     // 2. Correlate via memo
     const memoValue = this.stellarService.extractAndValidateMemo(txRecord);
 
-    const contribution = await this.contributionRepository.findOne({
-      where: { id: memoValue, status: ContributionStatus.PENDING },
-      relations: ['tier'],
-    });
+    // 3. Lock the contribution row with SELECT FOR UPDATE to prevent
+    //    two concurrent confirmations from both succeeding (race condition).
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    if (!contribution) {
-      throw new NotFoundException(
-        `No pending contribution found for memo "${memoValue}".`,
+    let confirmed: SponsorContribution;
+
+    try {
+      const locked = await queryRunner.query(
+        `SELECT c.*, t."eventId", t."maxSponsors", t."name" AS "tier_name"
+         FROM sponsor_contributions c
+         JOIN sponsor_tiers t ON t.id = c."tierId"
+         WHERE c.id = $1 AND c.status = 'pending'
+         FOR UPDATE OF c`,
+        [memoValue],
       );
+
+      if (!locked.length) {
+        await queryRunner.rollbackTransaction();
+        throw new NotFoundException(
+          `No pending contribution found for memo "${memoValue}".`,
+        );
+      }
+
+      const row = locked[0];
+
+      // 4. Resolve operations
+      const ops = await this.resolvePaymentOperations(txRecord);
+
+      if (ops.length === 0) {
+        await this.markFailedInTx(queryRunner, row.id, 'No payment operations in transaction.');
+        await queryRunner.commitTransaction();
+        throw new BadRequestException(
+          'Transaction contains no payment operations.',
+        );
+      }
+
+      // 5. Validate destination
+      const matchingOp = ops.find((op) => op.to === this.escrowWallet);
+
+      if (!matchingOp) {
+        await this.markFailedInTx(
+          queryRunner,
+          row.id,
+          `Incorrect destination. Expected ${this.escrowWallet}.`,
+        );
+        await queryRunner.commitTransaction();
+        throw new BadRequestException(
+          'Payment destination does not match the escrow wallet.',
+        );
+      }
+
+      // 6. Validate asset type
+      const assetCode: string =
+        matchingOp.asset_type === 'native'
+          ? 'XLM'
+          : (matchingOp.asset_code ?? '');
+
+      if (!SUPPORTED_ASSETS.includes(assetCode.toUpperCase() as SupportedAsset)) {
+        await this.markFailedInTx(queryRunner, row.id, `Unsupported asset "${assetCode}".`);
+        await queryRunner.commitTransaction();
+        throw new BadRequestException(`Asset "${assetCode}" is not supported.`);
+      }
+
+      // 7. Validate amount matches tier price exactly
+      const onChainAmount = parseFloat(matchingOp.amount);
+      const expectedAmount = parseFloat(String(row.amount));
+
+      if (Math.abs(onChainAmount - expectedAmount) > 0.0000001) {
+        await this.markFailedInTx(
+          queryRunner,
+          row.id,
+          `Incorrect amount. Expected ${expectedAmount}, got ${onChainAmount}.`,
+        );
+        await queryRunner.commitTransaction();
+        throw new BadRequestException(
+          `Incorrect contribution amount. Expected ${expectedAmount}, received ${onChainAmount}.`,
+        );
+      }
+
+      // 8. Re-check capacity within the same locked transaction
+      const confirmedCount = await queryRunner.query(
+        `SELECT COUNT(*)::int AS cnt
+         FROM sponsor_contributions
+         WHERE "tierId" = $1 AND status = 'confirmed' AND id != $2`,
+        [row.tierId, row.id],
+      );
+      const currentCount = confirmedCount[0]?.cnt ?? 0;
+      if (currentCount >= row.maxSponsors) {
+        await queryRunner.commitTransaction();
+        throw new ConflictException(
+          `Sponsor tier "${row.tier_name}" is full (${row.maxSponsors}/${row.maxSponsors} spots taken).`,
+        );
+      }
+
+      // 9. Confirm while still holding the row lock
+      await queryRunner.query(
+        `UPDATE sponsor_contributions
+         SET status = 'confirmed', "transactionHash" = $2
+         WHERE id = $1`,
+        [row.id, transactionHash],
+      );
+
+      await queryRunner.commitTransaction();
+
+      confirmed = await this.contributionRepository.findOne({
+        where: { id: row.id },
+        relations: ['tier'],
+      })!;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
     }
-
-    // 3. Resolve operations
-    const ops = await this.resolvePaymentOperations(txRecord);
-
-    if (ops.length === 0) {
-      await this.markFailed(
-        contribution,
-        'No payment operations in transaction.',
-      );
-      throw new BadRequestException(
-        'Transaction contains no payment operations.',
-      );
-    }
-
-    // 4. Validate destination
-    const matchingOp = ops.find((op) => op.to === this.escrowWallet);
-
-    if (!matchingOp) {
-      await this.markFailed(
-        contribution,
-        `Incorrect destination. Expected ${this.escrowWallet}.`,
-      );
-      throw new BadRequestException(
-        'Payment destination does not match the escrow wallet.',
-      );
-    }
-
-    // 5. Validate asset type
-    const assetCode: string =
-      matchingOp.asset_type === 'native'
-        ? 'XLM'
-        : (matchingOp.asset_code ?? '');
-
-    if (!SUPPORTED_ASSETS.includes(assetCode.toUpperCase() as SupportedAsset)) {
-      await this.markFailed(contribution, `Unsupported asset "${assetCode}".`);
-      throw new BadRequestException(`Asset "${assetCode}" is not supported.`);
-    }
-
-    // 6. Validate amount matches tier price exactly
-    const onChainAmount = parseFloat(matchingOp.amount);
-    const expectedAmount = parseFloat(String(contribution.amount));
-
-    if (Math.abs(onChainAmount - expectedAmount) > 0.0000001) {
-      await this.markFailed(
-        contribution,
-        `Incorrect amount. Expected ${expectedAmount}, got ${onChainAmount}.`,
-      );
-      throw new BadRequestException(
-        `Incorrect contribution amount. Expected ${expectedAmount}, received ${onChainAmount}.`,
-      );
-    }
-
-    // 7. Re-check capacity now that we're about to confirm (prevent race condition)
-    await this.assertCapacityAvailable(contribution.tier, contribution.id);
-
-    // 8. Confirm
-    contribution.transactionHash = transactionHash;
-    contribution.status = ContributionStatus.CONFIRMED;
-    const confirmed = await this.contributionRepository.save(contribution);
 
     await this.auditService.log({
       action: AuditAction.PAYMENT_CONFIRMED,
-      userId: contribution.sponsorId,
-      resourceId: contribution.id,
+      userId: confirmed.sponsorId,
+      resourceId: confirmed.id,
       meta: {
         transactionHash,
-        tierId: contribution.tierId,
-        amount: contribution.amount,
+        tierId: confirmed.tierId,
+        amount: confirmed.amount,
       },
     });
 
     this.logger.log(
-      `Contribution confirmed: id=${contribution.id} txHash=${transactionHash}`,
+      `Contribution confirmed: id=${confirmed.id} txHash=${transactionHash}`,
     );
 
-    // 9. Queue sponsor confirmation email (non-blocking)
-    this.queueSponsorConfirmedEmail(contribution, transactionHash).catch(
+    // 10. Queue sponsor confirmation email (non-blocking)
+    this.queueSponsorConfirmedEmail(confirmed, transactionHash).catch(
       () => undefined,
     );
 
@@ -369,6 +447,17 @@ export class ContributionsService {
 
     this.logger.warn(
       `Contribution failed: id=${contribution.id} reason=${reason}`,
+    );
+  }
+
+  private async markFailedInTx(
+    queryRunner: import('typeorm').QueryRunner,
+    contributionId: string,
+    reason: string,
+  ): Promise<void> {
+    await queryRunner.query(
+      `UPDATE sponsor_contributions SET status = 'failed' WHERE id = $1`,
+      [contributionId],
     );
   }
 }

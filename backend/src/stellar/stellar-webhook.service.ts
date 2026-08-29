@@ -9,6 +9,7 @@ import { StellarService } from './stellar.service';
 import { PaymentsService } from '../payments/payments.service';
 import { SponsorsService } from '../sponsors/sponsors.service';
 import { ContributionsService } from '../sponsors/contributions.service';
+import { NotificationService } from '../notifications/notification.service';
 
 /**
  * Shared queue type for unmatched payment events.
@@ -23,33 +24,34 @@ export interface DlqItem {
   lastError: string | null;
 }
 
-const RECONNECT_DELAY_MS = 5_000;
+const INITIAL_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const BACKOFF_MULTIPLIER = 2;
-const MAX_CONSECUTIVE_FAILURES = 10;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 @Injectable()
 export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(StellarWebhookService.name);
 
   private streamCloser: (() => void) | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private reconnectDelay = RECONNECT_DELAY_MS;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
+  private reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
   private destroyed = false;
-  consecutiveFailures: number = 0;
 
   /**
    * In-memory dead-letter queue.
    * In production, replace with Bull/Redis.
    */
   private readonly deadLetterQueue: DlqItem[] = [];
-  private dlqProcessingInterval: ReturnType<typeof setInterval> | null = null;
+  private dlqProcessingInterval: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly stellarService: StellarService,
     private readonly paymentsService: PaymentsService,
     private readonly sponsorsService: SponsorsService,
     private readonly contributionsService: ContributionsService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -72,8 +74,8 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
   reconnect(): void {
     this.logger.log('Manual reconnect requested — resetting retry counter');
-    this.consecutiveFailures = 0;
-    this.reconnectDelay = RECONNECT_DELAY_MS;
+    this.reconnectAttempts = 0;
+    this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
     this.clearReconnectTimer();
     this.closeStream();
     this.connect();
@@ -92,23 +94,26 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
       );
 
       // Reset backoff and failure counter on successful connection
-      this.reconnectDelay = RECONNECT_DELAY_MS;
-      this.consecutiveFailures = 0;
+      this.reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+      this.reconnectAttempts = 0;
       this.logger.log('Stellar payment stream connected');
     } catch (err) {
-      this.consecutiveFailures += 1;
+      this.reconnectAttempts += 1;
       this.logger.error(
-        `Failed to open stream (consecutive failures: ${this.consecutiveFailures})`,
+        `Failed to open stream (attempt ${this.reconnectAttempts} of ${MAX_RECONNECT_ATTEMPTS})`,
         err,
       );
 
-      if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        this.logger.fatal(
-          '[STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
-            `${this.consecutiveFailures} consecutive times and will no longer ` +
+      if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        this.logger.error(
+          '[CRITICAL][STELLAR_STREAM_DEAD] Stellar payment stream has failed ' +
+            `${this.reconnectAttempts} consecutive times and will no longer ` +
             'attempt to reconnect automatically. ' +
             'Use POST /admin/stellar/reconnect to restart manually.',
         );
+        this.notificationService.emit('STELLAR_STREAM_DEAD', {
+          attempts: this.reconnectAttempts,
+        });
         return;
       }
 
@@ -128,27 +133,55 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
     this.clearReconnectTimer();
 
-    this.logger.warn(
-      `Reconnecting Stellar stream in ${this.reconnectDelay}ms...`,
+    const delay = Math.min(
+      INITIAL_RECONNECT_DELAY_MS * Math.pow(BACKOFF_MULTIPLIER, this.reconnectAttempts),
+      MAX_RECONNECT_DELAY_MS,
     );
+    this.reconnectAttempts++;
+    this.logger.warn(`Scheduling Stellar stream reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     this.reconnectTimer = setTimeout(() => {
-      this.closeStream();
-
-      // Exponential backoff capped at max delay (advance before next connect attempt)
-      this.reconnectDelay = Math.min(
-        this.reconnectDelay * BACKOFF_MULTIPLIER,
-        MAX_RECONNECT_DELAY_MS,
-      );
-
       this.connect();
-    }, this.reconnectDelay);
+    }, delay);
   }
 
   private clearReconnectTimer(): void {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  // ─── Dead-letter queue public accessors ──────────────────────────────────
+
+  getDlq(): DlqItem[] {
+    return [...this.deadLetterQueue];
+  }
+
+  getDlqItem(id: string): DlqItem | undefined {
+    return this.deadLetterQueue.find((item) => item.id === id);
+  }
+
+  async retryDlqItem(id: string): Promise<void> {
+    const idx = this.deadLetterQueue.findIndex((item) => item.id === id);
+    if (idx === -1) return;
+
+    const [item] = this.deadLetterQueue.splice(idx, 1);
+    this.logger.log(`Retrying DLQ item ${id} (txHash=${item.transactionHash})`);
+
+    // Re-attempt payment / sponsor confirmation
+    const confirmed =
+      (await this.tryConfirmPayment(item.transactionHash)) ||
+      (await this.tryConfirmSponsor(item.transactionHash));
+
+    if (!confirmed) {
+      this.logger.debug(
+        `DLQ retry still unmatched for tx ${item.transactionHash}, re-enqueuing`,
+      );
+      item.retryCount += 1;
+      item.lastError = 'Retry still unmatched';
+      item.enqueuedAt = new Date().toISOString();
+      this.deadLetterQueue.push(item);
     }
   }
 

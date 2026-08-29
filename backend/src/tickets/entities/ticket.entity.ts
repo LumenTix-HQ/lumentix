@@ -29,6 +29,7 @@ export class TicketEntity {
   @Column({ type: 'varchar', length: 128 })
   transactionHash!: string;
 
+  @Index()
   @Column({ type: 'varchar', length: 16, default: 'valid' })
   status!: TicketStatus;
 
@@ -67,7 +68,14 @@ export class TicketEntity {
    * Each entry: { from: string; to: string; timestamp: string }
    */
   @Column({ type: 'jsonb', default: [] })
-  transferHistory!: Array<{ from: string; to: string; timestamp: string }>;
+  transferHistory!: Array<{
+    from: string;
+    to: string;
+    timestamp: string;
+    fromPublicKey?: string | null;
+    toPublicKey?: string | null;
+    transactionHash?: string | null;
+  }>;
 
   @CreateDateColumn()
   createdAt!: Date;
