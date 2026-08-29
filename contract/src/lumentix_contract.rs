@@ -1174,6 +1174,102 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Refund every eligible ticket holder of a cancelled event in a single call.
+    /// Skips tickets that are already refunded, used, or revoked.
+    /// Only the organizer can trigger a mass refund. Returns the number of tickets refunded.
+    pub fn execute_mass_refund(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        organizer.require_auth();
+
+        let mut event = storage::get_event(&env, event_id)?;
+
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status != EventStatus::Cancelled {
+            return Err(LumentixError::EventNotCancelled);
+        }
+
+        let fee_bps = storage::get_platform_fee_bps(&env);
+        let platform_fee = (event.ticket_price * fee_bps as i128) / 10000;
+        let escrow_amount = event.ticket_price - platform_fee;
+        let token_address = storage::get_token_result(&env)?;
+        let token_client = soroban_sdk::token::Client::new(&env, &token_address);
+
+        let mut refunded_count: u32 = 0;
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(mut ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id
+                    && !ticket.used
+                    && !ticket.refunded
+                    && !ticket.revoked
+                {
+                    storage::deduct_escrow(&env, event_id, escrow_amount)?;
+                    token_client.transfer(
+                        &env.current_contract_address(),
+                        &ticket.owner,
+                        &event.ticket_price,
+                    );
+
+                    ticket.refunded = true;
+                    storage::set_ticket(&env, ticket_id, &ticket);
+
+                    event.tickets_sold = event.tickets_sold.saturating_sub(1);
+                    refunded_count += 1;
+
+                    TicketRefunded::emit(
+                        &env,
+                        ticket_id,
+                        event_id,
+                        ticket.owner.clone(),
+                        event.ticket_price,
+                    );
+                }
+            }
+            ticket_id += 1;
+        }
+
+        storage::set_event(&env, event_id, &event);
+
+        Ok(refunded_count)
+    }
+
+    /// Verify that every eligible (non-used, non-revoked) ticket for a cancelled event
+    /// has been refunded. Returns EventNotCancelled if the event is not in Cancelled status.
+    /// No auth required — this is a read-only check.
+    pub fn verify_refund_completion(env: Env, event_id: u64) -> Result<bool, LumentixError> {
+        let event = storage::get_event(&env, event_id)?;
+
+        if event.status != EventStatus::Cancelled {
+            return Err(LumentixError::EventNotCancelled);
+        }
+
+        let next_ticket_id = storage::get_next_ticket_id(&env);
+        let mut ticket_id: u64 = 1;
+
+        while ticket_id < next_ticket_id {
+            if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
+                if ticket.event_id == event_id
+                    && !ticket.used
+                    && !ticket.revoked
+                    && !ticket.refunded
+                {
+                    return Ok(false);
+                }
+            }
+            ticket_id += 1;
+        }
+
+        Ok(true)
+    }
+
     /// Complete a published event after end_time. Only the organizer can complete.
     pub fn complete_event(
         env: Env,

@@ -10,6 +10,7 @@ import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { MailerService } from '../mailer/mailer.service';
 import { UsersService } from '../users/users.service';
 import { CalendarService } from '../calendar/calendar.service';
+import { NotificationPreferencesService } from './notification-preferences.service';
 
 @Processor('notifications')
 export class NotificationProcessor {
@@ -19,6 +20,7 @@ export class NotificationProcessor {
     @Inject(forwardRef(() => UsersService))
     private readonly usersService: UsersService,
     private readonly calendarService: CalendarService,
+    private readonly notificationPreferencesService: NotificationPreferencesService,
   ) { }
 
   private async shouldSkip(job: Job, preferenceKey: string): Promise<boolean> {
@@ -41,6 +43,11 @@ export class NotificationProcessor {
 
       if (prefs && prefs[preferenceKey] === false) {
         this.logger.log(`Skipping ${job.name} email for user ${job.data.userId} — opted out`);
+        return true;
+      }
+
+      if (this.notificationPreferencesService.enforceQuietHours((user as any).quietHours)) {
+        this.logger.log(`Skipping ${job.name} email for user ${job.data.userId} — quiet hours`);
         return true;
       }
     } catch (error) {
