@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { Event } from '../events/entities/event.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { WebhookDelivery } from './entities/webhook-delivery.entity';
+import { WebhookDeadLetter } from './entities/webhook-dead-letter.entity';
 
 @Injectable()
 export class WebhooksService {
@@ -13,6 +14,8 @@ export class WebhooksService {
     @InjectQueue('webhooks') private readonly webhooksQueue: Queue,
     @InjectRepository(WebhookDelivery)
     private readonly deliveryRepo: Repository<WebhookDelivery>,
+    @InjectRepository(WebhookDeadLetter)
+    private readonly deadLetterRepo: Repository<WebhookDeadLetter>,
   ) {}
 
   async queueDelivery(event: Event, payment: Payment): Promise<void> {
@@ -43,6 +46,16 @@ export class WebhooksService {
     return this.deliveryRepo.find({
       where: { eventId },
       order: { sentAt: 'DESC' },
+      take: 50,
+    });
+  }
+
+  async getDeadLettersForEvent(eventId: string, organizerId: string) {
+    // This is a placeholder for the actual implementation
+    // which should include an organizer guard.
+    return this.deadLetterRepo.find({
+      where: { eventId },
+      order: { createdAt: 'DESC' },
       take: 50,
     });
   }

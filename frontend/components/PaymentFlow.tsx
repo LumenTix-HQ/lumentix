@@ -7,6 +7,7 @@ import { useWalletBalance } from '@/hooks/useWalletBalance';
 import { InsufficientFundsWarning } from '@/components/payments/InsufficientFundsWarning';
 import TaxBreakdown from '@/components/TaxBreakdown';
 import type { TaxCalculationResult } from '@/types/tax';
+import { announceCartUpdate } from '@/lib/a11y';
 
 interface PaymentFlowProps {
   eventId: string;
@@ -42,13 +43,17 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
   useEffect(() => {
     if (paymentStatus === 'CONFIRMED') {
       refreshBalance();
+      announceCartUpdate('Payment confirmed. Your ticket is ready to download.');
     }
   }, [paymentStatus, refreshBalance]);
 
   if (paymentStatus === 'CONFIRMED') {
     return (
       <div className="space-y-3">
-        <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-3 rounded-xl text-center font-medium">
+        <div
+          role="status"
+          className="bg-green-500/10 border border-green-500/20 text-green-400 p-3 rounded-xl text-center font-medium"
+        >
           ✓ Payment confirmed!
         </div>
         <a
@@ -63,7 +68,10 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
 
   if (statusTimedOut && paymentStatus !== 'CONFIRMED' && paymentStatus !== 'FAILED') {
     return (
-      <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 p-3 rounded-xl text-sm text-center">
+      <div
+        role="status"
+        className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 p-3 rounded-xl text-sm text-center"
+      >
         Your payment is still processing. This is taking longer than expected — check back
         later in <a href={`/my-tickets?paymentId=${paymentId}`} className="underline font-medium">My Tickets</a>.
       </div>
@@ -73,7 +81,7 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
   if (paymentStatus === 'FAILED' || flowState === 'failed') {
     return (
       <div className="space-y-3">
-        <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-sm">
+        <div role="alert" className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-sm">
           {error || 'Payment failed. Please try again.'}
         </div>
         <button
@@ -88,8 +96,8 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
 
   if (flowState === 'polling') {
     return (
-      <div className="text-center space-y-2 py-2">
-        <div className="animate-spin mx-auto h-7 w-7 border-[3px] border-blue-500 border-t-transparent rounded-full" />
+      <div className="text-center space-y-2 py-2" role="status" aria-live="polite">
+        <div className="animate-spin mx-auto h-7 w-7 border-[3px] border-blue-500 border-t-transparent rounded-full" aria-hidden="true" />
         <p className="text-sm text-gray-400">Confirming payment on Stellar…</p>
       </div>
     );
@@ -100,6 +108,7 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
 
     if (!isConnected) {
       setFlowState('connecting');
+      announceCartUpdate('Connecting wallet…');
       try {
         await connectWallet?.();
       } catch {
@@ -117,6 +126,7 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
     }
 
     setFlowState('initiating');
+    announceCartUpdate('Initiating payment…');
     try {
       const res = await fetch(`${API_BASE}/payments/initiate`, {
         method: 'POST',
@@ -151,7 +161,7 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
 
   return (
     <div className="space-y-3">
-      {error && <p className="text-red-400 text-sm">{error}</p>}
+      {error && <p role="alert" className="text-red-400 text-sm">{error}</p>}
 
       {/* Tax breakdown — only shown for paid tickets */}
       {ticketPrice > 0 && (

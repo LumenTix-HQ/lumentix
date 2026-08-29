@@ -18,6 +18,7 @@ import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
+import { WorkspaceModule } from './workspace/workspace.module';
 import { StellarModule } from './stellar/stellar.module';
 import { SponsorsModule } from './sponsors/sponsors.module';
 import { WalletModule } from './wallet/wallet.module';
@@ -146,6 +147,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     DecentralizedStorageModule,
     ChatModule,
     ZkpModule,
+    WorkspaceModule,
     LoyaltyModule,
     TelemetryModule,
     MerchModule,

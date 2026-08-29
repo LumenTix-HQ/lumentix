@@ -1677,3 +1677,77 @@ impl PromoCodeApplied {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WalletConnect session events
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a dApp session is proposed for a wallet.
+pub struct WalletConnectInitiated;
+
+impl WalletConnectInitiated {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address, dapp_name: String) {
+        env.events()
+            .publish((symbol_short!("wcinit"),), (session_id, wallet, dapp_name));
+    }
+}
+
+/// Emitted when a wallet owner approves a pending session.
+pub struct WalletSessionApproved;
+
+impl WalletSessionApproved {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address, expires_at: u64) {
+        env.events()
+            .publish((symbol_short!("wcapprv"),), (session_id, wallet, expires_at));
+    }
+}
+
+/// Emitted when a session is torn down by its wallet owner.
+pub struct WalletDisconnected;
+
+impl WalletDisconnected {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address) {
+        env.events()
+            .publish((symbol_short!("wcdisc"),), (session_id, wallet));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Offline validation events
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer caches a batch of validation proofs.
+pub struct ValidationProofsCached;
+
+impl ValidationProofsCached {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, cached_count: u32, valid_until: u64) {
+        env.events().publish(
+            (symbol_short!("vpcached"),),
+            (event_id, organizer, cached_count, valid_until),
+        );
+    }
+}
+
+/// Emitted for each offline scan successfully replayed on-chain.
+pub struct OfflineScanSynced;
+
+impl OfflineScanSynced {
+    pub fn emit(env: &Env, event_id: u64, ticket_id: u64, validator: Address, scanned_at: u64) {
+        env.events().publish(
+            (symbol_short!("offsync"),),
+            (event_id, ticket_id, validator, scanned_at),
+        );
+    }
+}
+
+/// Emitted once per `sync_offline_scans` call summarising the batch.
+pub struct OfflineScansSyncCompleted;
+
+impl OfflineScansSyncCompleted {
+    pub fn emit(env: &Env, event_id: u64, validator: Address, accepted: u32, rejected: u32) {
+        env.events().publish(
+            (symbol_short!("offdone"),),
+            (event_id, validator, accepted, rejected),
+        );
+    }
+}

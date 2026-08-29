@@ -10,6 +10,7 @@ import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { MailerService } from '../mailer/mailer.service';
 import { UsersService } from '../users/users.service';
 import { CalendarService } from '../calendar/calendar.service';
+import { NotificationPreferencesService } from './notification-preferences.service';
 
 @Processor('notifications')
 export class NotificationProcessor {
@@ -19,6 +20,7 @@ export class NotificationProcessor {
     @Inject(forwardRef(() => UsersService))
     private readonly usersService: UsersService,
     private readonly calendarService: CalendarService,
+    private readonly notificationPreferencesService: NotificationPreferencesService,
   ) { }
 
   private async shouldSkip(job: Job, preferenceKey: string): Promise<boolean> {
@@ -41,6 +43,11 @@ export class NotificationProcessor {
 
       if (prefs && prefs[preferenceKey] === false) {
         this.logger.log(`Skipping ${job.name} email for user ${job.data.userId} — opted out`);
+        return true;
+      }
+
+      if (this.notificationPreferencesService.enforceQuietHours((user as any).quietHours)) {
+        this.logger.log(`Skipping ${job.name} email for user ${job.data.userId} — quiet hours`);
         return true;
       }
     } catch (error) {
@@ -264,6 +271,37 @@ export class NotificationProcessor {
       <div style="font-family: Arial, sans-serif;">
         <h2>Event Completed: ${eventTitle}</h2>
         <p>Your event <strong>${eventTitle}</strong> has been marked as completed. Thank you for hosting on Lumentix!</p>
+      </div>
+    `;
+    await this.mailerService.send(user.email, subject, html);
+    return { sent: true };
+  }
+
+  @Process('sendTierChangeEmail')
+  async handleTierChangeEmail(job: Job) {
+    this.logger.log(`Sending tier change email for job ${job.id}...`);
+    const { userId, previousTier, newTier } = job.data;
+
+    if (!userId) {
+      this.logger.error(`No userId found for tier change job ${job.id}`);
+      return;
+    }
+
+    const user = await this.usersService.findById(userId);
+    if (!user || !user.email) {
+      this.logger.error(`No email found for user ${userId} in tier change job ${job.id}`);
+      return;
+    }
+
+    const tierRank = ['Bronze', 'Silver', 'Gold', 'Platinum'];
+    const isUpgrade = tierRank.indexOf(newTier) > tierRank.indexOf(previousTier);
+    const subject = isUpgrade
+      ? `You've reached ${newTier} tier!`
+      : `Your loyalty tier is now ${newTier}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2>${subject}</h2>
+        <p>Your loyalty tier has changed from <strong>${previousTier}</strong> to <strong>${newTier}</strong>.</p>
       </div>
     `;
     await this.mailerService.send(user.email, subject, html);

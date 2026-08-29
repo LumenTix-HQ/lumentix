@@ -225,7 +225,7 @@ pub mod error;
 pub mod events;
 pub mod lumentix_contract;
 pub mod models;
-pub mod achievement_badge;
+pub mod royalty;
 pub mod storage;
 pub mod types;
 pub mod validation;
@@ -280,6 +280,7 @@ pub use events::{
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     WaitlistOfferExpired, WaitlistSpotReleased,
     EventCertificateIssued, CertificationStandardUpdated,
+    AgeProofIssued, AgeProofVerified, UnderagePurchaseRejected,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -295,5 +296,5 @@ pub use types::{
     RarityTier, ResalePriceCeiling, SeatUpgradeBid, Ticket as LumentixTicket, TicketDidAssociation,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
-    UserPreferences, CertificationStandard, EventCertificate,
+    UserPreferences, CertificationStandard, EventCertificate, AgeProof,
 };
