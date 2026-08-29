@@ -140,4 +140,42 @@ export class User {
 
   @Column({ nullable: true })
   logoUrl: string;
+
+  /**
+   * MFA configuration for organizers and admins.
+   * mfaEnabled: Whether MFA is currently active
+   * mfaMethod: 'totp' | 'sms' | null (method used for MFA)
+   * totpSecret: Base32-encoded TOTP secret (encrypted in DB)
+   * phoneNumber: SMS phone number for MFA (encrypted in DB, only populated if SMS is used)
+   * backupCodes: Array of backup codes for account recovery
+   * mfaVerifiedAt: Timestamp of last MFA verification
+   */
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    default: null,
+  })
+  mfaConfig: {
+    enabled?: boolean;
+    method?: 'totp' | 'sms' | null;
+    totpSecret?: string;
+    phoneNumber?: string;
+    backupCodes?: string[];
+    verifiedAt?: string;
+  } | null;
+
+  /**
+   * Active MFA sessions with their creation and last verified timestamps
+   */
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    default: null,
+  })
+  mfaSessions: Array<{
+    sessionId: string;
+    createdAt: string;
+    verifiedAt: string;
+    method: 'totp' | 'sms';
+  }> | null;
 }
