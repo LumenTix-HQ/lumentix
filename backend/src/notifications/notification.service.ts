@@ -110,6 +110,14 @@ export class NotificationService {
     await this.notificationQueue.add('sendEventCompletedEmail', data, { attempts: 3 });
   }
 
+  async queueTierChangeEmail(data: {
+    userId: string;
+    previousTier: string;
+    newTier: string;
+  }) {
+    await this.notificationQueue.add('sendTierChangeEmail', data, { attempts: 3 });
+  }
+
   async queueCalendarInvite(data: {
     to: string;
     eventTitle: string;

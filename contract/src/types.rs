@@ -452,6 +452,27 @@ pub struct IdentityProof {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Age Verification (Zero-Knowledge-Style Age Proofs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// An on-chain attestation that `subject` meets a minimum age threshold.
+///
+/// Issued by a trusted verifier (the contract admin, standing in for a KYC
+/// provider) after checking the subject's real date of birth off-chain. The
+/// date of birth itself is never submitted to or stored by the contract —
+/// only the age threshold cleared and a `commitment` hash binding this proof
+/// to the specific (subject, min_age) pair the verifier attested to.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgeProof {
+    pub subject: Address,
+    pub min_age: u32,
+    pub commitment: BytesN<32>,
+    pub issued_at: u64,
+    pub expires_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Cross-Chain Ticket Portability
 // ═══════════════════════════════════════════════════════════════════════════
 

@@ -5,10 +5,12 @@ import { LoyaltyTransaction } from './entities/loyalty-transaction.entity';
 import { LoyaltyDiscount } from './entities/loyalty-discount.entity';
 import { LoyaltyService } from './loyalty.service';
 import { LoyaltyController } from './loyalty.controller';
+import { NotificationModule } from '../notifications/notification.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([LoyaltyAccount, LoyaltyTransaction, LoyaltyDiscount]),
+    NotificationModule,
   ],
   controllers: [LoyaltyController],
   providers: [LoyaltyService],

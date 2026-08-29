@@ -5,12 +5,13 @@ import { Event, VipTier, SeatCategoryName, Seat } from "@/types/event";
 import { formatPrice } from "@/types/event";
 import SeatMap from "@/components/venues/SeatMap";
 import VenueMap from "@/components/VenueMap";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
     formatDateTimeInTimezone,
     formatLocalWithOriginalTimezone,
     getUserTimezone,
 } from "@/lib/utils/datetime";
+import { announceCartUpdate, injectAriaLabels, validateA11yCompliance } from "@/lib/a11y";
 
 interface EventDetailClientProps {
   event: Event;
@@ -30,6 +31,10 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
   const handleSelectSeat = (seat: Seat) => {
     setSelectedSeatId(seat.id);
   };
+
+  useEffect(() => {
+    validateA11yCompliance();
+  }, []);
 
   const sections = event.venueSections ?? [];
   const vipTiers = event.vipTiers ?? [];
@@ -138,8 +143,14 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
                   return (
                     <button
                       key={tier.id}
-                      onClick={() => !isFull && setSelectedTier(tier.id)}
+                      onClick={() => {
+                        if (isFull) return;
+                        setSelectedTier(tier.id);
+                        announceCartUpdate(injectAriaLabels.tier(tier, true, isFull));
+                      }}
                       disabled={isFull}
+                      aria-label={injectAriaLabels.tier(tier, isSelected, isFull)}
+                      aria-pressed={isSelected}
                       className={`w-full text-left p-3 rounded-xl border transition-all ${
                         isSelected
                           ? "bg-blue-500/10 border-blue-500/40"

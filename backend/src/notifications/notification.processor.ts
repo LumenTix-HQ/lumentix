@@ -277,6 +277,37 @@ export class NotificationProcessor {
     return { sent: true };
   }
 
+  @Process('sendTierChangeEmail')
+  async handleTierChangeEmail(job: Job) {
+    this.logger.log(`Sending tier change email for job ${job.id}...`);
+    const { userId, previousTier, newTier } = job.data;
+
+    if (!userId) {
+      this.logger.error(`No userId found for tier change job ${job.id}`);
+      return;
+    }
+
+    const user = await this.usersService.findById(userId);
+    if (!user || !user.email) {
+      this.logger.error(`No email found for user ${userId} in tier change job ${job.id}`);
+      return;
+    }
+
+    const tierRank = ['Bronze', 'Silver', 'Gold', 'Platinum'];
+    const isUpgrade = tierRank.indexOf(newTier) > tierRank.indexOf(previousTier);
+    const subject = isUpgrade
+      ? `You've reached ${newTier} tier!`
+      : `Your loyalty tier is now ${newTier}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2>${subject}</h2>
+        <p>Your loyalty tier has changed from <strong>${previousTier}</strong> to <strong>${newTier}</strong>.</p>
+      </div>
+    `;
+    await this.mailerService.send(user.email, subject, html);
+    return { sent: true };
+  }
+
   @Process('sendCalendarInvite')
   async handleCalendarInvite(job: Job) {
     this.logger.log(`Sending calendar invite email for job ${job.id}...`);

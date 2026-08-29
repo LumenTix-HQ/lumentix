@@ -3,21 +3,25 @@ import { WebhooksService } from './webhooks.service';
 import { getQueueToken } from '@nestjs/bull';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { WebhookDelivery } from './entities/webhook-delivery.entity';
+import { WebhookDeadLetter } from './entities/webhook-dead-letter.entity';
 
 describe('WebhooksService', () => {
   let service: WebhooksService;
   let mockQueue: { add: jest.Mock };
   let mockDeliveryRepo: { find: jest.Mock };
+  let mockDeadLetterRepo: { find: jest.Mock };
 
   beforeEach(async () => {
     mockQueue = { add: jest.fn().mockResolvedValue(undefined) };
     mockDeliveryRepo = { find: jest.fn().mockResolvedValue([]) };
+    mockDeadLetterRepo = { find: jest.fn().mockResolvedValue([]) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhooksService,
         { provide: getQueueToken('webhooks'), useValue: mockQueue },
         { provide: getRepositoryToken(WebhookDelivery), useValue: mockDeliveryRepo },
+        { provide: getRepositoryToken(WebhookDeadLetter), useValue: mockDeadLetterRepo },
       ],
     }).compile();
 
