@@ -1,17 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { Review } from './entities/review.entity';
-import { ReviewsService } from './reviews.service';
-import { ReviewsController } from './reviews.controller';
-
-@Module({
-  imports: [TypeOrmModule.forFeature([Review])],
-  controllers: [ReviewsController],
-  providers: [ReviewsService],
 
 import { EventReview } from './entities/event-review.entity';
 import { OrganizerReputation } from './entities/organizer-reputation.entity';
 import { ReviewsService } from './reviews.service';
+import { ReviewSentimentService } from './review-sentiment.service';
 import { ReviewsController } from './reviews.controller';
 
 import { TicketEntity } from '../tickets/entities/ticket.entity';
@@ -28,8 +21,8 @@ import { AuditModule } from '../audit/audit.module';
     ]),
     AuditModule,
   ],
-  providers: [ReviewsService],
+  providers: [ReviewsService, ReviewSentimentService],
   controllers: [ReviewsController],
-  exports: [ReviewsService],
+  exports: [ReviewsService, ReviewSentimentService],
 })
 export class ReviewsModule {}

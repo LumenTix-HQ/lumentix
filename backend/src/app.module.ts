@@ -18,6 +18,7 @@ import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
+import { WorkspaceModule } from './workspace/workspace.module';
 import { StellarModule } from './stellar/stellar.module';
 import { SponsorsModule } from './sponsors/sponsors.module';
 import { WalletModule } from './wallet/wallet.module';
@@ -53,6 +54,8 @@ import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
+import { RateLimitModule } from './common/rate-limit.module';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 
 @Module({
@@ -63,6 +66,7 @@ import { InternalRoutingModule } from './internal/internal.module';
       validationSchema: envValidationSchema,
       validationOptions: { abortEarly: false },
     }),
+    RateLimitModule,
 
     // ── Redis-backed rate limiting — shared across all instances ──────────────
     ThrottlerModule.forRootAsync({
@@ -143,6 +147,7 @@ import { InternalRoutingModule } from './internal/internal.module';
     DecentralizedStorageModule,
     ChatModule,
     ZkpModule,
+    WorkspaceModule,
     LoyaltyModule,
     TelemetryModule,
     MerchModule,
@@ -160,6 +165,10 @@ import { InternalRoutingModule } from './internal/internal.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
     },
     {
       provide: APP_INTERCEPTOR,

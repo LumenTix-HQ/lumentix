@@ -28,6 +28,7 @@ import { CreateSponsorTierDto } from './dto/create-sponsor-tier.dto';
 import { UpdateSponsorTierDto } from './dto/update-sponsor-tier.dto';
 import { ContributionIntentDto } from './dto/contribution-intent.dto';
 import { ConfirmContributionDto } from './dto/confirm-contribution.dto';
+import { SponsorReportDto } from './dto/sponsor-report.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -229,6 +230,33 @@ export class EventSponsorsController {
   getLeaderboard(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.sponsorsService.getEventLeaderboard(eventId);
   }
+
+  @Get('banners')
+  @ApiOperation({
+    summary: 'Rotate sponsor banners',
+    description: 'Public. Returns this event\'s active sponsor banners in a weighted-random rotation order.',
+  })
+  @ApiResponse({ status: 200, description: 'Sponsor banners in rotation order' })
+  getBanners(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.sponsorsService.rotateSponsorBanners(eventId);
+  }
+
+  @Get('report')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Sponsor impression/click report',
+    description: 'Organizer-only. Returns impression counts, click counts, and click-through rate per sponsor.',
+  })
+  @ApiResponse({ status: 200, description: 'Sponsor report', type: SponsorReportDto })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  getReport(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.sponsorsService.generateSponsorReport(eventId, req.user.id);
+  }
 }
 
 @ApiTags('Sponsors')
@@ -241,5 +269,23 @@ export class SponsorProfileController {
   @ApiResponse({ status: 200, description: 'Sponsor profile' })
   getProfile(@Param('id', ParseUUIDPipe) id: string) {
     return this.sponsorsService.getSponsorProfile(id);
+  }
+
+  @Post(':id/impression')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Record sponsor banner impression', description: 'Public. Called when a sponsor banner is displayed to a viewer.' })
+  @ApiResponse({ status: 204, description: 'Impression recorded' })
+  @ApiResponse({ status: 404, description: 'Sponsor not found' })
+  recordImpression(@Param('id', ParseUUIDPipe) id: string) {
+    return this.sponsorsService.recordSponsorImpression(id);
+  }
+
+  @Post(':id/click')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Record sponsor banner click', description: 'Public. Called when a viewer clicks a sponsor banner.' })
+  @ApiResponse({ status: 204, description: 'Click recorded' })
+  @ApiResponse({ status: 404, description: 'Sponsor not found' })
+  recordClick(@Param('id', ParseUUIDPipe) id: string) {
+    return this.sponsorsService.recordSponsorClick(id);
   }
 }

@@ -1,6 +1,4 @@
 use crate::error::LumentixError;
-use crate::types::{Event, Ticket, TicketTransferRecord, INSTANCE_LIFETIME, PERSISTENT_LIFETIME};
-use soroban_sdk::{Address, Env, Vec};
 use crate::types::{
     AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
     CarbonFootprint,
@@ -14,7 +12,8 @@ use crate::types::{
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
 
-  CertificationStandard, EventCertificate, AgeProof,
+  CertificationStandard, EventCertificate,
+    WalletSession, ValidationProof, OfflineScanRecord,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -446,10 +445,6 @@ pub fn append_ticket_transfer_history(env: &Env, ticket_id: u64, record: TicketT
 }
 
 /// Get the full transfer history for a ticket
-pub fn get_ticket_transfer_history(
-    env: &Env,
-    ticket_id: u64,
-) -> Vec<TicketTransferRecord> {
 pub fn get_ticket_transfer_history(env: &Env, ticket_id: u64) -> Vec<TicketTransferRecord> {
     let key = (TRANSFER_HISTORY_PREFIX, ticket_id);
     let history: Vec<TicketTransferRecord> = env
@@ -2225,24 +2220,75 @@ pub fn set_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Addr
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
+
 // ═══════════════════════════════════════════════════════════════════════════
-// AGE VERIFICATION STORAGE
+// WalletConnect session storage
 // ═══════════════════════════════════════════════════════════════════════════
 
-const AGE_PROOF_PREFIX: &str = "AGEPROOF_";
-const EVENT_MIN_AGE_PREFIX: &str = "EVMINAGE_";
+const WALLET_SESSION_PREFIX: &str = "WSESS_";
+const WALLET_SESSION_COUNTER: &str = "WSESSCTR";
 
-pub fn set_age_proof(env: &Env, subject: &Address, proof: &AgeProof) {
-    let key = (AGE_PROOF_PREFIX, subject.clone());
+/// Next session id to hand out. Ids are monotonic and never reused.
+pub fn get_next_wallet_session_id(env: &Env) -> u64 {
+    let id: u64 = env
+        .storage()
+        .instance()
+        .get(&WALLET_SESSION_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_wallet_session_id(env: &Env) {
+    let next = get_next_wallet_session_id(env) + 1;
+    env.storage().instance().set(&WALLET_SESSION_COUNTER, &next);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_wallet_session(env: &Env, session_id: u64, session: &WalletSession) {
+    let key = (WALLET_SESSION_PREFIX, session_id);
+    env.storage().persistent().set(&key, session);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_wallet_session(env: &Env, session_id: u64) -> Result<WalletSession, LumentixError> {
+    let key = (WALLET_SESSION_PREFIX, session_id);
+    let session: Option<WalletSession> = env.storage().persistent().get(&key);
+    match session {
+        Some(s) => {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+            Ok(s)
+        }
+        None => Err(LumentixError::WalletSessionNotFound),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Offline validation storage
+// ═══════════════════════════════════════════════════════════════════════════
+
+const VALIDATION_PROOF_PREFIX: &str = "VPROOF_";
+const OFFLINE_SCAN_PREFIX: &str = "OFFSCAN_";
+
+pub fn set_validation_proof(env: &Env, ticket_id: u64, proof: &ValidationProof) {
+    let key = (VALIDATION_PROOF_PREFIX, ticket_id);
     env.storage().persistent().set(&key, proof);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
-pub fn get_age_proof(env: &Env, subject: &Address) -> Option<AgeProof> {
-    let key = (AGE_PROOF_PREFIX, subject.clone());
-    let proof = env.storage().persistent().get(&key);
+pub fn get_validation_proof(env: &Env, ticket_id: u64) -> Option<ValidationProof> {
+    let key = (VALIDATION_PROOF_PREFIX, ticket_id);
+    let proof: Option<ValidationProof> = env.storage().persistent().get(&key);
     if proof.is_some() {
         env.storage()
             .persistent()
@@ -2251,24 +2297,27 @@ pub fn get_age_proof(env: &Env, subject: &Address) -> Option<AgeProof> {
     proof
 }
 
-/// Minimum age required to purchase a ticket to this event. 0 means no
-/// age restriction is configured.
-pub fn get_event_min_age(env: &Env, event_id: u64) -> u32 {
-    let key = (EVENT_MIN_AGE_PREFIX, event_id);
-    let min_age: u32 = env.storage().persistent().get(&key).unwrap_or(0);
-    if env.storage().persistent().has(&key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
-    }
-    min_age
-}
-
-pub fn set_event_min_age(env: &Env, event_id: u64, min_age: u32) {
-    let key = (EVENT_MIN_AGE_PREFIX, event_id);
-    env.storage().persistent().set(&key, &min_age);
+/// Mark an offline scan as synced so a replayed batch cannot double-apply it.
+pub fn set_offline_scan_synced(env: &Env, ticket_id: u64, record: &OfflineScanRecord) {
+    let key = (OFFLINE_SCAN_PREFIX, ticket_id);
+    env.storage().persistent().set(&key, record);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
+pub fn get_offline_scan(env: &Env, ticket_id: u64) -> Option<OfflineScanRecord> {
+    let key = (OFFLINE_SCAN_PREFIX, ticket_id);
+    let record: Option<OfflineScanRecord> = env.storage().persistent().get(&key);
+    if record.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    record
+}
+
+pub fn has_offline_scan_synced(env: &Env, ticket_id: u64) -> bool {
+    let key = (OFFLINE_SCAN_PREFIX, ticket_id);
+    env.storage().persistent().has(&key)
+}

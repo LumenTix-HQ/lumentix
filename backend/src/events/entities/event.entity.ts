@@ -8,7 +8,7 @@ import {
   JoinTable,
 } from 'typeorm';
 import { CancellationReason } from '../../payments/refunds/enums';
-import { Category } from '../../categories/entities/category.entity';
+import { CategoryEntity } from '../../categories/entities/category.entity';
 
 export enum EventStatus {
   DRAFT = 'draft',
@@ -137,9 +137,9 @@ export class Event {
    */
   @Column({ type: 'timestamp', nullable: true })
   cancelledAt: Date | null;
-  @ManyToMany(() => Category, (c) => c.events)
+  @ManyToMany(() => CategoryEntity, (c) => c.events)
   @JoinTable({ name: 'event_categories' })
-  categories: Category[];
+  categories: CategoryEntity[];
 
   /**
    * Timestamp when the escrow account was merged (closed) after a full refund.
@@ -154,6 +154,21 @@ export class Event {
    */
   @Column({ type: 'varchar', nullable: true, default: null })
   webhookUrl: string | null;
+
+  /**
+   * Numeric event id on the LumentixContract (Soroban smart contract).
+   * NULL means this event has no on-chain counterpart, in which case
+   * cancellation only runs the classic-Stellar escrow refund flow.
+   */
+  @Column({ type: 'bigint', nullable: true, default: null })
+  contractEventId: string | null;
+
+  /**
+   * Timestamp when the smart contract confirmed every eligible ticket
+   * holder for this event had been refunded. NULL until verified.
+   */
+  @Column({ type: 'timestamp', nullable: true, default: null })
+  onChainRefundVerifiedAt: Date | null;
 
   @CreateDateColumn()
   createdAt: Date;

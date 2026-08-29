@@ -1,4 +1,3 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 pub const INSTANCE_LIFETIME: u32 = 535_680; // ~30 days
@@ -83,30 +82,6 @@ pub struct ReferralLinkRecord {
     pub pending_rewards: i128,
     pub total_rewards_paid: i128,
     pub total_discount_awarded: i128,
-}
-
-/// A single record in a ticket's transfer history
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TicketTransferRecord {
-    /// Address that sent the ticket
-    pub from: Address,
-    /// Address that received the ticket
-    pub to: Address,
-    /// Ledger timestamp when the transfer occurred
-    pub timestamp: u64,
-}
-
-/// A single record in a ticket's transfer history
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TicketTransferRecord {
-    /// Address that sent the ticket
-    pub from: Address,
-    /// Address that received the ticket
-    pub to: Address,
-    /// Ledger timestamp when the transfer occurred
-    pub timestamp: u64,
 }
 
 /// Fee collected event for tracking platform fees
@@ -946,4 +921,87 @@ pub struct PromoCode {
     pub total_uses: u32,
     pub active: bool,
     pub created_by: Address,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WalletConnect Session Management
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Lifecycle state of a WalletConnect-style session.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WalletSessionStatus {
+    /// Session proposed but not yet approved by the wallet owner.
+    Pending,
+    /// Session approved and usable until `expires_at`.
+    Active,
+    /// Session terminated by the wallet owner.
+    Disconnected,
+}
+
+/// A dApp <-> wallet pairing recorded on-chain so that session state
+/// survives client restarts and can be audited.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WalletSession {
+    pub session_id: u64,
+    /// The wallet address that owns (and must authorize) this session.
+    pub wallet: Address,
+    /// Human-readable name of the requesting dApp.
+    pub dapp_name: String,
+    /// Opaque pairing topic supplied by the client.
+    pub session_topic: String,
+    pub status: WalletSessionStatus,
+    pub created_at: u64,
+    /// Set when the session moves to `Active`; zero while pending.
+    pub approved_at: u64,
+    /// Absolute expiry. Zero while pending; set at approval time.
+    pub expires_at: u64,
+    /// Requested lifetime, retained so approval can compute `expires_at`.
+    pub ttl_seconds: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Offline Ticket Validation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A pre-computed proof that lets a gate scanner validate a ticket while
+/// disconnected from the network. Cached by the organizer ahead of the event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidationProof {
+    pub ticket_id: u64,
+    pub event_id: u64,
+    /// Ticket owner at the time the proof was cached.
+    pub owner: Address,
+    /// sha256 over (event_id, ticket_id, owner, issued_at) — the value a
+    /// scanner compares against without needing chain access.
+    pub proof_hash: BytesN<32>,
+    pub issued_at: u64,
+    /// Proofs stop being honoured after this timestamp.
+    pub valid_until: u64,
+}
+
+/// One scan captured by a gate device while offline, replayed on reconnect.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OfflineScanRecord {
+    pub ticket_id: u64,
+    /// Proof hash the device matched against at scan time.
+    pub proof_hash: BytesN<32>,
+    /// When the gate actually scanned the ticket.
+    pub scanned_at: u64,
+    /// Device or staff identifier that performed the scan.
+    pub scanner_id: String,
+}
+
+/// Outcome of syncing a single offline scan.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OfflineScanResult {
+    pub ticket_id: u64,
+    /// True when the scan was applied and the ticket marked used.
+    pub accepted: bool,
+    /// Error discriminant explaining a rejection; zero when accepted.
+    pub reason_code: u32,
 }

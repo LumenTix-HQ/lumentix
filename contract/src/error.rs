@@ -408,16 +408,37 @@ pub enum LumentixError {
     PromoCodeUserLimitReached = 219,
     /// Discount basis points must be between 1 and 10000
     InvalidPromoDiscount = 220,
+    // ═══════════════════════════════════════════════════════════════════════
+    // WalletConnect session errors (221–227)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No wallet session exists with this id
+    WalletSessionNotFound = 221,
+    /// Session has already been approved and cannot be approved again
+    WalletSessionAlreadyApproved = 222,
+    /// Session's expiry timestamp has passed
+    WalletSessionExpired = 223,
+    /// Session is not in the pending state required for this operation
+    WalletSessionNotPending = 224,
+    /// Session has been disconnected and can no longer be used
+    WalletSessionDisconnected = 225,
+    /// Requested session time-to-live is outside the permitted range
+    InvalidSessionTtl = 226,
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Age Verification errors (221–224)
+    // Offline validation errors (228–234)
     // ═══════════════════════════════════════════════════════════════════════
-    /// No age proof has been issued for this subject
-    AgeProofNotFound = 221,
-    /// The subject's age proof has expired and must be re-issued
-    AgeProofExpired = 222,
-    /// The submitted age proof does not satisfy the event's minimum age
-    AgeVerificationFailed = 223,
-    /// Purchase rejected: event requires age verification the buyer has not completed
-    UnderageEventPurchase = 224,
+    /// No cached validation proof exists for this ticket
+    ValidationProofNotFound = 228,
+    /// Cached validation proof is past its validity window
+    ValidationProofExpired = 229,
+    /// Supplied proof hash does not match the cached proof
+    ValidationProofMismatch = 230,
+    /// This offline scan has already been synced
+    OfflineScanAlreadySynced = 231,
+    /// Too many entries supplied in a single offline batch
+    OfflineBatchTooLarge = 232,
+    /// Scan timestamp falls outside the proof's validity window
+    OfflineScanOutsideWindow = 233,
+    /// Requested proof validity window is zero or exceeds the permitted maximum
+    InvalidProofValidityWindow = 234,
 }
