@@ -1049,6 +1049,44 @@ impl LumentixContract {
         Ok(amount)
     }
 
+    /// Record a conversion against a referral link.
+    ///
+    /// A "conversion" is a completed purchase attributed to a referrer: it
+    /// applies the buyer's discount, increments the referrer's successful
+    /// purchase count, and accrues their reward. Returns
+    /// `(discounted_price, reward_amount)`.
+    ///
+    /// This is the referral-program name for the flow implemented by
+    /// [`Self::process_referred_purchase`], which stays available so existing
+    /// callers keep working. Attribution is recorded once per buyer per event,
+    /// so a repeated call cannot inflate a referrer's totals.
+    pub fn track_referral_conversion(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        link_code: String,
+    ) -> Result<(i128, i128), LumentixError> {
+        Self::process_referred_purchase(env, buyer, event_id, link_code)
+    }
+
+    /// Pay out a referrer's accrued rewards and reset the pending balance.
+    ///
+    /// Returns the amount issued, or zero when nothing has accrued. The
+    /// referrer authorizes the payout themselves, and the pending balance is
+    /// zeroed before being added to the paid total, so the same rewards cannot
+    /// be issued twice.
+    ///
+    /// This is the referral-program name for
+    /// [`Self::credit_referral_rewards`], which stays available so existing
+    /// callers keep working.
+    pub fn issue_referral_reward(
+        env: Env,
+        referrer: Address,
+        event_id: u64,
+    ) -> Result<i128, LumentixError> {
+        Self::credit_referral_rewards(env, referrer, event_id)
+    }
+
     /// Refund a ticket for a cancelled event.
     /// Decrements tickets_sold to free up capacity.
     /// The ticket must not be used or already refunded.
@@ -4173,6 +4211,55 @@ impl LumentixContract {
         UpgradeExecuted::emit(&env, proposal_id, executor, proposal.new_wasm_hash);
 
         Ok(())
+    }
+
+    /// Propose replacing the contract WASM, opening it for governance voting.
+    ///
+    /// Only a configured governance member may propose, the hash must be
+    /// well-formed, and a hash already under proposal is rejected so the same
+    /// upgrade cannot be voted on twice in parallel. Returns the proposal id.
+    ///
+    /// This is the governance-mechanism name for [`Self::propose_upgrade`],
+    /// which stays available so existing callers keep working.
+    pub fn propose_contract_upgrade(
+        env: Env,
+        proposer: Address,
+        new_wasm_hash: BytesN<32>,
+        description: String,
+    ) -> Result<u64, LumentixError> {
+        Self::propose_upgrade(env, proposer, new_wasm_hash, description)
+    }
+
+    /// Cast a governance vote for or against an upgrade proposal.
+    ///
+    /// One vote per member per proposal, accepted only while the proposal is
+    /// pending and inside its voting window.
+    ///
+    /// This is the governance-mechanism name for [`Self::vote_on_upgrade`],
+    /// which stays available so existing callers keep working.
+    pub fn cast_governance_vote(
+        env: Env,
+        voter: Address,
+        proposal_id: u64,
+        vote_yes: bool,
+    ) -> Result<(), LumentixError> {
+        Self::vote_on_upgrade(env, voter, proposal_id, vote_yes)
+    }
+
+    /// Execute an upgrade that has cleared governance.
+    ///
+    /// Runs only after the voting period has closed and the yes-vote count has
+    /// met the configured approval threshold, then swaps the contract WASM and
+    /// marks the proposal executed so it cannot be replayed.
+    ///
+    /// This is the governance-mechanism name for [`Self::execute_upgrade`],
+    /// which stays available so existing callers keep working.
+    pub fn execute_approved_upgrade(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), LumentixError> {
+        Self::execute_upgrade(env, executor, proposal_id)
     }
 
     /// Get an upgrade proposal by ID
