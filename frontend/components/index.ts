@@ -19,6 +19,7 @@ export { default as PaymentFlow } from './PaymentFlow';
 export { default as PaymentTimeline } from './PaymentTimeline';
 export { default as QRModal } from './QRModal';
 export { RevenueChart } from './RevenueChart';
+export { SponsorBanner } from './SponsorBanner';
 export { SponsorTierCard } from './SponsorTierCard';
 export { default as SponsorTierPreview } from './SponsorTierPreview';
 export { default as StellarPayment } from './StellarPayment';

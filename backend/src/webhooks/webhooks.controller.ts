@@ -30,4 +30,18 @@ export class WebhooksController {
   ) {
     return this.webhooksService.getDeliveriesForEvent(eventId, req.user.id);
   }
+
+  @Get('events/:id/webhooks/dead-letters')
+  @Roles(UserRole.ORGANIZER)
+  @ApiOperation({ summary: 'Get webhook deliveries that exhausted all retry attempts' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Webhook dead letters retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  getDeadLetters(
+    @Param('id', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.webhooksService.getDeadLettersForEvent(eventId, req.user.id);
+  }
 }

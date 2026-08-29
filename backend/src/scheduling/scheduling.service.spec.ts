@@ -125,7 +125,7 @@ describe('SchedulingService', () => {
       mockEventRepository.count.mockResolvedValue(1);
 
       const result = await service.suggestEventSchedule(
-        EventCategory.NETWORKING,
+        EventCategory.MEETUP,
         'Austin',
         2,
         {
@@ -267,7 +267,7 @@ describe('SchedulingService', () => {
       
       for (const audience of audiences) {
         const result = await service.analyzeOptimalTiming(
-          EventCategory.NETWORKING,
+          EventCategory.MEETUP,
           'Test Location',
           2,
           audience

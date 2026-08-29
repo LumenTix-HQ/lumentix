@@ -6,6 +6,7 @@ export { useEventAnalytics } from './useEventAnalytics';
 export { usePaymentHistory } from './usePaymentHistory';
 export { default as usePaymentStatus } from './usePaymentStatus';
 export { useProfile } from './useProfile';
+export { useSponsorBanners } from './useSponsorBanners';
 export { useSponsorContribution } from './useSponsorContribution';
 export { useStellarWallet } from './useStellarWallet';
 export { useTheme } from './useTheme';
