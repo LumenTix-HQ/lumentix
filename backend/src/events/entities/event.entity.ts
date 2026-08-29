@@ -15,6 +15,7 @@ export enum EventStatus {
   PUBLISHED = 'published',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+  ARCHIVED = 'archived',
 }
 
 export enum EventAgeRestriction {

@@ -6,10 +6,12 @@ import {
   Patch,
   Param,
   Delete,
+  Res,
   UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrenciesService } from './currencies.service';
 import { CreateCurrencyDto } from './dto/create-currency.dto';
@@ -25,7 +27,10 @@ import { CurrencyRateService }
 @ApiTags('Currencies')
 @Controller('currencies')
 export class CurrenciesController {
-  constructor(private readonly currenciesService: CurrenciesService) {}
+  constructor(
+    private readonly currenciesService: CurrenciesService,
+    private readonly currencyRateService: CurrencyRateService,
+  ) {}
 
     @Get('rates')
   @ApiOperation({ summary: 'Get current currency exchange rates' })
@@ -39,7 +44,7 @@ export class CurrenciesController {
       await this.currencyRateService.getRates();
 
     if (result.stale) {
-      response.setHeader(
+      response.header(
         'X-Rate-Stale',
         'true',
       );

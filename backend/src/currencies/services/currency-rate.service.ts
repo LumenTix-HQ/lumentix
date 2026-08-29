@@ -10,9 +10,9 @@ import Redis from 'ioredis';
 import {
   CURRENCY_RATE_CACHE_KEY,
   DEFAULT_RATE_TTL_SECONDS,
-} from '../constants/currency.constants';
+} from '../constant/currency.constants';
 
-import { FxProviderService } from '../providers/fx-provider.service';
+import { FxProviderService } from './fx-provider.service';
 
 @Injectable()
 export class CurrencyRateService {
@@ -26,7 +26,7 @@ export class CurrencyRateService {
     private readonly configService: ConfigService,
   ) {
     this.redis = new Redis(
-      process.env.REDIS_URL,
+      process.env.REDIS_URL ?? 'redis://localhost:6379',
     );
   }
 
