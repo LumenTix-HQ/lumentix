@@ -1756,7 +1756,7 @@ impl LumentixContract {
         storage::set_waitlist_offer(&env, event_id, &buyer, &offer);
         Self::add_offer_recipient_if_missing(&env, event_id, &buyer);
 
-        storage::set_waitlist_reserved(&env, event_id, new_reserved);
+        storage::set_waitlist_reserved(&env, event_id, reserved.saturating_add(quantity));
         WaitlistAvailabilityNotified::emit(&env, event_id, buyer, quantity, expires_at);
 
         Ok(expires_at)
@@ -5244,6 +5244,7 @@ impl LumentixContract {
         storage::get_merchandise(&env, merchandise_id)
     }
 
+    /*
     /// Link a merchandise item to a ticket (Issue #701)
     pub fn link_merch_to_ticket(
         env: Env,
@@ -5346,6 +5347,7 @@ impl LumentixContract {
         storage::set_merch_voucher(&env, voucher_id, &voucher);
         Ok(voucher_id)
     }
+    */
 
     /// Mint a commemorative NFT collectible for a special event.
     /// Only the event organizer can mint NFTs.
