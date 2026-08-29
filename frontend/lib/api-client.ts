@@ -1,4 +1,12 @@
+import type { Event, PaginatedResponse } from "@/types/event";
+import type { CreateEventFormValues } from "@/lib/schemas/create-event.schema";
+
 const PROXY_BASE = "/api/proxy";
+
+/** The events list endpoint may return a bare array or a paginated envelope. */
+export type EventsResponse = Event[] | PaginatedResponse<Event>;
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_BASE_RETRY_DELAY_MS = 300;
 
 class ApiProxyError extends Error {
   status: number;
@@ -9,6 +17,52 @@ class ApiProxyError extends Error {
   }
 }
 
+function isIdempotent(method?: string): boolean {
+  const m = (method ?? "GET").toUpperCase();
+  return m === "GET" || m === "HEAD";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface RetryOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+}
+
+/**
+ * fetch wrapper that retries idempotent (GET/HEAD) requests with exponential
+ * backoff on transient failures — network errors and 5xx responses — before
+ * surfacing the result. Non-idempotent requests are never retried. The retry
+ * budget is capped so a persistent failure surfaces promptly.
+ */
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit = {},
+  { maxRetries = DEFAULT_MAX_RETRIES, baseDelayMs = DEFAULT_BASE_RETRY_DELAY_MS }: RetryOptions = {},
+): Promise<Response> {
+  const retryable = isIdempotent(init.method);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (retryable && res.status >= 500 && attempt < maxRetries) {
+        await delay(baseDelayMs * 2 ** attempt);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastError = err;
+      if (!retryable || attempt === maxRetries) throw err;
+      await delay(baseDelayMs * 2 ** attempt);
+    }
+  }
+  // Unreachable for retryable requests (loop returns or throws), but keeps TS happy.
+  throw lastError instanceof Error ? lastError : new Error("Request failed");
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -17,7 +71,7 @@ async function request<T>(
   const path = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
   const url = `${PROXY_BASE}/${path}`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
@@ -73,6 +127,17 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return request<T>(path, { method: "DELETE" });
 }
 
+export async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken, refreshToken }),
+  });
+  if (!response.ok) {
+    throw new ApiProxyError(response.status, "Unable to create authenticated session");
+  }
+}
+
 export const apiClient = {
   login: (body: { email: string; password: string }) =>
     request<{ ok: boolean }>("/auth/login", {
@@ -82,16 +147,16 @@ export const apiClient = {
 
   getEvents: (params?: Record<string, string>) => {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
-    return request<any>(`/events${qs}`);
+    return request<EventsResponse>(`/events${qs}`);
   },
-  getEvent: (id: string) => request<any>(`/events/${id}`),
-  createEvent: (body: any) =>
-    request<any>("/events", {
+  getEvent: (id: string) => request<Event>(`/events/${id}`),
+  createEvent: (body: CreateEventFormValues) =>
+    request<Event>("/events", {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  patchEvent: (id: string, body: any) =>
-    request<any>(`/events/${id}`, {
+  patchEvent: (id: string, body: Partial<CreateEventFormValues>) =>
+    request<Event>(`/events/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),

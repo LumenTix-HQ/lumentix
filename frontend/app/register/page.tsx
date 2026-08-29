@@ -3,27 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { z } from 'zod';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { registerSchema, type RegisterFormValues } from '@/lib/schemas/auth.schema';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-
-const schema = z
-  .object({
-    email: z.string().email('Enter a valid email address'),
-    displayName: z.string().min(2, 'Display name must be at least 2 characters').or(z.literal('')),
-    password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters')
-      .regex(/\d/, 'Password must contain at least one number'),
-    confirmPassword: z.string(),
-  })
-  .refine((d) => d.password === d.confirmPassword, {
-    message: 'Passwords do not match',
-    path: ['confirmPassword'],
-  });
-
-type FormData = z.infer<typeof schema>;
-type FieldErrors = Partial<Record<keyof FormData, string>>;
 
 function getStrength(pw: string): { label: string; width: string; color: string } {
   if (!pw) return { label: '', width: '0%', color: '' };
@@ -40,66 +24,48 @@ function getStrength(pw: string): { label: string; width: string; color: string 
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [form, setForm] = useState<FormData>({
-    email: '',
-    displayName: '',
-    password: '',
-    confirmPassword: '',
-  });
-  const [errors, setErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const strength = getStrength(form.password);
 
-  const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [field]: e.target.value }));
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterFormValues>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { email: '', displayName: '', password: '', confirmPassword: '' },
+  });
 
-  const validate = (): boolean => {
-    const result = schema.safeParse(form);
-    if (!result.success) {
-      const fe: FieldErrors = {};
-      for (const issue of result.error.issues) {
-        const key = issue.path[0] as keyof FormData;
-        if (!fe[key]) fe[key] = issue.message;
-      }
-      setErrors(fe);
-      return false;
-    }
-    setErrors({});
-    return true;
-  };
+  const password = watch('password');
+  const strength = getStrength(password ?? '');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = handleSubmit(async (values) => {
     setServerError(null);
-    if (!validate()) return;
-
-    setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: form.email,
-          password: form.password,
-          displayName: form.displayName || undefined,
+          email: values.email,
+          password: values.password,
+          displayName: values.displayName || undefined,
         }),
       });
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        const msg: string = Array.isArray(body.message) ? body.message[0] : (body.message ?? '');
         if (res.status === 409) {
-          const msg: string = Array.isArray(body.message) ? body.message[0] : (body.message ?? '');
           if (msg.toLowerCase().includes('email')) {
-            setErrors((prev) => ({ ...prev, email: 'This email address is already taken' }));
+            setError('email', { message: 'This email address is already taken' });
           } else {
             setServerError(msg || 'Registration failed');
           }
         } else if (res.status === 400) {
-          const msg: string = Array.isArray(body.message) ? body.message[0] : (body.message ?? '');
           setServerError(msg || 'Invalid registration data');
         } else {
-          setServerError(body.message || 'Something went wrong. Please try again.');
+          setServerError(msg || 'Something went wrong. Please try again.');
         }
         return;
       }
@@ -107,15 +73,15 @@ export default function RegisterPage() {
       router.push('/login?registered=1');
     } catch {
       setServerError('Something went wrong. Please try again.');
-    } finally {
-      setLoading(false);
     }
   };
 
   const field = (name: keyof FormData, label: string, type = 'text', placeholder = '') => (
     <div>
-      <label className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
+      <label htmlFor={name} className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
       <input
+        id={name}
+        name={name}
         type={type}
         value={form[name] as string}
         onChange={set(name)}
@@ -143,22 +109,42 @@ export default function RegisterPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-            {field('email', 'Email', 'email', 'you@example.com')}
-            {field('displayName', 'Display name (optional)', 'text', 'Your name')}
+          <form onSubmit={onSubmit} className="space-y-4" noValidate>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">Email</label>
+              <input
+                type="email"
+                placeholder="you@example.com"
+                className={inputClass(!!errors.email)}
+                {...register('email')}
+              />
+              {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
+            </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Password</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1">Display name (optional)</label>
               <input
-                type="password"
-                value={form.password}
-                onChange={set('password')}
-                placeholder="Min 8 characters, at least 1 number"
-                className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-                  errors.password ? 'border-red-500/50' : 'border-white/10'
-                }`}
+                type="text"
+                placeholder="Your name"
+                className={inputClass(!!errors.displayName)}
+                {...register('displayName')}
               />
-              {form.password && (
+              {errors.displayName && (
+                <p className="text-red-400 text-xs mt-1">{errors.displayName.message}</p>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">Password</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="Min 8 characters, at least 1 number"
+                className={inputClass(!!errors.password)}
+                {...register('password')}
+              />
+              {password && (
                 <div className="mt-2 flex items-center gap-2">
                   <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
                     <div
@@ -169,17 +155,27 @@ export default function RegisterPage() {
                   <span className="text-xs text-gray-500 w-12">{strength.label}</span>
                 </div>
               )}
-              {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+              {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
             </div>
 
-            {field('confirmPassword', 'Confirm password', 'password')}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">Confirm password</label>
+              <input
+                type="password"
+                className={inputClass(!!errors.confirmPassword)}
+                {...register('confirmPassword')}
+              />
+              {errors.confirmPassword && (
+                <p className="text-red-400 text-xs mt-1">{errors.confirmPassword.message}</p>
+              )}
+            </div>
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={isSubmitting}
               className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mt-2"
             >
-              {loading ? 'Creating account…' : 'Create account'}
+              {isSubmitting ? 'Creating account…' : 'Create account'}
             </button>
           </form>
 

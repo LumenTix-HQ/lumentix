@@ -7168,8 +7168,8 @@ fn test_merchandise_preorder_and_voucher_flow() {
     let voucher_id = client.process_preorder_payment(&buyer, &ticket_id, &merch_id);
     assert!(voucher_id > 0);
 
-    // Test generate_merch_redemption_voucher
-    let voucher_id_2 = client.generate_merch_redemption_voucher(&buyer, &ticket_id, &merch_id);
+    // Test generate_merch_voucher
+    let voucher_id_2 = client.generate_merch_voucher(&buyer, &ticket_id, &merch_id);
     assert!(voucher_id_2 > 0);
 }
 

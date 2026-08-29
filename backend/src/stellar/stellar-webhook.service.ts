@@ -133,21 +133,16 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
     this.clearReconnectTimer();
 
-    this.logger.warn(
-      `Reconnecting Stellar stream in ${this.reconnectDelay}ms...`,
+    const delay = Math.min(
+      INITIAL_RECONNECT_DELAY_MS * Math.pow(BACKOFF_MULTIPLIER, this.reconnectAttempts),
+      MAX_RECONNECT_DELAY_MS,
     );
+    this.reconnectAttempts++;
+    this.logger.warn(`Scheduling Stellar stream reconnect in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     this.reconnectTimer = setTimeout(() => {
-      this.closeStream();
-
-      // Exponential backoff capped at max delay (advance before next connect attempt)
-      this.reconnectDelay = Math.min(
-        this.reconnectDelay * BACKOFF_MULTIPLIER,
-        MAX_RECONNECT_DELAY_MS,
-      );
-
       this.connect();
-    }, this.reconnectDelay);
+    }, delay);
   }
 
   private clearReconnectTimer(): void {

@@ -31,6 +31,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
+import { OwnershipTransferDto, ProvenanceChainDto } from './dto/provenance.dto';
 
 @Injectable()
 export class TicketsService {
@@ -167,11 +168,19 @@ export class TicketsService {
       const events = await this.eventRepo.find({ where: { seriesId: payment.seriesId as string } });
       if (events.length === 0) throw new BadRequestException('No events found for this series');
 
+      // Batch-fetch existing tickets for all events in this series
+      const eventIds = events.map((e) => e.id);
+      const existingTickets = await this.ticketRepo.find({
+        where: eventIds.map((eventId) => ({
+          transactionHash: payment.transactionHash,
+          eventId,
+        })),
+      });
+      const existingByEventId = new Map(existingTickets.map((t) => [t.eventId, t]));
+
       const tickets: TicketEntity[] = [];
       for (const event of events) {
-        let ticket = await this.ticketRepo.findOne({
-          where: { transactionHash: payment.transactionHash, eventId: event.id },
-        });
+        let ticket = existingByEventId.get(event.id) ?? null;
 
         if (!ticket) {
           ticket = this.ticketRepo.create({
@@ -360,7 +369,56 @@ export class TicketsService {
     }
 
     ticket.ownerId = newOwnerId;
+    const recordedTicket = await this.record_ownership_transfer(ticketId, {
+      fromUserId: callerOwnerId,
+      toUserId: newOwnerId,
+      fromPublicKey: ticket.ownerPublicKey,
+      toPublicKey: null,
+      transactionHash: null,
+      timestamp: new Date().toISOString(),
+    });
+    ticket.transferHistory = recordedTicket.transferHistory;
     return this.ticketRepo.save(ticket);
+  }
+
+  async record_ownership_transfer(
+    ticketId: string,
+    transfer: Omit<OwnershipTransferDto, 'sequence'>,
+  ): Promise<TicketEntity> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    ticket.transferHistory = [
+      ...(ticket.transferHistory ?? []),
+      {
+        from: transfer.fromUserId,
+        to: transfer.toUserId,
+        timestamp: transfer.timestamp,
+        fromPublicKey: transfer.fromPublicKey,
+        toPublicKey: transfer.toPublicKey,
+        transactionHash: transfer.transactionHash,
+      },
+    ];
+    return this.ticketRepo.save(ticket);
+  }
+
+  async fetch_provenance_chain(ticketId: string): Promise<ProvenanceChainDto> {
+    const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    return {
+      ticketId: ticket.id,
+      assetCode: ticket.assetCode,
+      issuedAt: ticket.createdAt.toISOString(),
+      currentOwnerId: ticket.ownerId,
+      chain: (ticket.transferHistory ?? []).map((transfer, index) => ({
+        sequence: index + 1,
+        fromUserId: transfer.from,
+        toUserId: transfer.to,
+        fromPublicKey: transfer.fromPublicKey ?? null,
+        toPublicKey: transfer.toPublicKey ?? null,
+        transactionHash: transfer.transactionHash ?? null,
+        timestamp: transfer.timestamp,
+      })),
+    };
   }
 
   /**
@@ -493,6 +551,9 @@ export class TicketsService {
         {
           from: previousOwnerId,
           to: recipient.id,
+          fromPublicKey: ticket.ownerPublicKey,
+          toPublicKey: recipient.stellarPublicKey,
+          transactionHash: dto.transactionHash,
           timestamp: new Date().toISOString(),
         },
       ];
@@ -513,6 +574,125 @@ export class TicketsService {
     });
 
     return saved;
+  }
+
+  /**
+   * Validates a batch of ticket transfers to different recipients.
+   */
+  async validate_batch_recipients(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = [];
+    if (!transfers || transfers.length === 0) {
+      errors.push('Transfer batch cannot be empty.');
+      return { valid: false, errors };
+    }
+
+    const ticketIds = transfers.map((t) => t.ticketId);
+    if (new Set(ticketIds).size !== ticketIds.length) {
+      errors.push('Duplicate ticket IDs found in batch.');
+    }
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) {
+        errors.push(`Ticket ${item.ticketId} not found.`);
+        continue;
+      }
+      if (ticket.ownerId !== senderUserId) {
+        errors.push(`Sender does not own ticket ${item.ticketId}.`);
+      }
+      if (ticket.status !== 'valid') {
+        errors.push(`Ticket ${item.ticketId} is not valid for transfer.`);
+      }
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) {
+        errors.push(`Recipient ${item.recipientUserId} not found for ticket ${item.ticketId}.`);
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Emits events and audit logs for a batch of ticket transfers.
+   */
+  async emit_batch_transfer_events(
+    senderUserId: string,
+    completedTransfers: Array<{ ticketId: string; recipientUserId: string; eventId: string }>,
+  ): Promise<void> {
+    for (const t of completedTransfers) {
+      await this.auditService.log({
+        action: AuditAction.TICKET_TRANSFERRED,
+        userId: senderUserId,
+        resourceId: t.ticketId,
+        meta: {
+          ticketId: t.ticketId,
+          fromUserId: senderUserId,
+          toUserId: t.recipientUserId,
+          eventId: t.eventId,
+          batch: true,
+        },
+      });
+
+      await this.notificationService.notifyUser(t.recipientUserId, {
+        title: 'Ticket Received',
+        body: `You received a ticket for event ${t.eventId}`,
+        type: 'ticket_transferred',
+        data: { ticketId: t.ticketId },
+      });
+    }
+  }
+
+  /**
+   * Transfers multiple tickets to different recipients in one operation.
+   */
+  async batch_transfer_tickets(
+    senderUserId: string,
+    transfers: Array<{ ticketId: string; recipientUserId: string }>,
+  ): Promise<{ success: boolean; transferredCount: number; errors?: string[] }> {
+    const validationResult = await this.validate_batch_recipients(senderUserId, transfers);
+    if (!validationResult.valid) {
+      throw new BadRequestException(`Batch transfer validation failed: ${validationResult.errors.join('; ')}`);
+    }
+
+    const completed: Array<{ ticketId: string; recipientUserId: string; eventId: string }> = [];
+
+    for (const item of transfers) {
+      const ticket = await this.ticketRepo.findOne({ where: { id: item.ticketId } });
+      if (!ticket) continue;
+
+      const recipient = await this.userRepo.findOne({ where: { id: item.recipientUserId } });
+      if (!recipient) continue;
+
+      ticket.ownerId = recipient.id;
+      if (recipient.stellarPublicKey) {
+        ticket.ownerPublicKey = recipient.stellarPublicKey;
+      }
+      ticket.transferHistory = [
+        ...(ticket.transferHistory ?? []),
+        {
+          from: senderUserId,
+          to: recipient.id,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await this.ticketRepo.save(ticket);
+      completed.push({
+        ticketId: ticket.id,
+        recipientUserId: recipient.id,
+        eventId: ticket.eventId,
+      });
+    }
+
+    await this.emit_batch_transfer_events(senderUserId, completed);
+
+    return {
+      success: true,
+      transferredCount: completed.length,
+    };
   }
 
   /**

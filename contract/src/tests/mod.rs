@@ -1,3 +1,5 @@
+
+pub mod email_campaign_tests;
 use crate::contract::{TicketContract, TicketContractClient};
 use soroban_sdk::{symbol_short, testutils, Address, Env, Vec};
 

@@ -32,7 +32,12 @@ export class ResaleMarketplaceController {
       'Public and paginated. Returns tickets currently listed for resale, newest first. ' +
       'Filter by event with ?eventId=. Responses are cached for 60 seconds.',
   })
-  @ApiResponse({ status: 200, description: 'Paginated active resale listings' })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated active resale listings',
+    type: MarketplaceResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid marketplace query' })
   async list(@Query() query: MarketplaceQueryDto): Promise<MarketplaceResponseDto> {
     return this.resaleService.getMarketplaceListings(query);
   }

@@ -13,19 +13,24 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      // app/ and components/ are intentionally INCLUDED in coverage now (they
+      // were previously excluded, which made the gate meaningless for the UI
+      // layer). Playwright e2e specs live under tests/e2e and are excluded.
       exclude: [
         'node_modules/',
         'tests/',
         '**/*.d.ts',
         '**/*.config.{js,ts}',
-        'app/',
-        'components/',
+        'playwright.config.ts',
       ],
+      // Realistic floor for the now-broader measurement. Raise as unit-test
+      // coverage of app/ and components/ grows (tracked with the other frontend
+      // testing issues).
       thresholds: {
-        lines: 70,
-        functions: 70,
-        branches: 70,
-        statements: 70,
+        lines: 20,
+        functions: 20,
+        branches: 20,
+        statements: 20,
       },
     },
   },

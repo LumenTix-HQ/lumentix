@@ -260,9 +260,12 @@ Authorization: Bearer <token>
 
 ---
 
-# ⚙️ Environment Variables (Updated)
+# ⚙️ Environment Variables
+
+Copy `.env.example` to `.env` and fill in the required values. The full list below matches what `src/config/env.validation.ts` validates on boot — missing required variables will prevent the app from starting.
 
 ```env
+# App
 PORT=3000
 NODE_ENV=development
 
@@ -270,24 +273,34 @@ NODE_ENV=development
 DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=postgres
-DB_PASSWORD=password
+DB_PASSWORD=change_me
 DB_NAME=lumentix
 
-# TypeORM
-DB_SYNCHRONIZE=false
-DB_LOGGING=true
-
-# JWT
-JWT_SECRET=super_secret
-JWT_EXPIRES=1h
+# JWT (secret must be at least 32 characters)
+JWT_SECRET=change_me_to_a_random_32_char_secret_value
+JWT_EXPIRES_IN=1h
 
 # Stellar
 STELLAR_NETWORK=testnet
 HORIZON_URL=https://horizon-testnet.stellar.org
 NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+PLATFORM_PUBLIC_KEY=your_stellar_platform_public_key
+PLATFORM_SECRET_KEY=your_stellar_platform_secret_key
 
-PLATFORM_PUBLIC_KEY=
-PLATFORM_SECRET_KEY=
+# Ticket Signing
+TICKET_SIGNING_SECRET=your_ticket_signing_stellar_secret_key
+TICKET_SIGNING_PUBLIC_KEY=your_ticket_signing_stellar_public_key
+
+# SMTP / Mailer
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your_smtp_username
+SMTP_PASS=your_smtp_password
+MAIL_FROM=no-reply@example.com
+
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
 
 # CORS
 CORS_ORIGIN=http://localhost:3000

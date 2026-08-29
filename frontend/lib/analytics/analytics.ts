@@ -1,13 +1,43 @@
-const OPT_OUT_KEY = 'lumentix_analytics_opt_out';
+const CONSENT_KEY = 'lumentix_analytics_consent';
+// Legacy key kept so we can migrate anyone who previously toggled opt-out.
+const LEGACY_OPT_OUT_KEY = 'lumentix_analytics_opt_out';
 
-function isOptedOut(): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(OPT_OUT_KEY) === 'true';
+export type ConsentDecision = 'granted' | 'denied';
+
+/** Returns the stored consent decision, or null if the user hasn't chosen yet. */
+export function getAnalyticsConsent(): ConsentDecision | null {
+  if (typeof window === 'undefined') return null;
+  const value = localStorage.getItem(CONSENT_KEY);
+  if (value === 'granted' || value === 'denied') return value;
+  // Migrate a legacy explicit opt-out into a denied decision.
+  const legacy = localStorage.getItem(LEGACY_OPT_OUT_KEY);
+  if (legacy === 'true') return 'denied';
+  if (legacy === 'false') return 'granted';
+  return null;
 }
 
-export function setAnalyticsOptOut(optOut: boolean): void {
+/** Persist an explicit consent decision. */
+export function setAnalyticsConsent(decision: ConsentDecision): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(OPT_OUT_KEY, String(optOut));
+  localStorage.setItem(CONSENT_KEY, decision);
+}
+
+/** Whether the user has made any explicit choice yet (used to gate the banner). */
+export function hasAnalyticsDecision(): boolean {
+  return getAnalyticsConsent() !== null;
+}
+
+/**
+ * Opt-IN model: analytics is considered opted-out unless the user has
+ * explicitly granted consent. No page/URL data is sent before that.
+ */
+function isOptedOut(): boolean {
+  return getAnalyticsConsent() !== 'granted';
+}
+
+// Back-compat helpers used by the profile settings toggle.
+export function setAnalyticsOptOut(optOut: boolean): void {
+  setAnalyticsConsent(optOut ? 'denied' : 'granted');
 }
 
 export function getAnalyticsOptOut(): boolean {

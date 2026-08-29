@@ -1,166 +1,108 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-
-const loginSchema = z.object({
-  email: z.string().email("Enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-});
-
-type LoginFormValues = z.infer<typeof loginSchema>;
+import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { loginSchema, type LoginFormValues } from '@/lib/schemas/auth.schema';
 
 export default function LoginPage() {
+  const t = useTranslations('Auth');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const showPasswordResetBanner = searchParams.get("message") === "password_reset";
+  const redirectUrl = searchParams.get('redirect') || '/events';
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<LoginFormValues>({
-    resolver: zodResolver(loginSchema),
-  });
+  const [serverError, setServerError] = useState('');
 
-  const onSubmit = async (values: LoginFormValues) => {
-    setErrorMessage(null);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setError(t('fillAllFields'));
+      return;
+    }
 
+    setLoading(true);
+    setError('');
+
+  const onSubmit = handleSubmit(async ({ email, password }) => {
+    setServerError('');
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
-
-      if (response.status === 401) {
-        setErrorMessage("Invalid email or password.");
-        return;
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Invalid email or password credentials');
+        throw new Error('Login failed. Please try again.');
       }
 
-      if (!response.ok) {
-        setErrorMessage(data?.message ?? "An error occurred. Please try again.");
-        return;
-      }
-
-      const redirect = searchParams.get("redirect") ?? "/";
-      router.push(redirect);
-    } catch {
-      setErrorMessage("Network error. Please check your connection.");
+      const data = await res.json();
+      document.cookie = `access_token=${data.access_token}; path=/`;
+      router.push(redirectUrl);
+    } catch (err) {
+      setServerError(err instanceof Error ? err.message : 'Login failed');
     }
-  };
+  });
+
+  const inputClass = (hasError: boolean) =>
+    `w-full bg-gray-900 border rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-blue-500 ${
+      hasError ? 'border-red-500/60' : 'border-gray-700'
+    }`;
 
   return (
-    <main className="min-h-screen bg-gray-900 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white">Sign In</h1>
-          <p className="text-gray-400 mt-2">Welcome back to Lumentix</p>
+    <main className="min-h-screen bg-gray-900 flex items-center justify-center p-4 text-white">
+      <div className="bg-gray-800 border border-gray-700 p-8 rounded-2xl max-w-md w-full shadow-2xl space-y-6">
+        <div className="text-center space-y-1">
+          <h1 className="text-2xl font-bold">{t('loginTitle')}</h1>
+          <p className="text-xs text-gray-400">{t('loginSubtitle')}</p>
         </div>
 
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          className="bg-gray-800 rounded-xl p-8 shadow-lg space-y-6"
-          noValidate
-        >
-          {showPasswordResetBanner && (
-            <p className="text-sm text-green-400 bg-green-900/30 border border-green-800 rounded-lg px-4 py-3">
-              Your password has been reset. Sign in with your new password.
-            </p>
-          )}
+        {serverError && (
+          <div className="p-3 bg-red-500/15 border border-red-500/30 rounded-lg text-xs text-red-300">
+            {serverError}
+          </div>
+        )}
 
-          {errorMessage && (
-            <p className="text-sm text-red-400 bg-red-900/30 border border-red-800 rounded-lg px-4 py-3">
-              {errorMessage}
-            </p>
-          )}
-
+        <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1.5">
-              Email
-            </label>
+            <label className="block text-xs font-semibold text-gray-300 mb-1">{t('emailAddress')}</label>
             <input
-              id="email"
               type="email"
-              autoComplete="email"
-              {...register("email")}
-              className="w-full px-4 py-2.5 rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-              placeholder="you@example.com"
+              className={inputClass(!!errors.email)}
+              placeholder="user@example.com"
+              {...register('email')}
             />
-            {errors.email && (
-              <p className="mt-1.5 text-sm text-red-400">{errors.email.message}</p>
-            )}
+            {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1.5">
-              Password
-            </label>
+            <label className="block text-xs font-semibold text-gray-300 mb-1">{t('password')}</label>
             <input
-              id="password"
               type="password"
-              autoComplete="current-password"
-              {...register("password")}
-              className="w-full px-4 py-2.5 rounded-lg bg-gray-700 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+              className={inputClass(!!errors.password)}
               placeholder="••••••••"
+              {...register('password')}
             />
-            {errors.password && (
-              <p className="mt-1.5 text-sm text-red-400">{errors.password.message}</p>
-            )}
-            <div className="mt-2 text-right">
-              <a href="/forgot-password" className="text-sm text-blue-400 hover:underline">
-                Forgot password?
-              </a>
-            </div>
+            {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white font-semibold transition"
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition"
           >
-            {isSubmitting ? (
-              <>
-                <svg
-                  className="animate-spin h-4 w-4 text-white"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"
-                  />
-                </svg>
-                Signing in…
-              </>
-            ) : (
-              "Sign In"
-            )}
+            {loading ? t('signingIn') : t('signIn')}
           </button>
         </form>
 
-        <p className="text-center text-sm text-gray-500 mt-6">
-          Don&apos;t have an account?{" "}
-          <a href="/register" className="text-blue-400 hover:underline">
-            Sign up
-          </a>
-        </p>
+        <div className="flex justify-between text-xs text-gray-400 pt-2 border-t border-gray-700">
+          <Link href="/register" className="hover:text-blue-400">{t('createAccount')}</Link>
+          <Link href="/forgot-password" className="hover:text-blue-400">{t('forgotPassword')}</Link>
+        </div>
       </div>
     </main>
   );

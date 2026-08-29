@@ -140,7 +140,7 @@ export class StellarService implements OnModuleDestroy {
       saved.transactionHash = result.hash ?? null;
       if (!result.successful) {
         saved.lastError =
-          (result as any).extras?.result_codes?.transaction ?? 'Submission failed';
+          (result as { extras?: { result_codes?: { transaction?: string } } }).extras?.result_codes?.transaction ?? 'Submission failed';
       }
       await this.xdrRepository.save(saved);
 
@@ -701,27 +701,129 @@ export class StellarService implements OnModuleDestroy {
         minimumRequired.toFixed(7),
       );
     }
+  }
 
   /**
    * Transfer a ticket asset to a new owner on the Stellar network.
    *
-   * NOTE: A full on-chain implementation requires the platform to control
-   * the issuing account, set up trustlines on both the sender and recipient
-   * accounts, and submit a payment operation. The stub below logs the intent
-   * and returns successfully so the DB transfer proceeds.
+   * Flow:
+   *  1. Load the recipient account and check whether it already trusts the
+   *     ticket asset. If not, return a changeTrust XDR the recipient must
+   *     sign and submit first.
+   *  2. Build a payment transaction from the platform issuer account to the
+   *     recipient for the non-divisible ticket asset, sign it with the
+   *     platform secret, and submit.
    *
-   * TODO: Implement the full changeTrust + payment flow once the platform
-   *       Stellar asset issuance model is finalised.
+   * @param ticket            Ticket record (must include assetCode)
+   * @param recipientPublicKey  Stellar public key of the new owner
+   * @returns An object with the on-chain transaction hash, and optionally
+   *          a `trustlineXdr` the recipient must submit first if they
+   *          didn't already trust the asset.
    */
   async transferTicketAsset(
     ticket: { id: string; assetCode: string; ownerId: string },
     recipientPublicKey: string,
-  ): Promise<void> {
+  ): Promise<{ txHash: string; trustlineXdr?: string }> {
     this.logger.log(
       `transferTicketAsset: ticket=${ticket.id} asset=${ticket.assetCode} ` +
-        `from ownerId=${ticket.ownerId} to recipientPublicKey=${recipientPublicKey}`,
+        `to recipient=${recipientPublicKey}`,
     );
-    // Stub — full on-chain transfer deferred pending asset issuance model design.
+
+    const issuerSecret = this.configService.get<string>(
+      'PLATFORM_SECRET_KEY',
+    );
+    if (!issuerSecret) {
+      throw new InternalServerErrorException(
+        'PLATFORM_SECRET_KEY is not configured — cannot sign ticket asset transfer.',
+      );
+    }
+
+    const issuerKeypair = Keypair.fromSecret(issuerSecret);
+    const issuerPublicKey = issuerKeypair.publicKey();
+
+    // ── 1. Build the ticket asset (issued by the platform) ────────────────
+    const ticketAsset = new Asset(ticket.assetCode, issuerPublicKey);
+
+    // ── 2. Check recipient trustline ──────────────────────────────────────
+    let recipientTrustsAsset = false;
+    let recipientAccount: Horizon.AccountResponse;
+    try {
+      recipientAccount = await this.server.loadAccount(recipientPublicKey);
+      recipientTrustsAsset = recipientAccount.balances.some(
+        (b) =>
+          b.asset_type !== 'native' &&
+          'asset_code' in b &&
+          b.asset_code === ticket.assetCode &&
+          'asset_issuer' in b &&
+          b.asset_issuer === issuerPublicKey,
+      );
+    } catch {
+      throw new BadRequestException(
+        `Recipient account "${recipientPublicKey}" could not be loaded from Horizon.`,
+      );
+    }
+
+    let trustlineXdr: string | undefined;
+
+    if (!recipientTrustsAsset) {
+      // Build a changeTrust XDR for the recipient to sign & submit
+      const trustlineTx = new TransactionBuilder(recipientAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(
+          Operation.changeTrust({
+            asset: ticketAsset,
+            limit: '1', // NFT — non-divisible, max supply 1
+          }),
+        )
+        .setTimeout(30)
+        .build();
+
+      trustlineXdr = trustlineTx.toXDR();
+    }
+
+    // ── 3. Build + sign the payment from issuer to recipient ──────────────
+    //    The issuer account sends the ticket asset (1 unit, non-divisible)
+    //    to the recipient.  The issuer must have previously issued this
+    //    asset by sending a payment from their own account.
+    const issuerAccount = await this.server.loadAccount(issuerPublicKey);
+
+    const paymentTx = new TransactionBuilder(issuerAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: recipientPublicKey,
+          asset: ticketAsset,
+          amount: '0.0000001', // Stellar NFT — minimum non-divisible amount
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    paymentTx.sign(issuerKeypair);
+
+    const response = await this.server.submitTransaction(paymentTx);
+
+    if (!response.successful) {
+      const errCode =
+        (response as { extras?: { result_codes?: { transaction?: string } } })
+          .extras?.result_codes?.transaction ?? 'unknown';
+      throw new InternalServerErrorException(
+        `Stellar ticket transfer failed (code: ${errCode}).`,
+      );
+    }
+
+    this.logger.log(
+      `transferTicketAsset: ticket=${ticket.id} transferred on-chain txHash=${response.hash}`,
+    );
+
+    return {
+      txHash: response.hash,
+      ...(trustlineXdr && { trustlineXdr }),
+    };
   }
 
   onModuleDestroy(): void {

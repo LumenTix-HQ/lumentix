@@ -17,6 +17,10 @@ export class CreatePaymentIntentDto {
   @IsOptional()
   currency?: string;
 
+  @IsBoolean()
+  @IsOptional()
+  includeCarbonOffset?: boolean;
+
   @ApiPropertyOptional({
     example: false,
     description: 'Whether the client wants to use a path payment flow',

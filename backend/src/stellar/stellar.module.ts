@@ -7,6 +7,7 @@ import { BullModule } from '@nestjs/bull';
 import { stellarConfig } from './stellar.config';
 import { StellarController } from './stellar.controller';
 import { StellarService, PAYMENT_RETRY_QUEUE } from './stellar.service';
+import { SorobanService } from './soroban.service';
 import { UsersModule } from '../users/users.module';
 import { Payment } from '../payments/entities/payment.entity';
 import { AuditModule } from '../audit/audit.module';
@@ -30,7 +31,7 @@ import { RetryPaymentJob } from '../payments/jobs/retry-payment.job';
     }),
   ],
   controllers: [StellarController],
-  providers: [StellarService, RetryPaymentJob],
-  exports: [StellarService],
+  providers: [StellarService, RetryPaymentJob, SorobanService],
+  exports: [StellarService, SorobanService],
 })
 export class StellarModule {}

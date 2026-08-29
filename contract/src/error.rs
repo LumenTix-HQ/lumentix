@@ -304,6 +304,42 @@ pub enum LumentixError {
     MemorabiliaClaimNotFound = 103,
 
     // ═══════════════════════════════════════════════════════════════════════
+    // Email Campaign errors (116–121)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Email campaign not found
+    EmailCampaignNotFound = 116,
+    /// Email campaign subject or body is empty
+    EmailCampaignInvalidContent = 117,
+    /// Email campaign has already been sent and cannot be modified
+    EmailCampaignAlreadySent = 118,
+    /// Caller is not the campaign organizer
+    EmailCampaignUnauthorized = 119,
+    /// Campaign analytics record not found
+    EmailCampaignAnalyticsNotFound = 120,
+    /// Delivery count exceeds the number of recipients
+    EmailCampaignInvalidDeliveryCount = 121,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Tax Determination errors (122–130)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Tax rule with the specified ID does not exist
+    TaxRuleNotFound = 122,
+    /// Tax jurisdiction code is empty or invalid
+    TaxInvalidJurisdiction = 123,
+    /// Tax rate basis points exceed 10 000 (100%)
+    TaxInvalidRate = 124,
+    /// Tax collection record not found
+    TaxCollectionRecordNotFound = 125,
+    /// Tax report not found
+    TaxReportNotFound = 126,
+    /// No tax collection records exist for the requested jurisdiction/period
+    TaxNoRecordsForJurisdiction = 127,
+    /// Period start must be strictly before period end
+    TaxInvalidPeriod = 128,
+    /// Tax rule already exists for this jurisdiction code
+    TaxRuleAlreadyExists = 129,
+    /// Ticket base price must be positive to compute tax
+    TaxInvalidBasePrice = 130,
     // Core feature implementation errors
     // ═══════════════════════════════════════════════════════════════════════
     /// The provided zero-knowledge proof is invalid
@@ -324,4 +360,85 @@ pub enum LumentixError {
     // ═══════════════════════════════════════════════════════════════════════
     /// Not enough historical sales data points were provided to produce a forecast
     InsufficientSalesHistory = 202,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Anonymous Event Feedback Survey errors (203–206)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// This ticket has already submitted a survey response for this event
+    SurveyAlreadySubmitted = 203,
+    /// No survey responses exist yet for this event
+    NoSurveyResponses = 204,
+    /// Survey submission must include at least one rating
+    EmptySurveyAnswers = 205,
+    /// Every survey rating must be between 1 and 5
+    InvalidSurveyRating = 206,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Decentralized Schedule Voting errors (207–213)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// A schedule vote needs at least two candidates to be meaningful
+    InsufficientScheduleCandidates = 207,
+    /// Schedule vote with the given ID does not exist
+    ScheduleVoteNotFound = 208,
+    /// Voting deadline for this schedule vote has passed
+    ScheduleVotingClosed = 209,
+    /// Schedule vote cannot be tallied before its voting deadline
+    ScheduleVotingStillActive = 210,
+    /// This ticket holder has already voted on this schedule slot
+    ScheduleVoteAlreadyCast = 211,
+    /// Caller does not hold a ticket for the event being voted on
+    ScheduleVoterNotTicketHolder = 212,
+    /// Candidate index is out of range for this schedule vote
+    InvalidScheduleCandidateIndex = 213,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Promo Code errors (214–220)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Promo code does not exist for this event
+    PromoCodeNotFound = 214,
+    /// A promo code with this name already exists for this event
+    PromoCodeAlreadyExists = 215,
+    /// Promo code's expiration date has passed
+    PromoCodeExpired = 216,
+    /// Promo code has been deactivated by the organizer
+    PromoCodeInactive = 217,
+    /// Promo code has reached its maximum total number of uses
+    PromoCodeGlobalLimitReached = 218,
+    /// Caller has already used this promo code the maximum number of times
+    PromoCodeUserLimitReached = 219,
+    /// Discount basis points must be between 1 and 10000
+    InvalidPromoDiscount = 220,
+    // ═══════════════════════════════════════════════════════════════════════
+    // WalletConnect session errors (221–227)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No wallet session exists with this id
+    WalletSessionNotFound = 221,
+    /// Session has already been approved and cannot be approved again
+    WalletSessionAlreadyApproved = 222,
+    /// Session's expiry timestamp has passed
+    WalletSessionExpired = 223,
+    /// Session is not in the pending state required for this operation
+    WalletSessionNotPending = 224,
+    /// Session has been disconnected and can no longer be used
+    WalletSessionDisconnected = 225,
+    /// Requested session time-to-live is outside the permitted range
+    InvalidSessionTtl = 226,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Offline validation errors (228–234)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No cached validation proof exists for this ticket
+    ValidationProofNotFound = 228,
+    /// Cached validation proof is past its validity window
+    ValidationProofExpired = 229,
+    /// Supplied proof hash does not match the cached proof
+    ValidationProofMismatch = 230,
+    /// This offline scan has already been synced
+    OfflineScanAlreadySynced = 231,
+    /// Too many entries supplied in a single offline batch
+    OfflineBatchTooLarge = 232,
+    /// Scan timestamp falls outside the proof's validity window
+    OfflineScanOutsideWindow = 233,
+    /// Requested proof validity window is zero or exceeds the permitted maximum
+    InvalidProofValidityWindow = 234,
 }
