@@ -163,6 +163,7 @@ export class PaymentsController {
       dto.currency,
       dto.usePathPayment,
       dto.sourceAsset,
+      dto.includeCarbonOffset, // Add this
     );
   }
 
