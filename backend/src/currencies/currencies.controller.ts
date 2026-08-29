@@ -8,6 +8,8 @@ import {
   Delete,
   Res,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
@@ -30,7 +32,10 @@ export class CurrenciesController {
     private readonly currencyRateService: CurrencyRateService,
   ) {}
 
-  @Get('rates')
+    @Get('rates')
+  @ApiOperation({ summary: 'Get current currency exchange rates' })
+  @ApiResponse({ status: 200, description: 'Exchange rates returned' })
+  @ApiResponse({ status: 503, description: 'Exchange rates unavailable' })
   async getRates(
     @Res({ passthrough: true })
     response: Response,
@@ -86,9 +91,11 @@ export class CurrenciesController {
   }
 
   @Patch(':code/activate')
+  @Post(':code/activate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Activate a currency', description: 'Admin only. Activates a currency by its code.' })
   @ApiResponse({ status: 200, description: 'Currency activated' })
   @ApiResponse({ status: 404, description: 'Currency not found' })
@@ -98,9 +105,11 @@ export class CurrenciesController {
   }
 
   @Patch(':code/deactivate')
+  @Post(':code/deactivate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Deactivate a currency', description: 'Admin only. Deactivates a currency. Returns 409 if pending payments exist for this currency.' })
   @ApiResponse({ status: 200, description: 'Currency deactivated' })
   @ApiResponse({ status: 404, description: 'Currency not found' })

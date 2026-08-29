@@ -1,0 +1,165 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-node-modules-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-node-modules-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-node-modules-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: frontend/.next/cache
+          key: ${{ runner.os }}-frontend-next-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-next-${{ hashFiles('frontend/package-lock.json') }}-
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  dep-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check for duplicate dependencies
+        run: |
+          node -e "
+            const pkg = require('./frontend/package.json');
+            const deps = Object.keys(pkg.dependencies || {});
+            const devDeps = pkg.devDependencies || {};
+            const duplicates = deps.filter((name) => devDeps[name]);
+            if (duplicates.length) {
+              console.error('Packages listed in both dependencies and devDependencies:');
+              duplicates.forEach((name) => console.error('  - ' + name));
+              process.exit(1);
+            }
+            console.log('No duplicate dependencies found.');
+          "
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-node-modules-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm run test:run
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-frontend-node-modules-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npm run test:e2e:install
+
+      - name: Run Playwright e2e tests
+        working-directory: frontend
+        run: npm run test:e2e

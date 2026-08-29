@@ -157,6 +157,35 @@ export class TicketsController {
   ) {
     return this.ticketsService.confirmTransfer(ticketId, req.user.id, dto);
   }
+
+  @Post('batch-transfer')
+  @ApiOperation({
+    summary: 'Batch transfer multiple tickets to different recipients',
+    description: 'Allow a single wallet to transfer multiple tickets to different recipients in one transaction.',
+  })
+  batchTransfer(
+    @Body() body: { transfers: Array<{ ticketId: string; recipientUserId: string }> },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.batch_transfer_tickets(req.user.id, body.transfers);
+  }
+
+  @Post('verify-qr')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Verify QR code for physical event check-in',
+    description:
+      'Authenticated organizer/admin. Scans a ticket QR code, validates signature, and marks the ticket as used.',
+  })
+  @ApiBody({ schema: { properties: { qrData: { type: 'string', description: 'JSON-encoded QR payload with ticketId and signature' } }, required: ['qrData'] } })
+  @ApiResponse({ status: 200, description: 'Ticket checked in successfully with attendee info' })
+  @ApiResponse({ status: 400, description: 'Invalid QR data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized or invalid signature' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  verifyQr(@Body('qrData') qrData: string) {
+    return this.ticketsService.verifyQrCheckIn(qrData);
+  }
 }
 
 @ApiTags('Tickets')
@@ -172,6 +201,18 @@ export class TicketsPublicController {
   @ApiResponse({ status: 200, description: 'Listed tickets retrieved successfully' })
   getMarketplace() {
     return this.ticketsService.getMarketplace();
+  }
+
+  @Get(':id/provenance')
+  @ApiOperation({
+    summary: 'Get ticket ownership provenance',
+    description: 'Publicly returns the ticket NFT ownership chain for authenticity checks.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 200, description: 'Ownership provenance chain returned' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  getProvenance(@Param('id') id: string) {
+    return this.ticketsService.fetch_provenance_chain(id);
   }
 
   @Get(':id/verify-status')

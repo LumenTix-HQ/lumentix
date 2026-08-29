@@ -5,6 +5,9 @@ import { useWallet } from '@/contexts/WalletContext';
 import usePaymentStatus from '@/hooks/usePaymentStatus';
 import { useWalletBalance } from '@/hooks/useWalletBalance';
 import { InsufficientFundsWarning } from '@/components/payments/InsufficientFundsWarning';
+import TaxBreakdown from '@/components/TaxBreakdown';
+import type { TaxCalculationResult } from '@/types/tax';
+import { announceCartUpdate } from '@/lib/a11y';
 
 interface PaymentFlowProps {
   eventId: string;
@@ -25,18 +28,32 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
   const [flowState, setFlowState] = useState<FlowState>('idle');
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [taxResult, setTaxResult] = useState<TaxCalculationResult | null>(null);
 
-  const { status: paymentStatus } = usePaymentStatus(paymentId);
-
+  const { status: paymentStatus, timedOut: statusTimedOut } = usePaymentStatus(paymentId);
   const { networkMismatch } = useWallet();
-  const insufficientFunds = ticketPrice > 0 && hasInsufficientFunds(ticketPrice);
-  const shortfall = getShortfall(ticketPrice);
+
+  // Use tax-inclusive price for insufficiency check when tax has been calculated
+  const effectivePrice = taxResult ? taxResult.totalPrice / 100 : ticketPrice;
+  const insufficientFunds = effectivePrice > 0 && hasInsufficientFunds(effectivePrice);
+  const shortfall = getShortfall(effectivePrice);
   const isBlocked = !isConnected || flowState !== 'idle' || insufficientFunds || networkMismatch;
+
+  // Refresh balance after successful payment
+  useEffect(() => {
+    if (paymentStatus === 'CONFIRMED') {
+      refreshBalance();
+      announceCartUpdate('Payment confirmed. Your ticket is ready to download.');
+    }
+  }, [paymentStatus, refreshBalance]);
 
   if (paymentStatus === 'CONFIRMED') {
     return (
       <div className="space-y-3">
-        <div className="bg-green-500/10 border border-green-500/20 text-green-400 p-3 rounded-xl text-center font-medium">
+        <div
+          role="status"
+          className="bg-green-500/10 border border-green-500/20 text-green-400 p-3 rounded-xl text-center font-medium"
+        >
           ✓ Payment confirmed!
         </div>
         <a
@@ -49,10 +66,22 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
     );
   }
 
+  if (statusTimedOut && paymentStatus !== 'CONFIRMED' && paymentStatus !== 'FAILED') {
+    return (
+      <div
+        role="status"
+        className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 p-3 rounded-xl text-sm text-center"
+      >
+        Your payment is still processing. This is taking longer than expected — check back
+        later in <a href={`/my-tickets?paymentId=${paymentId}`} className="underline font-medium">My Tickets</a>.
+      </div>
+    );
+  }
+
   if (paymentStatus === 'FAILED' || flowState === 'failed') {
     return (
       <div className="space-y-3">
-        <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-sm">
+        <div role="alert" className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-sm">
           {error || 'Payment failed. Please try again.'}
         </div>
         <button
@@ -67,25 +96,19 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
 
   if (flowState === 'polling') {
     return (
-      <div className="text-center space-y-2 py-2">
-        <div className="animate-spin mx-auto h-7 w-7 border-[3px] border-blue-500 border-t-transparent rounded-full" />
+      <div className="text-center space-y-2 py-2" role="status" aria-live="polite">
+        <div className="animate-spin mx-auto h-7 w-7 border-[3px] border-blue-500 border-t-transparent rounded-full" aria-hidden="true" />
         <p className="text-sm text-gray-400">Confirming payment on Stellar…</p>
       </div>
     );
   }
-
-  // Refresh balance after successful payment
-  useEffect(() => {
-    if (paymentStatus === 'CONFIRMED') {
-      refreshBalance();
-    }
-  }, [paymentStatus, refreshBalance]);
 
   const handleRegister = async () => {
     setError(null);
 
     if (!isConnected) {
       setFlowState('connecting');
+      announceCartUpdate('Connecting wallet…');
       try {
         await connectWallet?.();
       } catch {
@@ -103,11 +126,18 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
     }
 
     setFlowState('initiating');
+    announceCartUpdate('Initiating payment…');
     try {
       const res = await fetch(`${API_BASE}/payments/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ eventId, currency }),
+        body: JSON.stringify({
+          eventId,
+          currency,
+          // Pass the tax-inclusive amount so the backend can record it
+          taxAmount: taxResult?.taxAmount ?? 0,
+          jurisdictionCode: taxResult?.jurisdictionCode ?? null,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -122,15 +152,32 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
     }
   };
 
+  // Compute display price — use tax total if available
+  const displayTotal = taxResult
+    ? `${(taxResult.totalPrice / 100).toFixed(2)} ${currency} (incl. tax)`
+    : ticketPrice === 0
+    ? 'Free'
+    : `${ticketPrice} ${currency}`;
+
   return (
     <div className="space-y-3">
-      {error && <p className="text-red-400 text-sm">{error}</p>}
-      
+      {error && <p role="alert" className="text-red-400 text-sm">{error}</p>}
+
+      {/* Tax breakdown — only shown for paid tickets */}
+      {ticketPrice > 0 && (
+        <TaxBreakdown
+          eventId={eventId}
+          basePrice={ticketPrice * 100} // convert to cents
+          currency={currency}
+          onTaxCalculated={setTaxResult}
+        />
+      )}
+
       {/* Insufficient funds warning */}
       {insufficientFunds && (
         <InsufficientFundsWarning
           balance={balance}
-          requiredAmount={ticketPrice + 0.50001}
+          requiredAmount={effectivePrice + 0.50001}
           shortfall={shortfall}
         />
       )}
@@ -154,9 +201,9 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
           ? 'Connect Wallet & Register'
           : ticketPrice === 0
           ? 'Register (Free)'
-          : `Register — ${ticketPrice} ${currency}`}
+          : `Register — ${displayTotal}`}
       </button>
-      
+
       {!isConnected && (
         <p className="text-xs text-gray-500 text-center">Requires Freighter wallet</p>
       )}

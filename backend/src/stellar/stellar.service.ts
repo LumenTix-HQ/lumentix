@@ -4,10 +4,16 @@ import {
   InternalServerErrorException,
   Logger,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { InjectQueue } from '@nestjs/bull';
+import { Repository } from 'typeorm';
+import { Queue } from 'bull';
 import { UsersService } from '../users/users.service';
 import { InsufficientBalanceException } from '../common/exceptions/insufficient-balance.exception';
+import { Payment } from '../payments/entities/payment.entity';
 import {
   Horizon,
   Transaction,
@@ -20,6 +26,7 @@ import {
   Memo,
 } from '@stellar/stellar-sdk';
 import * as crypto from 'crypto';
+import { PersistedXdr, XdrStatus } from './entities/persisted-xdr.entity';
 
 export type PaymentCallback = (
   payment: Horizon.ServerApi.PaymentOperationRecord,
@@ -29,6 +36,32 @@ export interface EscrowKeypair {
   publicKey: string;
   /** Raw secret — caller is responsible for encrypting before storage */
   secret: string;
+}
+
+/** Name of the Bull queue that retries a payment's persisted signed XDR after a Horizon timeout. */
+export const PAYMENT_RETRY_QUEUE = 'payment-retry';
+
+/**
+ * True for Horizon submission failures that are transient/network-level
+ * (timeout, connection reset, DNS failure, HTTP 408) rather than a
+ * definitive on-chain rejection (e.g. bad sequence number, insufficient
+ * balance) -- only these are worth retrying with the same signed XDR.
+ */
+export function isHorizonTimeoutError(err: unknown): boolean {
+  const e = err as {
+    code?: string;
+    message?: string;
+    response?: { status?: number };
+  } | null;
+  if (!e) return false;
+  if (e.response?.status === 408) return true;
+  if (e.code && ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN'].includes(e.code)) {
+    return true;
+  }
+  if (typeof e.message === 'string' && /timeout|timed out/i.test(e.message)) {
+    return true;
+  }
+  return false;
 }
 
 @Injectable()
@@ -41,6 +74,12 @@ export class StellarService implements OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
+    @Optional()
+    @InjectRepository(Payment)
+    private readonly paymentsRepository?: Repository<Payment>,
+    @Optional()
+    @InjectQueue(PAYMENT_RETRY_QUEUE)
+    private readonly paymentRetryQueue?: Queue,
   ) {
     const horizonUrl =
       this.configService.get<string>('stellar.horizonUrl') ??
@@ -76,6 +115,43 @@ export class StellarService implements OnModuleDestroy {
       this.networkPassphrase,
     );
     return this.server.submitTransaction(tx);
+  }
+
+  /**
+   * Persist the XDR to the database, then broadcast it to Horizon.
+   * On broadcast failure the persisted record enables later replay.
+   */
+  async persistAndSubmitTransaction(
+    xdr: string,
+    paymentId?: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    const record = this.xdrRepository.create({
+      xdr,
+      networkPassphrase: this.networkPassphrase,
+      status: XdrStatus.PENDING,
+      paymentId: paymentId ?? null,
+    });
+    const saved = await this.xdrRepository.save(record);
+
+    try {
+      const result = await this.submitTransaction(xdr);
+
+      saved.status = result.successful ? XdrStatus.CONFIRMED : XdrStatus.FAILED;
+      saved.transactionHash = result.hash ?? null;
+      if (!result.successful) {
+        saved.lastError =
+          (result as { extras?: { result_codes?: { transaction?: string } } }).extras?.result_codes?.transaction ?? 'Submission failed';
+      }
+      await this.xdrRepository.save(saved);
+
+      return result;
+    } catch (err: unknown) {
+      saved.status = XdrStatus.FAILED;
+      saved.lastError = err instanceof Error ? err.message : String(err);
+      saved.nextRetryAt = new Date(Date.now() + 30_000); // first retry in 30s
+      await this.xdrRepository.save(saved);
+      throw err;
+    }
   }
 
   async getTransaction(
@@ -226,17 +302,18 @@ export class StellarService implements OnModuleDestroy {
     return this.server.submitTransaction(tx);
   }
 
-  async sendPayment(
+  /**
+   * Builds and signs a payment transaction without submitting it. Useful
+   * when the caller needs to persist the signed XDR (e.g. for retry-on-
+   * timeout) before calling submitTransaction() itself.
+   */
+  async buildSignedPaymentXdr(
     escrowSecret: string,
     destination: string,
     amount: string,
     assetCode: string = 'XLM',
     assetIssuer?: string,
-  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
-    this.logger.debug(
-      `sendPayment: destination=${destination} amount=${amount} asset=${assetCode}`,
-    );
-
+  ): Promise<string> {
     const escrowKeypair = Keypair.fromSecret(escrowSecret);
     const escrowAccount = await this.server.loadAccount(
       escrowKeypair.publicKey(),
@@ -262,7 +339,60 @@ export class StellarService implements OnModuleDestroy {
       .build();
 
     tx.sign(escrowKeypair);
-    return this.server.submitTransaction(tx);
+    return tx.toXDR();
+  }
+
+  /**
+   * Builds, signs, and submits a payment transaction.
+   *
+   * When `paymentId` is provided (and the payments repository / retry queue
+   * were injected — see StellarModule), the signed XDR is persisted to
+   * `payments.signedXdr` before submission. If submission then fails with a
+   * transient Horizon timeout/connection error, a retry job is enqueued
+   * (RetryPaymentJob, up to 3 attempts with exponential backoff) and this
+   * method rethrows so the caller does not mistake a scheduled retry for a
+   * completed submission — the payment is left in its current (PENDING)
+   * status rather than marked FAILED, since a retry is in flight.
+   */
+  async sendPayment(
+    escrowSecret: string,
+    destination: string,
+    amount: string,
+    assetCode: string = 'XLM',
+    assetIssuer?: string,
+    paymentId?: string,
+  ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
+    this.logger.debug(
+      `sendPayment: destination=${destination} amount=${amount} asset=${assetCode}`,
+    );
+
+    const xdr = await this.buildSignedPaymentXdr(
+      escrowSecret,
+      destination,
+      amount,
+      assetCode,
+      assetIssuer,
+    );
+
+    if (paymentId && this.paymentsRepository) {
+      await this.paymentsRepository.update({ id: paymentId }, { signedXdr: xdr });
+    }
+
+    try {
+      const response = await this.submitTransaction(xdr);
+      if (paymentId && this.paymentsRepository) {
+        await this.paymentsRepository.update({ id: paymentId }, { signedXdr: null });
+      }
+      return response;
+    } catch (err) {
+      if (paymentId && this.paymentRetryQueue && isHorizonTimeoutError(err)) {
+        this.logger.warn(
+          `sendPayment: Horizon timeout for payment ${paymentId}; enqueuing retry`,
+        );
+        await this.paymentRetryQueue.add('retry', { paymentId });
+      }
+      throw err;
+    }
   }
 
   /**
@@ -389,6 +519,28 @@ export class StellarService implements OnModuleDestroy {
       .build();
 
     return tx.toXDR();
+  }
+
+  /**
+   * Build a pathPaymentStrictReceive operation (without wrapping in a full transaction).
+   * Useful when composing multi-operation transactions on the client side.
+   */
+  buildPathPaymentOp(params: {
+    sourceAsset: Asset;
+    sendMax: string;
+    destPublicKey: string;
+    destAsset: Asset;
+    destAmount: string;
+    path: Asset[];
+  }): ReturnType<typeof Operation.pathPaymentStrictReceive> {
+    return Operation.pathPaymentStrictReceive({
+      sendAsset: params.sourceAsset,
+      sendMax: params.sendMax,
+      destination: params.destPublicKey,
+      destAsset: params.destAsset,
+      destAmount: params.destAmount,
+      path: params.path,
+    });
   }
 
   async buildTicketTransferXdr(params: {
@@ -554,23 +706,124 @@ export class StellarService implements OnModuleDestroy {
   /**
    * Transfer a ticket asset to a new owner on the Stellar network.
    *
-   * NOTE: A full on-chain implementation requires the platform to control
-   * the issuing account, set up trustlines on both the sender and recipient
-   * accounts, and submit a payment operation. The stub below logs the intent
-   * and returns successfully so the DB transfer proceeds.
+   * Flow:
+   *  1. Load the recipient account and check whether it already trusts the
+   *     ticket asset. If not, return a changeTrust XDR the recipient must
+   *     sign and submit first.
+   *  2. Build a payment transaction from the platform issuer account to the
+   *     recipient for the non-divisible ticket asset, sign it with the
+   *     platform secret, and submit.
    *
-   * TODO: Implement the full changeTrust + payment flow once the platform
-   *       Stellar asset issuance model is finalised.
+   * @param ticket            Ticket record (must include assetCode)
+   * @param recipientPublicKey  Stellar public key of the new owner
+   * @returns An object with the on-chain transaction hash, and optionally
+   *          a `trustlineXdr` the recipient must submit first if they
+   *          didn't already trust the asset.
    */
   async transferTicketAsset(
     ticket: { id: string; assetCode: string; ownerId: string },
     recipientPublicKey: string,
-  ): Promise<void> {
+  ): Promise<{ txHash: string; trustlineXdr?: string }> {
     this.logger.log(
       `transferTicketAsset: ticket=${ticket.id} asset=${ticket.assetCode} ` +
-        `from ownerId=${ticket.ownerId} to recipientPublicKey=${recipientPublicKey}`,
+        `to recipient=${recipientPublicKey}`,
     );
-    // Stub — full on-chain transfer deferred pending asset issuance model design.
+
+    const issuerSecret = this.configService.get<string>(
+      'PLATFORM_SECRET_KEY',
+    );
+    if (!issuerSecret) {
+      throw new InternalServerErrorException(
+        'PLATFORM_SECRET_KEY is not configured — cannot sign ticket asset transfer.',
+      );
+    }
+
+    const issuerKeypair = Keypair.fromSecret(issuerSecret);
+    const issuerPublicKey = issuerKeypair.publicKey();
+
+    // ── 1. Build the ticket asset (issued by the platform) ────────────────
+    const ticketAsset = new Asset(ticket.assetCode, issuerPublicKey);
+
+    // ── 2. Check recipient trustline ──────────────────────────────────────
+    let recipientTrustsAsset = false;
+    let recipientAccount: Horizon.AccountResponse;
+    try {
+      recipientAccount = await this.server.loadAccount(recipientPublicKey);
+      recipientTrustsAsset = recipientAccount.balances.some(
+        (b) =>
+          b.asset_type !== 'native' &&
+          'asset_code' in b &&
+          b.asset_code === ticket.assetCode &&
+          'asset_issuer' in b &&
+          b.asset_issuer === issuerPublicKey,
+      );
+    } catch {
+      throw new BadRequestException(
+        `Recipient account "${recipientPublicKey}" could not be loaded from Horizon.`,
+      );
+    }
+
+    let trustlineXdr: string | undefined;
+
+    if (!recipientTrustsAsset) {
+      // Build a changeTrust XDR for the recipient to sign & submit
+      const trustlineTx = new TransactionBuilder(recipientAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(
+          Operation.changeTrust({
+            asset: ticketAsset,
+            limit: '1', // NFT — non-divisible, max supply 1
+          }),
+        )
+        .setTimeout(30)
+        .build();
+
+      trustlineXdr = trustlineTx.toXDR();
+    }
+
+    // ── 3. Build + sign the payment from issuer to recipient ──────────────
+    //    The issuer account sends the ticket asset (1 unit, non-divisible)
+    //    to the recipient.  The issuer must have previously issued this
+    //    asset by sending a payment from their own account.
+    const issuerAccount = await this.server.loadAccount(issuerPublicKey);
+
+    const paymentTx = new TransactionBuilder(issuerAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: recipientPublicKey,
+          asset: ticketAsset,
+          amount: '0.0000001', // Stellar NFT — minimum non-divisible amount
+        }),
+      )
+      .setTimeout(30)
+      .build();
+
+    paymentTx.sign(issuerKeypair);
+
+    const response = await this.server.submitTransaction(paymentTx);
+
+    if (!response.successful) {
+      const errCode =
+        (response as { extras?: { result_codes?: { transaction?: string } } })
+          .extras?.result_codes?.transaction ?? 'unknown';
+      throw new InternalServerErrorException(
+        `Stellar ticket transfer failed (code: ${errCode}).`,
+      );
+    }
+
+    this.logger.log(
+      `transferTicketAsset: ticket=${ticket.id} transferred on-chain txHash=${response.hash}`,
+    );
+
+    return {
+      txHash: response.hash,
+      ...(trustlineXdr && { trustlineXdr }),
+    };
   }
 
   onModuleDestroy(): void {

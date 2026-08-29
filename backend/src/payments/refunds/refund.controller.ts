@@ -26,15 +26,23 @@ import {
   CalculateRefundAmountDto,
   CreateRefundDisputeDto,
   RefundDisputeDto,
+  FileDisputeClaimDto,
+  AssignArbitratorsDto,
+  ResolveDisputeRefundDto,
+  DisputeArbitrationDto,
 } from './dto';
 import { RefundService } from './refund.service';
+import { DisputeArbitrationService } from './arbitration.service';
 
 @ApiTags('Refunds')
 @ApiBearerAuth()
 @Controller('refunds')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RefundController {
-  constructor(private readonly refundService: RefundService) {}
+  constructor(
+    private readonly refundService: RefundService,
+    private readonly arbitrationService: DisputeArbitrationService,
+  ) {}
 
   @Post('event/:eventId')
   @Roles(Role.ADMIN)
@@ -50,7 +58,7 @@ export class RefundController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Event not found' })
   refundEvent(@Param('eventId') eventId: string): Promise<RefundResultDto[]> {
-    return this.refundService.refundEvent(eventId);
+    return this.refundService.refundAllForEvent(eventId);
   }
 
   @Post('automatic')
@@ -114,6 +122,8 @@ export class RefundController {
     return this.refundService.getMyRefunds(req.user.id, paginationDto);
   }
 
+  // ── Existing dispute endpoints ──────────────────────────────────────────
+
   @Post('disputes')
   @ApiOperation({ summary: 'File a refund dispute' })
   fileDispute(
@@ -144,5 +154,72 @@ export class RefundController {
       body.resolutionNotes,
       req.user.id,
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ARBITRATION ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════════════
+
+  @Post('arbitration/claims')
+  @ApiOperation({
+    summary: 'File a dispute claim for arbitration',
+    description:
+      'Authenticated. Files a dispute claim when an event is falsely described or cancelled.',
+  })
+  fileDisputeClaim(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: FileDisputeClaimDto,
+  ): Promise<DisputeArbitrationDto> {
+    return this.arbitrationService.fileDisputeClaim(dto, req.user.id);
+  }
+
+  @Post('arbitration/assign')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Assign arbitrators to a dispute',
+    description: 'Admin-only. Assigns one or more arbitrators to review a dispute claim.',
+  })
+  assignArbitrators(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: AssignArbitratorsDto,
+  ): Promise<DisputeArbitrationDto> {
+    return this.arbitrationService.assignDisputeArbitrators(dto, req.user.id);
+  }
+
+  @Post('arbitration/:disputeId/resolve')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Resolve a dispute with a refund verdict',
+    description:
+      'Admin-only. Resolves a dispute based on arbitrator verdict, optionally issuing a refund.',
+  })
+  resolveArbitration(
+    @Param('disputeId') disputeId: string,
+    @Body() dto: ResolveDisputeRefundDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<DisputeArbitrationDto> {
+    return this.arbitrationService.resolveDisputeRefund(disputeId, dto, req.user.id);
+  }
+
+  @Get('arbitration/:disputeId')
+  @ApiOperation({
+    summary: 'Get dispute arbitration details',
+    description: 'Authenticated. Returns full details of a dispute arbitration.',
+  })
+  getArbitration(
+    @Param('disputeId') disputeId: string,
+  ): Promise<DisputeArbitrationDto> {
+    return this.arbitrationService.getDisputeById(disputeId);
+  }
+
+  @Get('arbitration/me')
+  @ApiOperation({
+    summary: 'Get my filed dispute arbitrations',
+    description: 'Authenticated. Returns all dispute arbitrations filed by the current user.',
+  })
+  getMyArbitrations(
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.arbitrationService.getDisputesForUser(req.user.id);
   }
 }

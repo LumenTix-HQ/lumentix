@@ -1,7 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
-import { Event, EventCategory } from '../events/entities/event.entity';
+import {
+  Repository,
+  Between,
+  FindOptionsWhere,
+  In,
+  LessThan,
+  MoreThan,
+  Not,
+} from 'typeorm';
+import { Event, EventCategory, EventStatus } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { Registration } from '../registrations/entities/registration.entity';
@@ -43,6 +51,48 @@ export interface AttendanceImpactPrediction {
   };
   riskFactors: string[];
   opportunities: string[];
+}
+
+/** A single overlapping booking found at the same venue. */
+export interface ScheduleConflict {
+  eventId: string;
+  title: string;
+  startDate: Date;
+  endDate: Date;
+  /** The overlapping window itself, not the conflicting event's full range. */
+  overlap: {
+    start: Date;
+    end: Date;
+    hours: number;
+  };
+  /** `full` when one booking is wholly inside the other. */
+  severity: 'partial' | 'full';
+}
+
+export interface ScheduleConflictReport {
+  hasConflict: boolean;
+  venue: string;
+  requestedSlot: {
+    startDate: Date;
+    endDate: Date;
+  };
+  conflicts: ScheduleConflict[];
+}
+
+export interface AlternativeSlot {
+  startDate: Date;
+  endDate: Date;
+  /** Signed hours from the requested start; negative means earlier. */
+  shiftHours: number;
+  reason: string;
+}
+
+export interface ConflictResolution {
+  outcome: 'no_conflict' | 'alternative_available' | 'unresolved';
+  conflicts: ScheduleConflict[];
+  recommendedSlot: AlternativeSlot | null;
+  alternatives: AlternativeSlot[];
+  reasoning: string[];
 }
 
 @Injectable()
@@ -99,6 +149,257 @@ export class SchedulingService {
         competitionAnalysis,
         demographicInsights,
       ),
+    };
+  }
+
+  /**
+   * Find bookings that overlap `[startDate, endDate)` at the same venue.
+   *
+   * Two bookings overlap when each starts before the other ends. Touching
+   * slots do not conflict — an event ending at 18:00 and one starting at
+   * 18:00 share a boundary, not a window. Draft and cancelled events are
+   * ignored because neither holds the venue.
+   */
+  async detectScheduleConflict(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    excludeEventId?: string,
+  ): Promise<ScheduleConflictReport> {
+    if (!(startDate instanceof Date) || !(endDate instanceof Date)) {
+      throw new BadRequestException('startDate and endDate must be dates');
+    }
+    if (endDate.getTime() <= startDate.getTime()) {
+      throw new BadRequestException('endDate must be after startDate');
+    }
+
+    const where: FindOptionsWhere<Event> = {
+      location: venue,
+      status: In([EventStatus.PUBLISHED, EventStatus.COMPLETED]),
+      startDate: LessThan(endDate),
+      endDate: MoreThan(startDate),
+    };
+    if (excludeEventId) {
+      where.id = Not(excludeEventId);
+    }
+
+    const overlapping = await this.eventRepository.find({
+      where,
+      order: { startDate: 'ASC' },
+    });
+
+    const conflicts = overlapping.map((event) =>
+      this.describeConflict(event, startDate, endDate),
+    );
+
+    if (conflicts.length > 0) {
+      this.logger.warn(
+        `Venue "${venue}" has ${conflicts.length} conflicting booking(s) for the requested slot`,
+      );
+    }
+
+    return {
+      hasConflict: conflicts.length > 0,
+      venue,
+      requestedSlot: { startDate, endDate },
+      conflicts,
+    };
+  }
+
+  /**
+   * Walk outwards from the requested slot in `stepHours` increments and return
+   * the first `limit` windows the venue is actually free for.
+   *
+   * Slots are probed in alternating order — one step later, one step earlier,
+   * two later, two earlier — so the closest alternative to what the organizer
+   * originally wanted is always first, in either direction. Only the venue's
+   * own bookings are fetched, once, and overlap is then checked in memory.
+   */
+  async suggestAlternativeSlots(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    options: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    } = {},
+  ): Promise<AlternativeSlot[]> {
+    const limit = options.limit ?? 3;
+    const stepHours = options.stepHours ?? 24;
+    const searchWindowDays = options.searchWindowDays ?? 14;
+
+    if (endDate.getTime() <= startDate.getTime()) {
+      throw new BadRequestException('endDate must be after startDate');
+    }
+    if (limit <= 0 || stepHours <= 0 || searchWindowDays <= 0) {
+      throw new BadRequestException(
+        'limit, stepHours and searchWindowDays must all be positive',
+      );
+    }
+
+    const durationMs = endDate.getTime() - startDate.getTime();
+    const windowMs = searchWindowDays * 24 * 60 * 60 * 1000;
+
+    const where: FindOptionsWhere<Event> = {
+      location: venue,
+      status: In([EventStatus.PUBLISHED, EventStatus.COMPLETED]),
+      startDate: LessThan(new Date(endDate.getTime() + windowMs)),
+      endDate: MoreThan(new Date(startDate.getTime() - windowMs)),
+    };
+    if (options.excludeEventId) {
+      where.id = Not(options.excludeEventId);
+    }
+    const nearby = await this.eventRepository.find({ where });
+
+    const stepMs = stepHours * 60 * 60 * 1000;
+    const maxSteps = Math.floor(windowMs / stepMs);
+    const found: AlternativeSlot[] = [];
+
+    for (let step = 1; step <= maxSteps && found.length < limit; step++) {
+      for (const direction of [1, -1]) {
+        if (found.length >= limit) break;
+
+        const shiftMs = direction * step * stepMs;
+        const candidateStart = new Date(startDate.getTime() + shiftMs);
+        const candidateEnd = new Date(candidateStart.getTime() + durationMs);
+
+        // Never propose a slot in the past — it cannot be booked.
+        if (candidateStart.getTime() <= Date.now()) continue;
+
+        const clashes = nearby.some((event) =>
+          this.overlaps(event, candidateStart, candidateEnd),
+        );
+        if (clashes) continue;
+
+        const shiftHours = shiftMs / (60 * 60 * 1000);
+        found.push({
+          startDate: candidateStart,
+          endDate: candidateEnd,
+          shiftHours,
+          reason:
+            direction > 0
+              ? `Venue is free ${Math.abs(shiftHours)}h after the requested slot`
+              : `Venue is free ${Math.abs(shiftHours)}h before the requested slot`,
+        });
+      }
+    }
+
+    return found;
+  }
+
+  /**
+   * Detect conflicts for a slot and, if there are any, pick the nearest free
+   * alternative.
+   *
+   * This reports a plan rather than moving anything: the venue is a shared
+   * resource and rescheduling someone's event is the organizer's call, not a
+   * side effect of asking whether a slot is clear.
+   */
+  async resolveConflict(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    options: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    } = {},
+  ): Promise<ConflictResolution> {
+    const report = await this.detectScheduleConflict(
+      venue,
+      startDate,
+      endDate,
+      options.excludeEventId,
+    );
+
+    if (!report.hasConflict) {
+      return {
+        outcome: 'no_conflict',
+        conflicts: [],
+        recommendedSlot: null,
+        alternatives: [],
+        reasoning: [`Venue "${venue}" is free for the requested slot`],
+      };
+    }
+
+    const alternatives = await this.suggestAlternativeSlots(
+      venue,
+      startDate,
+      endDate,
+      options,
+    );
+
+    const reasoning = report.conflicts.map(
+      (conflict) =>
+        `Overlaps "${conflict.title}" for ${conflict.overlap.hours}h (${conflict.severity} overlap)`,
+    );
+
+    if (alternatives.length === 0) {
+      reasoning.push(
+        `No free slot found within ${options.searchWindowDays ?? 14} days of the requested time`,
+      );
+      return {
+        outcome: 'unresolved',
+        conflicts: report.conflicts,
+        recommendedSlot: null,
+        alternatives: [],
+        reasoning,
+      };
+    }
+
+    reasoning.push(alternatives[0].reason);
+
+    return {
+      outcome: 'alternative_available',
+      conflicts: report.conflicts,
+      recommendedSlot: alternatives[0],
+      alternatives,
+      reasoning,
+    };
+  }
+
+  private overlaps(event: Event, start: Date, end: Date): boolean {
+    return (
+      new Date(event.startDate).getTime() < end.getTime() &&
+      new Date(event.endDate).getTime() > start.getTime()
+    );
+  }
+
+  private describeConflict(
+    event: Event,
+    start: Date,
+    end: Date,
+  ): ScheduleConflict {
+    const eventStart = new Date(event.startDate);
+    const eventEnd = new Date(event.endDate);
+
+    const overlapStart = new Date(
+      Math.max(eventStart.getTime(), start.getTime()),
+    );
+    const overlapEnd = new Date(Math.min(eventEnd.getTime(), end.getTime()));
+    const overlapMs = Math.max(0, overlapEnd.getTime() - overlapStart.getTime());
+
+    const requestedInside =
+      eventStart.getTime() <= start.getTime() &&
+      eventEnd.getTime() >= end.getTime();
+    const existingInside =
+      start.getTime() <= eventStart.getTime() &&
+      end.getTime() >= eventEnd.getTime();
+
+    return {
+      eventId: event.id,
+      title: event.title,
+      startDate: eventStart,
+      endDate: eventEnd,
+      overlap: {
+        start: overlapStart,
+        end: overlapEnd,
+        hours: Math.round((overlapMs / (60 * 60 * 1000)) * 100) / 100,
+      },
+      severity: requestedInside || existingInside ? 'full' : 'partial',
     };
   }
 
@@ -221,15 +522,30 @@ export class SchedulingService {
       avgRevenue: data.count > 0 ? data.revenue / data.count : 0,
     }));
 
-    const bestMonth = monthlyAverages.reduce((best, current) => 
-      current.avgAttendance > best.avgAttendance ? current : best
-    );
-
     const consistency = this.calculateSeasonalConsistency(monthlyAverages);
+
+    // A brand new category/location pair has no history at all. `reduce` with
+    // no seed throws on an empty array, and `Math.max()` of nothing is
+    // -Infinity, so both need the empty case handled before they run.
+    if (monthlyAverages.length === 0) {
+      return {
+        bestMonth: null,
+        score: 0,
+        consistency,
+        monthlyData: monthlyAverages,
+      };
+    }
+
+    const bestMonth = monthlyAverages.reduce((best, current) =>
+      current.avgAttendance > best.avgAttendance ? current : best,
+    );
+    const peakAttendance = Math.max(
+      ...monthlyAverages.map((m) => m.avgAttendance),
+    );
 
     return {
       bestMonth: bestMonth.month,
-      score: bestMonth.avgAttendance / Math.max(...monthlyAverages.map(m => m.avgAttendance)),
+      score: peakAttendance > 0 ? bestMonth.avgAttendance / peakAttendance : 0,
       consistency,
       monthlyData: monthlyAverages,
     };

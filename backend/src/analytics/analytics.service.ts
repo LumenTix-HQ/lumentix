@@ -40,7 +40,15 @@ import {
   BusinessOutcomePredictionDto,
   MarketTrendsDto,
 } from './dto/bi-dashboard.dto';
+import {
+  RevenueDashboardDto,
+  CurrencyRevenue,
+  RevenueTimePoint,
+} from './dto/revenue-dashboard.dto';
 import { EventStatus } from '../events/entities/event.entity';
+import { MerchItem } from '../merch/entities/merch-item.entity';
+import { MerchReservation } from '../merch/entities/merch-reservation.entity';
+import { RevenueBreakdownRow, RevenueReportDto } from './dto/revenue-dashboard.dto';
 
 @Injectable()
 export class AnalyticsService {
@@ -59,6 +67,10 @@ export class AnalyticsService {
     private readonly ageVerificationRepository: Repository<AgeVerification>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(MerchItem)
+    private readonly merchItemRepository: Repository<MerchItem>,
+    @InjectRepository(MerchReservation)
+    private readonly merchReservationRepository: Repository<MerchReservation>,
   ) {}
 
   async generateSalesReport(
@@ -698,6 +710,162 @@ export class AnalyticsService {
       attendance,
       refunds,
     };
+  }
+
+  async getRevenueDashboard(
+    eventId: string,
+    organizerId: string,
+  ): Promise<RevenueDashboardDto> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) {
+      throw new NotFoundException(`Event with id "${eventId}" not found`);
+    }
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+
+    const confirmedPayments = await this.paymentRepository.find({
+      where: { eventId, status: PaymentStatus.CONFIRMED },
+      order: { createdAt: 'ASC' },
+    });
+
+    const totalRevenue = confirmedPayments.reduce(
+      (sum, p) => sum + Number(p.amount),
+      0,
+    );
+    const ticketCount = confirmedPayments.length;
+    const averagePrice = ticketCount > 0 ? totalRevenue / ticketCount : 0;
+
+    const currencyMap = new Map<string, { tickets: number; amount: number }>();
+    for (const payment of confirmedPayments) {
+      const currency = payment.currency || 'XLM';
+      const existing = currencyMap.get(currency) || { tickets: 0, amount: 0 };
+      existing.tickets += 1;
+      existing.amount += Number(payment.amount);
+      currencyMap.set(currency, existing);
+    }
+
+    const currencyBreakdown: CurrencyRevenue[] = Array.from(currencyMap.entries()).map(
+      ([currency, data]) => ({
+        currency,
+        ticketCount: data.tickets,
+        totalAmount: data.amount,
+        avgPrice: data.tickets > 0 ? data.amount / data.tickets : 0,
+      }),
+    );
+
+    const dailyMap = new Map<string, RevenueTimePoint>();
+    for (const payment of confirmedPayments) {
+      const day = payment.createdAt.toISOString().slice(0, 10);
+      const existing = dailyMap.get(day) || { date: day, ticketsSold: 0, revenue: 0 };
+      existing.ticketsSold += 1;
+      existing.revenue += Number(payment.amount);
+      dailyMap.set(day, existing);
+    }
+    const timeSeries = Array.from(dailyMap.values()).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+
+    return {
+      eventId,
+      totalRevenue,
+      ticketCount,
+      averagePrice,
+      currencyBreakdown,
+      timeSeries,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  async aggregate_revenue_data(
+    eventId: string,
+    organizerId: string,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<RevenueReportDto> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException(`Event with id "${eventId}" not found`);
+    if (event.organizerId !== organizerId) throw new ForbiddenException('You are not the organizer of this event.');
+
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+    if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime()))) {
+      throw new BadRequestException('Invalid revenue report date range');
+    }
+
+    const payments = await this.paymentRepository.find({ where: { eventId, status: PaymentStatus.CONFIRMED }, order: { createdAt: 'ASC' } });
+    const filteredPayments = payments.filter((payment) => (!start || payment.createdAt >= start) && (!end || payment.createdAt <= end));
+    const reservations = await this.merchReservationRepository.find({ where: { status: 'purchased' }, relations: ['merchItem'] });
+    const merchSales = reservations.filter((reservation) => reservation.merchItem?.eventId === eventId && (!start || (reservation.purchasedAt ?? reservation.reservedAt) >= start) && (!end || (reservation.purchasedAt ?? reservation.reservedAt) <= end));
+
+    const group = (rows: Array<{ name: string; amount: number }>): RevenueBreakdownRow[] => {
+      const grouped = new Map<string, RevenueBreakdownRow>();
+      for (const row of rows) {
+        const existing = grouped.get(row.name) ?? { name: row.name, quantity: 0, revenue: 0 };
+        existing.quantity += 1;
+        existing.revenue += row.amount;
+        grouped.set(row.name, existing);
+      }
+      return Array.from(grouped.values()).sort((a, b) => b.revenue - a.revenue);
+    };
+    const ticketRevenue = filteredPayments.filter((payment) => payment.productType !== 'merch').reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const merchRows = merchSales.map((reservation) => ({ name: reservation.merchItem.name, amount: Number(reservation.merchItem.price) }));
+    const merchRevenue = merchRows.reduce((sum, row) => sum + row.amount, 0);
+    const timeSeriesMap = new Map<string, RevenueTimePoint>();
+    for (const payment of filteredPayments) {
+      const date = payment.createdAt.toISOString().slice(0, 10);
+      const point = timeSeriesMap.get(date) ?? { date, ticketsSold: 0, revenue: 0 };
+      point.ticketsSold += payment.productType === 'merch' ? 0 : 1;
+      point.revenue += Number(payment.amount);
+      timeSeriesMap.set(date, point);
+    }
+    for (const reservation of merchSales) {
+      const date = (reservation.purchasedAt ?? reservation.reservedAt).toISOString().slice(0, 10);
+      const point = timeSeriesMap.get(date) ?? { date, ticketsSold: 0, revenue: 0 };
+      point.revenue += Number(reservation.merchItem.price);
+      timeSeriesMap.set(date, point);
+    }
+    return {
+      eventId, startDate: start?.toISOString() ?? null, endDate: end?.toISOString() ?? null,
+      totalRevenue: ticketRevenue + merchRevenue, ticketRevenue, merchRevenue,
+      ticketCount: filteredPayments.filter((payment) => payment.productType !== 'merch').length,
+      ticketTiers: group(filteredPayments.filter((payment) => payment.productType !== 'merch').map((payment) => ({ name: payment.ticketTier ?? 'Unspecified', amount: Number(payment.amount) }))),
+      promoCodes: group(filteredPayments.filter((payment) => payment.promoCode).map((payment) => ({ name: payment.promoCode as string, amount: Number(payment.amount) }))),
+      merchSales: group(merchRows),
+      timeSeries: Array.from(timeSeriesMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
+    };
+  }
+
+  generate_revenue_chart(report: RevenueReportDto): RevenueTimePoint[] {
+    return report.timeSeries;
+  }
+
+  async export_revenue_report(eventId: string, organizerId: string, format: 'csv' | 'pdf', startDate?: string, endDate?: string): Promise<{ contentType: string; filename: string; body: Buffer }> {
+    const report = await this.aggregate_revenue_data(eventId, organizerId, startDate, endDate);
+    if (format === 'csv') {
+      const rows = [['section', 'name', 'quantity', 'revenue'], ...[
+        ...report.ticketTiers.map((row) => ['ticket-tier', row.name, row.quantity, row.revenue]),
+        ...report.promoCodes.map((row) => ['promo-code', row.name, row.quantity, row.revenue]),
+        ...report.merchSales.map((row) => ['merch', row.name, row.quantity, row.revenue]),
+      ]];
+      const escape = (value: unknown) => `"${String(value).replace(/"/g, '""')}"`;
+      return { contentType: 'text/csv; charset=utf-8', filename: `revenue-${eventId}.csv`, body: Buffer.from(rows.map((row) => row.map(escape).join(',')).join('\n')) };
+    }
+    return new Promise((resolve, reject) => {
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ margin: 48 });
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      doc.on('end', () => resolve({ contentType: 'application/pdf', filename: `revenue-${eventId}.pdf`, body: Buffer.concat(chunks) }));
+      doc.on('error', reject);
+      doc.fontSize(20).text('Revenue report');
+      doc.moveDown().fontSize(11).text(`Event: ${eventId}`).text(`Total revenue: ${report.totalRevenue.toFixed(2)}`);
+      for (const [title, rows] of [['Ticket tiers', report.ticketTiers], ['Promo codes', report.promoCodes], ['Merch sales', report.merchSales] ] as const) {
+        doc.moveDown().fontSize(14).text(title);
+        rows.forEach((row) => doc.fontSize(10).text(`${row.name}: ${row.quantity} x ${row.revenue.toFixed(2)}`));
+      }
+      doc.end();
+    });
   }
 
   async generateBiDashboard(

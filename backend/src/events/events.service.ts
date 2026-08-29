@@ -11,7 +11,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder, In } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Event, EventStatus, EventCategory, EventAgeRestriction } from './entities/event.entity';
 import { EventSeries } from './entities/event-series.entity';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -41,14 +41,13 @@ import { EventImage } from './entities/event-image.entity';
 import { EventHistory } from './entities/event-history.entity';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
-import { HistoricalAnalysisDto } from './dto/historical-analysis.dto';
+import { buildListEventsOptions } from './build-list-events-options';
 
 export interface PaginatedResult<T> {
   data: T[];
   total: number;
   page: number;
   limit: number;
-  totalPages: number;
 }
 
 export type EventWithCapacity = Event & {
@@ -262,7 +261,7 @@ export class EventsService {
     const remainingCapacity =
       event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
 
-    const result: EventWithCapacity = {
+    const result = {
       ...event,
       soldTickets,
       remainingCapacity,
@@ -274,63 +273,20 @@ export class EventsService {
   }
 
   async listEvents(filterDto: ListEventsDto): Promise<PaginatedResult<EventWithCapacity>> {
-    const { status, organizerId, search, category, showAvailableOnly, page = 1, limit = 10 } = filterDto;
-    const qb: SelectQueryBuilder<Event> = this.eventRepository
-      .createQueryBuilder('event')
-      .leftJoin(
-        (subQb) =>
-          subQb
-            .select('t.eventId', 'eventId')
-            .addSelect('COUNT(*)', 'soldCount')
-            .from(TicketEntity, 't')
-            .where("t.status = 'valid'")
-            .groupBy('t.eventId'),
-        'ticket_counts',
-        'ticket_counts."eventId" = event.id',
-      )
-      .addSelect('COALESCE(ticket_counts."soldCount"::int, 0)', 'soldTickets');
-    if (status) qb.andWhere('event.status = :status', { status });
-    if (organizerId)
-      qb.andWhere('event.organizerId = :organizerId', { organizerId });
-    if (search) {
-      qb.andWhere('event.search_vector @@ plainto_tsquery(:search)', { search });
-      qb.addSelect(
-        "ts_rank(event.search_vector, plainto_tsquery(:search))",
-        'rank',
-      );
-      qb.orderBy('rank', 'DESC');
-    } else {
-      qb.orderBy('event.createdAt', 'DESC');
-    }
-    if (category) qb.andWhere('event.category = :category', { category });
-    if (filterDto.categoryIds) {
-      const ids = filterDto.categoryIds.split(',').filter(Boolean);
-      if (ids.length) {
-        qb.innerJoin('event.categories', 'cat', 'cat.id IN (:...ids)', { ids });
-      }
-    }
-    if (showAvailableOnly) {
-      qb.andWhere(
-        '(event.maxAttendees IS NULL OR COALESCE(ticket_counts."soldCount"::int, 0) < event.maxAttendees)',
-      );
-    }
-
-    if (search) {
-      // Rank by full-text relevance when a search term is present
-      qb.orderBy(
-        `ts_rank(to_tsvector('english', event.title || ' ' || COALESCE(event.description, '')), plainto_tsquery('english', :search2))`,
-        'DESC',
-      ).addOrderBy('event.createdAt', 'DESC');
-      qb.setParameter('search2', search);
-    } else {
-      qb.orderBy('event.createdAt', 'DESC');
-    }
-
-    qb.skip((page - 1) * limit).take(limit);
-
-    const [rawEvents, total] = await Promise.all([qb.getRawAndEntities(), qb.getCount()]);
-    const data: EventWithCapacity[] = rawEvents.entities.map((event, i) => {
-      const soldTickets = Number(rawEvents.raw[i]?.soldTickets ?? 0);
+    const page = filterDto.page ?? 1;
+    const limit = filterDto.limit ?? 20;
+    const [events, total] = await this.eventRepository.findAndCount(
+      buildListEventsOptions(filterDto),
+    );
+    const soldCounts = await Promise.all(
+      events.map((event) =>
+        this.ticketRepository.count({
+          where: { eventId: event.id, status: 'valid' },
+        }),
+      ),
+    );
+    const data: EventWithCapacity[] = events.map((event, i) => {
+      const soldTickets = soldCounts[i];
       const remainingCapacity =
         event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
       return {
@@ -340,7 +296,7 @@ export class EventsService {
         availableSpots: remainingCapacity,
       };
     });
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return { data, total, page, limit };
   }
 
   async getEventStats(id: string, callerId: string): Promise<EventStatsResponseDto> {
@@ -635,7 +591,71 @@ export class EventsService {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');
     if (event.organizerId !== organizerId) throw new ForbiddenException();
-    await Promise.all(dto.images.map(({ id, order }) => this.eventImageRepo.update(id, { order })));
+
+    if (!dto.images?.length) {
+      throw new BadRequestException('At least one image order entry is required');
+    }
+
+    // #860: validate before writing anything. Previously the updates fired as
+    // independent queries via Promise.all, so a payload with duplicate or
+    // missing order values was applied verbatim — leaving the gallery with two
+    // images claiming position 1 and an ordering the UI could not render
+    // deterministically.
+    const ids = dto.images.map((i) => i.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException('Duplicate image id in order payload');
+    }
+
+    const orders = dto.images.map((i) => i.order);
+    if (new Set(orders).size !== orders.length) {
+      throw new BadRequestException('Duplicate order value in order payload');
+    }
+
+    // Contiguous from 0: gaps make "order + 1" insertion ambiguous and let the
+    // sequence drift further apart with every reorder.
+    const sorted = [...orders].sort((a, b) => a - b);
+    const hasGap = sorted.some((value, index) => value !== index);
+    if (hasGap) {
+      throw new BadRequestException(
+        `Order values must be contiguous starting at 0 (received: ${sorted.join(', ')})`,
+      );
+    }
+
+    // Every id must belong to this event — otherwise an organizer could reorder
+    // images on an event they do not own by passing foreign ids.
+    const owned = await this.eventImageRepo.find({ where: { eventId } });
+    const ownedIds = new Set(owned.map((i) => i.id));
+    const foreign = ids.filter((id) => !ownedIds.has(id));
+    if (foreign.length > 0) {
+      throw new BadRequestException(`Image(s) do not belong to this event: ${foreign.join(', ')}`);
+    }
+
+    if (ids.length !== owned.length) {
+      throw new BadRequestException(
+        `Order payload must cover every image (expected ${owned.length}, received ${ids.length})`,
+      );
+    }
+
+    // Atomic: a partially-applied reorder is worse than a rejected one, since
+    // it leaves the gallery in a state the client never asked for.
+    await this.eventImageRepo.manager.transaction(async (manager) => {
+      for (const { id, order } of dto.images) {
+        await manager.update(EventImage, { id, eventId }, { order });
+      }
+    });
+  }
+
+  /**
+   * #860: images for an event, ordered for display.
+   *
+   * Exposed so `GET /events/:id` can include the gallery — the acceptance
+   * criterion — without callers needing a second round trip.
+   */
+  async getEventImages(eventId: string): Promise<EventImage[]> {
+    return this.eventImageRepo.find({
+      where: { eventId },
+      order: { order: 'ASC', createdAt: 'ASC' },
+    });
   }
 
   async deleteEventImage(eventId: string, imageId: string, organizerId: string): Promise<void> {

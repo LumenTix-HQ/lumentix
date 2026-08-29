@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f7;
+    }
+    .container {
+      max-width: 560px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .header {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      padding: 32px 24px;
+      text-align: center;
+    }
+    .header h1 {
+      color: #ffffff;
+      font-size: 22px;
+      margin: 0;
+      font-weight: 700;
+    }
+    .body {
+      padding: 24px;
+    }
+    .body p {
+      color: #374151;
+      font-size: 15px;
+      line-height: 1.6;
+      margin: 0 0 16px;
+    }
+    .event-details {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    .event-details h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      color: #111827;
+    }
+    .event-details .detail-row {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 6px;
+      font-size: 14px;
+      color: #4b5563;
+    }
+    .event-details .detail-row .label {
+      font-weight: 600;
+      min-width: 70px;
+      color: #6b7280;
+    }
+    .calendar-buttons {
+      margin-bottom: 20px;
+    }
+    .calendar-buttons .btn {
+      display: block;
+      width: 100%;
+      padding: 14px 20px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      text-align: center;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+      box-sizing: border-box;
+      transition: background 0.2s;
+    }
+    .btn-google {
+      background: #4285f4;
+      color: #ffffff;
+    }
+    .btn-outlook {
+      background: #0078d4;
+      color: #ffffff;
+    }
+    .btn-yahoo {
+      background: #6001d2;
+      color: #ffffff;
+    }
+    .btn-apple {
+      background: #000000;
+      color: #ffffff;
+    }
+    .btn-download {
+      background: #10b981;
+      color: #ffffff;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+    .divider {
+      text-align: center;
+      margin: 16px 0;
+      font-size: 13px;
+      color: #9ca3af;
+      position: relative;
+    }
+    .divider::before,
+    .divider::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 42%;
+      height: 1px;
+      background: #e5e7eb;
+    }
+    .divider::before { left: 0; }
+    .divider::after { right: 0; }
+    .footer {
+      padding: 20px 24px;
+      background: #f9fafb;
+      text-align: center;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🗓️ Save the Date</h1>
+    </div>
+
+    <div class="body">
+      <p>Hey there! You're registered for <strong>{{eventTitle}}</strong>. Add it to your calendar so you never miss it.</p>
+
+      <div class="event-details">
+        <h3>{{eventTitle}}</h3>
+        <div class="detail-row"><span class="label">Date:</span> <span>{{eventDate}}</span></div>
+        {{#if eventTime}}<div class="detail-row"><span class="label">Time:</span> <span>{{eventTime}}</span></div>{{/if}}
+        {{#if eventLocation}}<div class="detail-row"><span class="label">Location:</span> <span>{{eventLocation}}</span></div>{{/if}}
+        {{#if ticketId}}<div class="detail-row"><span class="label">Ticket:</span> <span>{{ticketId}}</span></div>{{/if}}
+      </div>
+
+      <div class="calendar-buttons">
+        {{#if googleUrl}}
+        <a href="{{googleUrl}}" target="_blank" class="btn btn-google">➕ Add to Google Calendar</a>
+        {{/if}}
+        {{#if outlookUrl}}
+        <a href="{{outlookUrl}}" target="_blank" class="btn btn-outlook">📅 Add to Outlook Calendar</a>
+        {{/if}}
+        {{#if yahooUrl}}
+        <a href="{{yahooUrl}}" target="_blank" class="btn btn-yahoo">📅 Add to Yahoo Calendar</a>
+        {{/if}}
+        {{#if icsDownloadUrl}}
+        <a href="{{icsDownloadUrl}}" target="_blank" class="btn btn-apple">🍎 Add to Apple Calendar</a>
+        {{/if}}
+      </div>
+    </div>
+
+    <div class="footer">
+      <p style="margin:0">You received this email because you purchased a ticket for {{eventTitle}} on Lumentix.</p>
+      <p style="margin:8px 0 0">© {{currentYear}} Lumentix. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>
+
+ 

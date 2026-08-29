@@ -31,8 +31,6 @@ export const createEventSchema = z
             .length(3, "Currency must be a 3-letter code")
             .transform((v) => v.toUpperCase()),
         status: z.enum(["draft", "published", "completed", "cancelled"]),
-        authToken: z.string().optional(),
-        walletPublicKey: z.string().optional(),
         sponsorshipEnabled: z.boolean(),
         sponsorTiers: z.array(sponsorTierSchema).default([]),
     })
@@ -86,8 +84,6 @@ export const defaultCreateEventValues: CreateEventFormInput = {
     ticketPrice: 0,
     currency: "USD",
     status: "draft",
-    authToken: "",
-    walletPublicKey: "",
     sponsorshipEnabled: false,
     sponsorTiers: [],
 };

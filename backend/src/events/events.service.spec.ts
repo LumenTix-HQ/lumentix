@@ -334,7 +334,7 @@ describe('EventsService', () => {
       expect(result.data).toHaveLength(1);
       expect(result.total).toBe(1);
       expect(result.page).toBe(1);
-      expect(result.totalPages).toBe(1);
+      expect(result.limit).toBe(10);
     });
 
     it('should filter by status', async () => {

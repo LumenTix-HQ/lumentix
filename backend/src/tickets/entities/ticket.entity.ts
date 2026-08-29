@@ -68,7 +68,14 @@ export class TicketEntity {
    * Each entry: { from: string; to: string; timestamp: string }
    */
   @Column({ type: 'jsonb', default: [] })
-  transferHistory!: Array<{ from: string; to: string; timestamp: string }>;
+  transferHistory!: Array<{
+    from: string;
+    to: string;
+    timestamp: string;
+    fromPublicKey?: string | null;
+    toPublicKey?: string | null;
+    transactionHash?: string | null;
+  }>;
 
   @CreateDateColumn()
   createdAt!: Date;

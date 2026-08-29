@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { WalletContextType, WalletState, WalletType, NetworkType } from '@/types/wallet';
 import { connectFreighter, isFreighterAvailable } from '@/lib/stellar/freighter';
+import { getConnector } from '@/lib/stellar/connectors';
 import { getNetwork } from '@stellar/freighter-api';
 import {
   saveWalletData,
@@ -88,22 +89,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     setShowInstallPrompt(false);
     try {
-      let publicKey: string;
-
-      switch (walletType) {
-        case WalletType.FREIGHTER:
-          publicKey = await connectFreighter(state.network);
-          break;
-
-        case WalletType.LOBSTR:
-          throw new Error('LOBSTR integration coming soon');
-
-        case WalletType.WALLET_CONNECT:
-          throw new Error('WalletConnect integration coming soon');
-
-        default:
-          throw new Error(`Unsupported wallet type: ${walletType}`);
-      }
+      const publicKey = await getConnector(walletType).connect(state.network);
 
       const next: WalletState = {
         ...state, isConnected: true, publicKey, walletType, isLoading: false, error: null,
@@ -133,10 +119,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, [state]);
 
   const disconnect = useCallback(() => {
+    const activeType = state.walletType;
+    if (activeType) {
+      // Tear down any wallet-side session (WalletConnect); best-effort.
+      getConnector(activeType).disconnect().catch(() => { /* non-fatal */ });
+    }
     clearWalletData();
     setNetworkMismatch(false);
     setState({ ...INITIAL });
-  }, []);
+  }, [state.walletType]);
 
   const switchNetwork = useCallback(async (network: NetworkType) => {
     if (!state.isConnected || !state.walletType) {
@@ -145,13 +136,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     try {
-      let publicKey: string;
-
-      if (state.walletType === WalletType.FREIGHTER) {
-        publicKey = await connectFreighter(network);
-      } else {
-        throw new Error('Network switching not supported for this wallet');
-      }
+      // Re-establish the connection on the requested network uniformly across
+      // all wallet types via their connector.
+      const publicKey = await getConnector(state.walletType).connect(network);
 
       const newState: WalletState = {
         ...state,
@@ -193,7 +180,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           : 'https://horizon-testnet.stellar.org',
       );
       const account = await server.loadAccount(state.publicKey);
-      const xlm = account.balances.find((b: any) => b.asset_type === 'native');
+      const xlm = account.balances.find(
+        (b: { asset_type: string; balance: string }) => b.asset_type === 'native',
+      );
       setState(prev => ({ ...prev, balance: xlm?.balance ?? '0' }));
     } catch { /* non-fatal */ }
   }, [state.publicKey, state.network]);

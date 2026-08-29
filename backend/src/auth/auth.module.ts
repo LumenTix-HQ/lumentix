@@ -17,6 +17,7 @@ import { WalletChallenge } from './entities/wallet-challenge.entity';
 import { RedisModule } from '../redis/redis.module';
 import { MailerModule } from '../mailer/mailer.module';
 import { AuditModule } from '../audit/audit.module';
+import { PasswordResetCleanupTask } from './tasks/password-reset-cleanup.task';
 import type { StringValue } from 'ms';
 
 @Module({
@@ -42,7 +43,14 @@ import type { StringValue } from 'ms';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, GoogleStrategy, BruteForceService, BruteForceGuard],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    GoogleStrategy,
+    BruteForceService,
+    BruteForceGuard,
+    PasswordResetCleanupTask,
+  ],
   exports: [BruteForceService, BruteForceGuard],
   controllers: [AuthController],
 })

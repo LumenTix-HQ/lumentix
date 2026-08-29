@@ -145,4 +145,17 @@ export class LoyaltyController {
   ) {
     return this.loyaltyService.applyTierDiscounts(req.user.id, eventId);
   }
+
+  // ── POST /loyalty/tier-status ───────────────────────────────────────────────
+
+  @Post('tier-status')
+  @ApiOperation({
+    summary: 'Evaluate tier status',
+    description:
+      'Re-evaluates the loyalty tier against the current points balance, applying promotion or demotion and notifying the user if it changed.',
+  })
+  @ApiResponse({ status: 201, description: 'Tier status evaluated' })
+  evaluateTierStatus(@Req() req: AuthenticatedRequest) {
+    return this.loyaltyService.evaluateTierStatus(req.user.id);
+  }
 }
