@@ -49,6 +49,10 @@ import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { MerchModule } from './merch/merch.module';
+import { UpgradeAuctionModule } from './upgrade-auction/upgrade-auction.module';
+import { MerchPreorderModule } from './merch-preorder/merch-preorder.module';
+import { PrivacyModule } from './privacy/privacy.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 import { TicketDesignModule } from './ticket-design/ticket-design.module';
 import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
@@ -151,6 +155,10 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     LoyaltyModule,
     TelemetryModule,
     MerchModule,
+    UpgradeAuctionModule,
+    MerchPreorderModule,
+    PrivacyModule,
+    CampaignsModule,
     TicketDesignModule,
     ScanAnalyticsModule,
     TermsOfServiceModule,
