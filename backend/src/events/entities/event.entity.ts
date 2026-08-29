@@ -8,7 +8,7 @@ import {
   JoinTable,
 } from 'typeorm';
 import { CancellationReason } from '../../payments/refunds/enums';
-import { Category } from '../../categories/entities/category.entity';
+import { CategoryEntity } from '../../categories/entities/category.entity';
 
 export enum EventStatus {
   DRAFT = 'draft',
@@ -137,9 +137,9 @@ export class Event {
    */
   @Column({ type: 'timestamp', nullable: true })
   cancelledAt: Date | null;
-  @ManyToMany(() => Category, (c) => c.events)
+  @ManyToMany(() => CategoryEntity, (c) => c.events)
   @JoinTable({ name: 'event_categories' })
-  categories: Category[];
+  categories: CategoryEntity[];
 
   /**
    * Timestamp when the escrow account was merged (closed) after a full refund.
