@@ -35,8 +35,20 @@ export class Seat {
   })
   status: SeatStatus;
 
+  @Column({ type: 'decimal', precision: 18, scale: 7, default: 0 })
+  price: number;
+
+  @Column({ type: 'varchar', length: 32, default: 'General' })
+  pricingTier: string;
+
+  @Column({ type: 'boolean', default: false })
+  obstructedView: boolean;
+
   @Column({ type: 'varchar', nullable: true })
   heldBy: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  holdExpiresAt: Date | null;
 
   @CreateDateColumn()
   createdAt: Date;

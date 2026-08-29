@@ -1,8 +1,15 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToMany } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToMany,
+} from 'typeorm';
 import { Event } from '../../events/entities/event.entity';
 
 @Entity('categories')
-export class Category {
+export class CategoryEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -12,12 +19,22 @@ export class Category {
   @Column({ unique: true })
   slug: string;
 
-  @Column({ type: 'text', nullable: true })
-  description: string | null;
-
   @Column({ nullable: true })
-  iconUrl: string | null;
+  iconUrl: string;
 
+  @Column({ default: true })
+  isActive: boolean;
+
+  /**
+   * Inverse side of `Event.categories`. The owning side already declares the
+   * `event_categories` join table, so this adds no schema of its own.
+   */
   @ManyToMany(() => Event, (event) => event.categories)
   events: Event[];
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

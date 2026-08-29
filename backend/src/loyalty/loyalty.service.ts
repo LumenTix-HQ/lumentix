@@ -18,6 +18,7 @@ import {
 } from './entities/loyalty-discount.entity';
 import { AwardPointsDto } from './dto/award-points.dto';
 import { RedeemPointsDto } from './dto/redeem-points.dto';
+import { NotificationService } from '../notifications/notification.service';
 
 /** Points awarded per confirmed event attendance */
 export const POINTS_PER_ATTENDANCE = 100;
@@ -47,6 +48,7 @@ export class LoyaltyService {
     @InjectRepository(LoyaltyDiscount)
     private readonly discountRepo: Repository<LoyaltyDiscount>,
     private readonly dataSource: DataSource,
+    private readonly notificationService: NotificationService,
   ) {}
 
   // ── Award Loyalty Points ───────────────────────────────────────────────────
@@ -286,6 +288,15 @@ export class LoyaltyService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
   async expireInactivePoints(): Promise<void> {
+    await this.expireStalePoints();
+  }
+
+  /**
+   * Expires points for accounts that have been inactive for
+   * INACTIVITY_EXPIRY_MONTHS, then re-evaluates their tier status so
+   * demotions triggered by the expiry are detected and notified.
+   */
+  async expireStalePoints(): Promise<void> {
     const cutoff = new Date();
     cutoff.setMonth(cutoff.getMonth() - INACTIVITY_EXPIRY_MONTHS);
 
@@ -329,9 +340,79 @@ export class LoyaltyService {
         });
         await em.save(LoyaltyTransaction, tx);
       });
+
+      await this.evaluateTierStatus(account.userId);
     }
 
     this.logger.log(`Points expiry job completed for ${toExpire.length} accounts`);
+  }
+
+  // ── Evaluate Tier Status (promotion / demotion) ────────────────────────────
+
+  /**
+   * Evaluates a user's tier against their current points balance and
+   * persists the result. Unlike calculateTier() (used for lifetime-earned
+   * display purposes), this is based on the active balance so it supports
+   * demotion when points expire or are redeemed away.
+   */
+  async evaluateTierStatus(userId: string): Promise<{
+    userId: string;
+    previousTier: string;
+    currentTier: string;
+    changed: boolean;
+  }> {
+    const account = await this.accountRepo.findOne({ where: { userId } });
+
+    if (!account) {
+      return {
+        userId,
+        previousTier: 'Bronze',
+        currentTier: 'Bronze',
+        changed: false,
+      };
+    }
+
+    const previousTier = account.currentTier;
+    const evaluatedTier = this.calculateTier(account.pointsBalance).name;
+    const changed = evaluatedTier !== previousTier;
+
+    if (changed) {
+      account.currentTier = evaluatedTier;
+      await this.accountRepo.save(account);
+      await this.notifyTierChange(userId, previousTier, evaluatedTier);
+    }
+
+    return {
+      userId,
+      previousTier,
+      currentTier: evaluatedTier,
+      changed,
+    };
+  }
+
+  // ── Notify Tier Change ──────────────────────────────────────────────────────
+
+  /**
+   * Queues a notification informing the user their loyalty tier changed
+   * (promotion or demotion). Failures are logged and swallowed so they
+   * never block the tier evaluation that triggered them.
+   */
+  async notifyTierChange(
+    userId: string,
+    previousTier: string,
+    newTier: string,
+  ): Promise<void> {
+    try {
+      await this.notificationService.queueTierChangeEmail({
+        userId,
+        previousTier,
+        newTier,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to queue tier change notification for user ${userId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   // ── Award Points on Event Attendance (internal helper) ────────────────────
@@ -359,6 +440,8 @@ export class LoyaltyService {
       );
     }
   }
+
+  // ── Private Helpers ────────────────────────────────────────────────────────
 
   // ── Calculate Loyalty Points ────────────────────────────────────────────────
 

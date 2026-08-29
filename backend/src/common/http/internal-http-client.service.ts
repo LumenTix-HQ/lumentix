@@ -77,7 +77,13 @@ export class InternalHttpClientService {
     extra?: Record<string, string>,
   ): Record<string, string> {
     const timestamp = String(Date.now());
-    const secret = process.env.INTERNAL_SECRET ?? 'change_me_in_production';
+    const secret = process.env.INTERNAL_SECRET;
+    if (!secret) {
+      throw new Error(
+        'INTERNAL_SECRET environment variable is not set. ' +
+        'Internal HTTP service cannot sign requests without it.',
+      );
+    }
 
     const signature = createHmac('sha256', secret)
       .update(`${timestamp}:${rawBody}`)

@@ -95,6 +95,28 @@ export class User {
     minRefundAmount?: number | null;
   } | null;
 
+  /**
+   * Per-channel, per-category notification opt-in/out.
+   * Shape: { push: { <category>: boolean }, email: {...}, sms: {...}, in_app: {...} }
+   * A missing category for a channel defaults to enabled.
+   */
+  @Column({
+    type: 'jsonb',
+    default: { push: {}, email: {}, sms: {}, in_app: {} },
+  })
+  channelNotificationPreferences: Record<string, Record<string, boolean>>;
+
+  /**
+   * Quiet hours during which non-critical notifications are suppressed.
+   * `start`/`end` are "HH:mm" in the given IANA `timezone`; an overnight
+   * range (start > end) wraps past midnight.
+   */
+  @Column({
+    type: 'jsonb',
+    default: { enabled: false, start: '22:00', end: '08:00', timezone: 'UTC' },
+  })
+  quietHours: { enabled: boolean; start: string; end: string; timezone: string };
+
   @CreateDateColumn()
   createdAt: Date;
 
@@ -118,4 +140,42 @@ export class User {
 
   @Column({ nullable: true })
   logoUrl: string;
+
+  /**
+   * MFA configuration for organizers and admins.
+   * mfaEnabled: Whether MFA is currently active
+   * mfaMethod: 'totp' | 'sms' | null (method used for MFA)
+   * totpSecret: Base32-encoded TOTP secret (encrypted in DB)
+   * phoneNumber: SMS phone number for MFA (encrypted in DB, only populated if SMS is used)
+   * backupCodes: Array of backup codes for account recovery
+   * mfaVerifiedAt: Timestamp of last MFA verification
+   */
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    default: null,
+  })
+  mfaConfig: {
+    enabled?: boolean;
+    method?: 'totp' | 'sms' | null;
+    totpSecret?: string;
+    phoneNumber?: string;
+    backupCodes?: string[];
+    verifiedAt?: string;
+  } | null;
+
+  /**
+   * Active MFA sessions with their creation and last verified timestamps
+   */
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    default: null,
+  })
+  mfaSessions: Array<{
+    sessionId: string;
+    createdAt: string;
+    verifiedAt: string;
+    method: 'totp' | 'sms';
+  }> | null;
 }

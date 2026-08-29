@@ -15,9 +15,12 @@ interface MobileDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   navLinks: NavLink[];
+  isAuthenticated?: boolean;
+  user?: { email?: string | null; role?: string | null } | null;
+  onLogout?: () => void;
 }
 
-const MobileDrawer = ({ isOpen, onClose, navLinks }: MobileDrawerProps) => {
+const MobileDrawer = ({ isOpen, onClose, navLinks, isAuthenticated, user, onLogout }: MobileDrawerProps) => {
   const pathname = usePathname();
 
   useEffect(() => {
@@ -75,9 +78,53 @@ const MobileDrawer = ({ isOpen, onClose, navLinks }: MobileDrawerProps) => {
               {link.name}
             </Link>
           ))}
+          {isAuthenticated && (
+            <Link
+              href="/profile"
+              onClick={onClose}
+              className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                isActive("/profile")
+                  ? "text-white bg-white/10"
+                  : "text-gray-400 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              Profile
+            </Link>
+          )}
         </div>
 
         <div className="p-4 border-t border-white/10 space-y-3">
+          {isAuthenticated ? (
+            <>
+              <div className="px-4 py-2 rounded-lg bg-white/5">
+                <p className="text-sm text-white font-medium truncate">{user?.email}</p>
+                <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+              </div>
+              <button
+                onClick={() => { onLogout?.(); onClose(); }}
+                className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-white/5 rounded-lg transition-colors"
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <div className="flex gap-2">
+              <Link
+                href="/login"
+                onClick={onClose}
+                className="flex-1 text-center px-3 py-2 text-sm font-medium text-gray-300 hover:text-white border border-white/10 rounded-lg transition-colors"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/register"
+                onClick={onClose}
+                className="flex-1 text-center px-3 py-2 text-sm font-medium text-white bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+              >
+                Sign up
+              </Link>
+            </div>
+          )}
           <NetworkSwitcher />
           <WalletButton />
         </div>

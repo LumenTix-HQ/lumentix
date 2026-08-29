@@ -1,12 +1,15 @@
 'use client';
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useWallet } from "@/contexts/WalletContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { NetworkSwitcher } from "@/components/NetworkSwitcher";
 import { WalletButton } from "@/components/WalletButton";
 import MobileDrawer from "@/components/MobileDrawer";
+import LocaleSwitcher from "@/components/LocaleSwitcher";
 
 interface NavLink {
   name: string;
@@ -14,17 +17,22 @@ interface NavLink {
   requiresAuth?: boolean;
 }
 
-const navLinks: NavLink[] = [
-  { name: "Events", href: "/events" },
-  { name: "Create Event", href: "/create", requiresAuth: true },
-  { name: "My Tickets", href: "/profile" },
+const navLinkDefs: Array<{ key: "events" | "create" | "myTickets"; href: string; requiresAuth?: boolean }> = [
+  { key: "events", href: "/events" },
+  { key: "create", href: "/create", requiresAuth: true },
+  { key: "myTickets", href: "/my-tickets", requiresAuth: true },
 ];
 
 const Navbar = () => {
+  const t = useTranslations("Nav");
   const pathname = usePathname();
+  const router = useRouter();
   const { isConnected } = useWallet();
+  const { user, isAuthenticated, logout } = useAuth();
   const [isScrolled, setIsScrolled] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -34,14 +42,30 @@ const Navbar = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowProfileDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const isActive = (href: string) => {
     if (href === "/") return pathname === href;
     return pathname.startsWith(href);
   };
 
-  const visibleLinks = navLinks.filter(
-    (link) => !link.requiresAuth || isConnected
-  );
+  const visibleLinks: NavLink[] = navLinkDefs
+    .filter((link) => !link.requiresAuth || isAuthenticated)
+    .map((link) => ({ name: t(link.key), href: link.href, requiresAuth: link.requiresAuth }));
+
+  const handleLogout = () => {
+    logout();
+    setShowProfileDropdown(false);
+    router.push("/");
+  };
 
   return (
     <>
@@ -77,8 +101,68 @@ const Navbar = () => {
             </div>
 
             <div className="hidden md:flex items-center gap-4">
+              <LocaleSwitcher />
               <NetworkSwitcher />
               <WalletButton />
+              {isAuthenticated ? (
+                <div className="relative" ref={dropdownRef}>
+                  <button
+                    onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-xs font-bold">
+                      {user?.email?.charAt(0).toUpperCase() ?? "U"}
+                    </div>
+                    <span className="hidden lg:inline max-w-[120px] truncate">{user?.email}</span>
+                    <svg className={`w-4 h-4 transition-transform ${showProfileDropdown ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showProfileDropdown && (
+                    <div className="absolute right-0 top-full mt-2 w-48 bg-[#0a0a0f] border border-white/10 rounded-xl shadow-xl overflow-hidden">
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <p className="text-sm text-white font-medium truncate">{user?.email}</p>
+                        <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                      </div>
+                      <Link
+                        href="/profile"
+                        onClick={() => setShowProfileDropdown(false)}
+                        className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+                      >
+                        {t("profile")}
+                      </Link>
+                      <Link
+                        href="/my-tickets"
+                        onClick={() => setShowProfileDropdown(false)}
+                        className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
+                      >
+                        {t("myTickets")}
+                      </Link>
+                      <button
+                        onClick={handleLogout}
+                        className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-white/5 transition-colors"
+                      >
+                        {t("logout")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Link
+                    href="/login"
+                    className="px-3 py-1.5 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+                  >
+                    {t("login")}
+                  </Link>
+                  <Link
+                    href="/register"
+                    className="px-4 py-1.5 text-sm font-medium text-white bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+                  >
+                    {t("register")}
+                  </Link>
+                </div>
+              )}
             </div>
 
             <button
@@ -98,7 +182,12 @@ const Navbar = () => {
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         navLinks={visibleLinks}
+        isAuthenticated={isAuthenticated}
+        user={user}
+        onLogout={handleLogout}
       />
     </>
   );
 }
+
+export default Navbar;

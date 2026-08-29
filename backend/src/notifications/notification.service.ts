@@ -110,6 +110,35 @@ export class NotificationService {
     await this.notificationQueue.add('sendEventCompletedEmail', data, { attempts: 3 });
   }
 
+  async queueTierChangeEmail(data: {
+    userId: string;
+    previousTier: string;
+    newTier: string;
+  }) {
+    await this.notificationQueue.add('sendTierChangeEmail', data, { attempts: 3 });
+  }
+
+  async queueCalendarInvite(data: {
+    to: string;
+    eventTitle: string;
+    eventDescription?: string;
+    startDate: string;
+    endDate: string;
+    location?: string;
+    ticketId?: string;
+    organizerName?: string;
+    googleUrl: string;
+    outlookUrl: string;
+    yahooUrl: string;
+    icsDownloadUrl: string;
+  }) {
+    await this.notificationQueue.add('sendCalendarInvite', data, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: true,
+    });
+  }
+
   async queueLifecycleEmail(event: Event): Promise<void> {
     switch (event.status) {
       case EventStatus.PUBLISHED:

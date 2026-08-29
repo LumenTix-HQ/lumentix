@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
-import { REDIS_CLIENT } from '../redis/redis.module';
+import { REDIS_CLIENT } from '../redis/redis.provider';
 import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of } from 'rxjs';
 

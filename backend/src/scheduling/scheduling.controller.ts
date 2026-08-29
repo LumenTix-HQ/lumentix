@@ -18,6 +18,9 @@ import {
   AnalyzeOptimalTimingDto,
   SuggestEventScheduleDto,
   PredictAttendanceImpactDto,
+  DetectScheduleConflictDto,
+  SuggestAlternativeSlotsDto,
+  ResolveConflictDto,
 } from './dto/scheduling.dto';
 
 @ApiTags('scheduling')
@@ -65,6 +68,54 @@ export class SchedulingController {
       eventId,
       new Date(dto.newStartDate),
       new Date(dto.newEndDate),
+    );
+  }
+
+  @Post('detect-conflict')
+  @ApiOperation({ summary: 'Detect venue booking conflicts for a time slot' })
+  @ApiResponse({ status: 200, description: 'Conflict check completed' })
+  async detectScheduleConflict(@Body() dto: DetectScheduleConflictDto) {
+    return this.schedulingService.detectScheduleConflict(
+      dto.venue,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+      dto.excludeEventId,
+    );
+  }
+
+  @Post('alternative-slots')
+  @ApiOperation({ summary: 'Suggest free alternative slots at the same venue' })
+  @ApiResponse({ status: 200, description: 'Alternative slots generated' })
+  async suggestAlternativeSlots(@Body() dto: SuggestAlternativeSlotsDto) {
+    return this.schedulingService.suggestAlternativeSlots(
+      dto.venue,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+      {
+        limit: dto.limit,
+        stepHours: dto.stepHours,
+        searchWindowDays: dto.searchWindowDays,
+        excludeEventId: dto.excludeEventId,
+      },
+    );
+  }
+
+  @Post('resolve-conflict')
+  @ApiOperation({
+    summary: 'Detect conflicts and recommend the nearest free slot',
+  })
+  @ApiResponse({ status: 200, description: 'Conflict resolution generated' })
+  async resolveConflict(@Body() dto: ResolveConflictDto) {
+    return this.schedulingService.resolveConflict(
+      dto.venue,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+      {
+        limit: dto.limit,
+        stepHours: dto.stepHours,
+        searchWindowDays: dto.searchWindowDays,
+        excludeEventId: dto.excludeEventId,
+      },
     );
   }
 

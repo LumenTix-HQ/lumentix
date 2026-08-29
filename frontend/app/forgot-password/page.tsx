@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/contexts/ToastContext';
+import { apiPost } from '@/lib/api-client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+const RESEND_COOLDOWN_SECONDS = 60;
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Enter a valid email address'),
@@ -19,6 +20,7 @@ export default function ForgotPasswordPage() {
   const { toast } = useToast();
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [cooldown, setCooldown] = useState(0);
 
   const {
     register,
@@ -29,31 +31,32 @@ export default function ForgotPasswordPage() {
     resolver: zodResolver(forgotPasswordSchema),
   });
 
+  // Tick down the resend cooldown once a submission has been made
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
   const onSubmit = async (values: ForgotPasswordFormValues) => {
     setServerError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: values.email }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        // Don't reveal whether email exists - show generic message
-        setServerError(data?.message ?? 'An error occurred. Please try again.');
+      await apiPost('/auth/forgot-password', { email: values.email });
+    } catch {
+      // Swallow API errors so a rejected request can't reveal whether the
+      // email is registered - only surface genuine connectivity failures.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setServerError('Network error. Please check your connection and try again.');
         return;
       }
-
-      // Success - show confirmation but don't reveal if email exists
-      setIsSubmitted(true);
-      toast.success('If an account exists with this email, you will receive password reset instructions.');
-      reset();
-    } catch {
-      setServerError('Network error. Please check your connection and try again.');
     }
+
+    // Always report the same outcome regardless of whether the email exists
+    setIsSubmitted(true);
+    setCooldown(RESEND_COOLDOWN_SECONDS);
+    toast.success('If that email is registered, you will receive a link shortly.');
+    reset();
   };
 
   return (
@@ -91,7 +94,7 @@ export default function ForgotPasswordPage() {
               <div className="space-y-2">
                 <h2 className="text-xl font-bold text-white">Check Your Email</h2>
                 <p className="text-gray-400 text-sm">
-                  If an account exists with the email you provided, you'll receive a password reset link shortly.
+                  If that email is registered, you will receive a link shortly.
                 </p>
                 <p className="text-gray-500 text-xs">
                   Didn't receive an email? Check your spam folder or try again.
@@ -100,9 +103,10 @@ export default function ForgotPasswordPage() {
               <div className="space-y-3 pt-4">
                 <button
                   onClick={() => setIsSubmitted(false)}
-                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-500 transition-colors"
+                  disabled={cooldown > 0}
+                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  Try Another Email
+                  {cooldown > 0 ? `Try Another Email in ${cooldown}s` : 'Try Another Email'}
                 </button>
                 <Link
                   href="/login"
@@ -142,10 +146,12 @@ export default function ForgotPasswordPage() {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || cooldown > 0}
                 className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
-                {isSubmitting ? (
+                {cooldown > 0 ? (
+                  `Resend in ${cooldown}s`
+                ) : isSubmitting ? (
                   <>
                     <svg
                       className="animate-spin h-4 w-4 text-white"

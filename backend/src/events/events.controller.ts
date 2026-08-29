@@ -27,6 +27,7 @@ import {
   ApiResponse,
   ApiBody,
   ApiConsumes,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Express } from 'express';
@@ -41,6 +42,7 @@ import { BulkUpdateSeriesDto } from './dto/bulk-update-series.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
+import { HistoricalAnalysisDto } from './dto/historical-analysis.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -48,11 +50,15 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 import { TicketsService } from '../tickets/tickets.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { Event } from './entities/event.entity';
+import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 
 @ApiTags('Events')
 @ApiBearerAuth()
 @Controller('events')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden' })
+@ApiResponse({ status: 404, description: 'Resource not found' })
 @ApiResponse({ status: 429, description: 'Too Many Requests' })
 export class EventsController {
   constructor(
@@ -71,7 +77,10 @@ export class EventsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all events' })
+  @ApiOperation({ summary: 'List events with pagination, filtering, and sorting' })
+  @ApiResponse({ status: 200, description: 'Paginated events returned' })
+  @ApiResponse({ status: 400, description: 'Invalid list query' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   list(@Query() filterDto: ListEventsDto) {
     return this.eventsService.listEvents(filterDto);
   }
@@ -183,6 +192,11 @@ export class EventsController {
 
   @Post(':id/emergency')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Activate an event emergency protocol' })
+  @ApiResponse({ status: 201, description: 'Emergency protocol activated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   triggerEmergency(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: {
@@ -197,6 +211,11 @@ export class EventsController {
 
   @Get(':id/evacuation')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Get event evacuation status' })
+  @ApiResponse({ status: 200, description: 'Evacuation status returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   trackEvacuation(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
@@ -206,6 +225,11 @@ export class EventsController {
 
   @Post(':id/weather/monitor')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Start weather monitoring for an event' })
+  @ApiResponse({ status: 201, description: 'Weather monitoring started' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   monitorWeather(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
@@ -215,6 +239,12 @@ export class EventsController {
 
   @Post(':id/reschedule')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Reschedule an event' })
+  @ApiResponse({ status: 201, description: 'Event rescheduled' })
+  @ApiResponse({ status: 400, description: 'Invalid date range' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   reschedule(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: { startDate: string; endDate: string; reason?: string },
@@ -282,6 +312,57 @@ export class EventsController {
     return this.eventsService.completeEvent(id, req.user.id);
   }
 
+  @Post(':id/archive')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Archive a completed event',
+    description:
+      'Organizer-only. Transitions COMPLETED → ARCHIVED and preserves event history for future analysis.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'Event archived', type: Event })
+  @ApiResponse({ status: 400, description: 'Event is not completed or invalid transition' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  archive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.archiveCompletedEvent(id, req.user.id);
+  }
+
+  @Post(':id/history')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Preserve event history snapshot',
+    description:
+      'Organizer-only. Captures and stores a snapshot of event data (tickets, payments, sponsorships) for historical preservation.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'History preserved' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  preserveHistory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.preserveEventHistory(id, req.user.id);
+  }
+
+  @Get('historical-analysis')
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Historical data analysis',
+    description:
+      'Query archived event history for trend analysis and reporting. Supports filtering by organizer, category, date range, and full-text search.',
+  })
+  @ApiResponse({ status: 200, description: 'Historical analysis results' })
+  historicalAnalysis(
+    @Query() filterDto: HistoricalAnalysisDto,
+  ) {
+    return this.eventsService.enableHistoricalAnalysis(filterDto);
+  }
+
   @Post(':id/cancel')
   @Roles(Role.ORGANIZER)
   @ApiOperation({
@@ -342,16 +423,30 @@ export class EventsController {
 
   @Get(':eventId/tickets')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'List tickets for an event' })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)', type: Number })
+  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default 10)', type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, description: 'Sort column (default createdAt)' })
+  @ApiQuery({ name: 'order', required: false, enum: ['ASC', 'DESC'], description: 'Sort order (default DESC)' })
+  @ApiResponse({ status: 200, description: 'Event tickets returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   async getEventTickets(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
-    @Query() paginationDto: any,
+    @Query() paginationDto: PaginationDto,
   ) {
     return this.ticketsService.findByEvent(eventId, req.user.id, paginationDto);
   }
 
   @Get(':eventId/tickets/summary')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Get event ticket summary' })
+  @ApiResponse({ status: 200, description: 'Ticket summary returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   async getTicketSummary(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
@@ -365,6 +460,10 @@ export class EventsController {
     summary: 'Create a recurring event series',
     description: 'Organizer-only. Creates a series and child events.',
   })
+  @ApiResponse({ status: 201, description: 'Event series created' })
+  @ApiResponse({ status: 400, description: 'Invalid series settings' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   createSeries(
     @Body() dto: CreateEventSeriesDto,
     @Req() req: AuthenticatedRequest,
@@ -378,6 +477,11 @@ export class EventsController {
     summary: 'Manage settings for a series',
     description: 'Organizer-only. Propagates settings to all events in the series.',
   })
+  @ApiResponse({ status: 200, description: 'Series settings updated' })
+  @ApiResponse({ status: 400, description: 'Invalid series settings' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Series not found' })
   manageSeriesSettings(
     @Param('seriesId', ParseUUIDPipe) seriesId: string,
     @Body() dto: UpdateEventSeriesDto,
@@ -392,6 +496,11 @@ export class EventsController {
     summary: 'Bulk update events in a series',
     description: 'Organizer-only. Updates status/price in bulk.',
   })
+  @ApiResponse({ status: 200, description: 'Series events updated' })
+  @ApiResponse({ status: 400, description: 'Invalid bulk update' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Series not found' })
   bulkUpdateSeries(
     @Param('seriesId', ParseUUIDPipe) seriesId: string,
     @Body() dto: BulkUpdateSeriesDto,
@@ -418,6 +527,12 @@ export class EventsController {
 
   @Post(':id/images')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Add an image to an event gallery' })
+  @ApiResponse({ status: 201, description: 'Event image added' })
+  @ApiResponse({ status: 400, description: 'Invalid image data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   addImage(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddEventImageDto,
@@ -428,6 +543,12 @@ export class EventsController {
 
   @Patch(':id/images/order')
   @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Reorder images in an event gallery' })
+  @ApiResponse({ status: 200, description: 'Image order updated' })
+  @ApiResponse({ status: 400, description: 'Invalid image order' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
   updateImageOrder(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateImageOrderDto,
@@ -439,12 +560,18 @@ export class EventsController {
   @Delete(':id/images/:imageId')
   @Roles(Role.ORGANIZER)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete an image from an event gallery' })
+  @ApiResponse({ status: 204, description: 'Event image deleted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event or image not found' })
   deleteImage(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('imageId', ParseUUIDPipe) imageId: string,
     @Req() req: AuthenticatedRequest,
   ) {
     return this.eventsService.deleteEventImage(id, imageId, req.user.id);
+  }
 
   @Get(':id/webhooks/deliveries')
   @Roles(Role.ORGANIZER)

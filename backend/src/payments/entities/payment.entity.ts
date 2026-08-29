@@ -23,11 +23,17 @@ export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0.00 })
+  carbonOffsetAmount: number;
+
+  
   @Index() // NEW
   @Index()
   @Column({ nullable: true })
   eventId: string | null;
 
+  @Index()
   @Column({ nullable: true })
   seriesId: string | null;
 
@@ -44,8 +50,26 @@ export class Payment {
   @Column({ default: 'XLM' })
   currency: string;
 
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  ticketTier: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  promoCode: string | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'ticket' })
+  productType: 'ticket' | 'merch';
+
   @Column({ nullable: true, type: 'varchar' })
   transactionHash: string | null;
+
+  /**
+   * The signed Stellar transaction XDR, persisted before submission to
+   * Horizon so a network timeout doesn't strand the payment with no way to
+   * retry without rebuilding (and re-signing) the transaction. Cleared once
+   * the payment reaches a terminal state (CONFIRMED or FAILED).
+   */
+  @Column({ nullable: true, type: 'text' })
+  signedXdr: string | null;
 
   @Index()
   @Column({

@@ -21,6 +21,7 @@ import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
+import { BruteForceGuard } from '../common/guards/brute-force.guard';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -40,6 +41,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, description: 'User registered successfully' })
   @ApiResponse({ status: 400, description: 'Validation error' })
@@ -49,7 +51,8 @@ export class AuthController {
   }
 
   @Post('login')
-  @UseGuards(LocalAuthGuard)
+  @UseGuards(LocalAuthGuard, BruteForceGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate user with email/password' })
   @ApiBody({ type: LoginDto })
@@ -60,6 +63,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send password reset email' })
   @ApiResponse({ status: 200, description: 'Reset email sent if email exists' })
@@ -68,6 +72,7 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @UseGuards(BruteForceGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password with token' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
@@ -125,31 +130,23 @@ export class AuthController {
   // ── Wallet challenge ────────────────────────────────────────────────────
 
   @Post('wallet-challenge')
-  @SkipThrottle()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a wallet signing challenge' })
   async requestWalletChallenge(@Body() dto: RequestWalletChallengeDto) {
     return this.authService.requestWalletChallenge(dto.publicKey);
   }
 
-  @Post('wallet-login')
+  @Post('wallet-verify')
+  @UseGuards(BruteForceGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login or link wallet with signed challenge' })
-  async walletLogin(@Body() dto: { publicKey: string; signature: string }) {
-    return this.authService.walletLogin(dto.publicKey, dto.signature);
+  @ApiOperation({ summary: 'Verify a signed wallet challenge and issue JWT tokens' })
+  async walletVerify(@Body() dto: WalletVerifyDto) {
+    return this.authService.walletLogin(dto.publicKey, dto.nonce, dto.signature);
   }
 
   // ─── Google OAuth ────────────────────────────────────────────────────────
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Generate wallet challenge nonce' })
-  @ApiResponse({ status: 201, description: 'Nonce generated' })
-  async walletChallenge(
-    @Req() req: AuthenticatedRequest,
-  ): Promise<WalletChallengeResponseDto> {
-    const result = await this.authService.generateWalletChallenge(req.user.id);
-    return { nonce: result.nonce, message: result.message };
-  }
 
   @Get('google')
   @UseGuards(GoogleAuthGuard)

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, In } from 'typeorm';
+import { Horizon } from '@stellar/stellar-sdk';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { paginate } from '../common/pagination/pagination.helper';
@@ -46,6 +47,9 @@ export class PaymentsService {
     private readonly webhooksService: WebhooksService,
     
   ) {}
+
+
+  
 
   async getPaymentById(id: string): Promise<Payment> {
     const payment = await this.paymentsRepository.findOne({ where: { id } });
@@ -185,6 +189,13 @@ export class PaymentsService {
 
         if (ownedTicketsCount > 0) {
           finalPrice = finalPrice * (1 - Number(series.discountPercentage) / 100);
+
+                    // Add this block
+          if (includeCarbonOffset) {
+            const offsetAmount = await this.calculate_travel_offset(eventId);
+            finalPrice += offsetAmount;
+            payment.carbonOffsetAmount = offsetAmount;
+          }
         }
       }
     }
@@ -227,7 +238,7 @@ export class PaymentsService {
     ) {
       try {
         const user = await this.userRepository.findOne({ where: { id: userId } });
-        const userPublicKey = (user as any)?.stellarPublicKey;
+        const userPublicKey = user?.stellarPublicKey ?? null;
         if (userPublicKey) {
           const pathResult = await this.stellarService.findPaymentPath(
             userPublicKey,
@@ -238,8 +249,8 @@ export class PaymentsService {
           if (pathResult) {
             pathPayment = {
               sendAsset: sourceAsset,
-              sendAmount: (pathResult as any).source_amount ?? String(finalPrice),
-              path: (pathResult as any).path ?? [],
+              sendAmount: pathResult.source_amount ?? String(finalPrice),
+              path: pathResult.path ?? [],
             };
           }
         }
@@ -324,7 +335,7 @@ export class PaymentsService {
     const saved = await this.paymentsRepository.save(payment);
 
     await this.auditService.log({
-      action: AuditAction.PAYMENT_INTENT_CREATED,
+      action: AuditAction.SEASON_PASS_INTENT_CREATED,
       userId,
       resourceId: saved.id,
       meta: {
@@ -350,7 +361,7 @@ export class PaymentsService {
     userId: string,
   ): Promise<Payment> {
 
-    let txRecord: any;
+    let txRecord: Horizon.ServerApi.TransactionRecord;
     try {
       txRecord = await this.stellarService.getTransaction(transactionHash);
     } catch {
@@ -394,6 +405,7 @@ export class PaymentsService {
     }
 
     let targetEscrowPublicKey: string | null = null;
+    let event: Event | null = null;
     if (payment.isSeasonPass) {
       const series = await this.eventSeriesRepository.findOne({
         where: { id: payment.seriesId as string },
@@ -403,7 +415,7 @@ export class PaymentsService {
       }
       targetEscrowPublicKey = series.escrowPublicKey;
     } else {
-      const event = await this.eventsService.getEventById(payment.eventId as string);
+      event = await this.eventsService.getEventById(payment.eventId as string);
       if (!event.escrowPublicKey) {
         throw new ConflictException('Escrow wallet is not configured for this event.');
       }
@@ -444,6 +456,12 @@ export class PaymentsService {
     payment.transactionHash = transactionHash;
     const confirmed = await this.paymentsRepository.save(payment);
 
+      
+    if (Number(confirmed.carbonOffsetAmount) > 0) {
+      await this.process_carbon_donation(confirmed.id, Number(confirmed.carbonOffsetAmount));
+      await this.allocate_offset_funds(confirmed.id);
+    }
+
     await this.auditService.log({
       action: AuditAction.PAYMENT_CONFIRMED,
       userId: payment.userId,
@@ -455,7 +473,9 @@ export class PaymentsService {
       },
     });
 
-    this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+    if (event) {
+      this.webhooksService.queueDelivery(event, confirmed).catch(() => undefined);
+    }
 
     return confirmed;
   }
@@ -474,6 +494,31 @@ export class PaymentsService {
     );
   }
 
+  async findPaymentPaths(
+    sourcePublicKey: string,
+    sourceAsset: string,
+    destAsset: string,
+    destAmount: string,
+  ) {
+    const records = await this.stellarService.findPaymentPath(
+      sourcePublicKey,
+      sourceAsset,
+      destAsset,
+      destAmount,
+    );
+
+    return records.map((record: Horizon.ServerApi.PaymentPathRecord, index: number) => ({
+      rank: index + 1,
+      sourceAmount: record.source_amount,
+      sourceAsset: sourceAsset,
+      destinationAmount: record.destination_amount,
+      destinationAsset: destAsset,
+      path: (record.path ?? []).map((a: { asset_code?: string; asset_issuer?: string }) =>
+        a.asset_code ? `${a.asset_code}:${a.asset_issuer}` : 'native',
+      ),
+    }));
+  }
+
   async expireStalePayments(): Promise<void> {
     const expired = await this.paymentsRepository.find({
       where: {
@@ -482,9 +527,26 @@ export class PaymentsService {
       },
     });
 
-    for (const payment of expired) {
-      await this.markFailed(payment, 'Payment expired');
+    const results = await Promise.allSettled(
+      expired.map((payment) => this.markFailed(payment, 'Payment expired')),
+    );
+
+    const failures = results.filter((r) => r.status === 'rejected');
+    if (failures.length > 0) {
+      console.error(
+        `${failures.length}/${expired.length} stale payments failed to mark as failed:`,
+        failures.map((f) => (f as PromiseRejectedResult).reason),
+      );
     }
+  }
+
+  async mergeEscrowToOrganizer(eventId: string, organizerId: string) {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException(`Event ${eventId} not found`);
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('You are not the organizer of this event.');
+    }
+    return this.escrowService.mergeEscrowToOrganizer(eventId, event.organizerId);
   }
 
   private async resolvePaymentOperations(txRecord: any): Promise<PaymentOperation[]> {
@@ -549,6 +611,22 @@ export class PaymentsService {
         error,
       );
     }
+  }
+
+  async calculate_travel_offset(eventId: string): Promise<number> {
+    // Logic: Replace with your actual carbon calculation provider or formula
+    // e.g., const carbonTons = await this.carbonProvider.calculate(eventId);
+    return 2.50; // Example fixed cost
+  }
+
+  async process_carbon_donation(paymentId: string, amount: number): Promise<void> {
+    // Logic: Trigger external payment for the donation
+    console.log(`Processing carbon donation of ${amount} for payment ${paymentId}`);
+  }
+
+  async allocate_offset_funds(paymentId: string): Promise<void> {
+    // Logic: Finalize allocation to the carbon project
+    console.log(`Allocating funds for payment ${paymentId}`);
   }
 }
 
