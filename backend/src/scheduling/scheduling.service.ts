@@ -221,15 +221,30 @@ export class SchedulingService {
       avgRevenue: data.count > 0 ? data.revenue / data.count : 0,
     }));
 
-    const bestMonth = monthlyAverages.reduce((best, current) => 
-      current.avgAttendance > best.avgAttendance ? current : best
-    );
-
     const consistency = this.calculateSeasonalConsistency(monthlyAverages);
+
+    // A brand new category/location pair has no history at all. `reduce` with
+    // no seed throws on an empty array, and `Math.max()` of nothing is
+    // -Infinity, so both need the empty case handled before they run.
+    if (monthlyAverages.length === 0) {
+      return {
+        bestMonth: null,
+        score: 0,
+        consistency,
+        monthlyData: monthlyAverages,
+      };
+    }
+
+    const bestMonth = monthlyAverages.reduce((best, current) =>
+      current.avgAttendance > best.avgAttendance ? current : best,
+    );
+    const peakAttendance = Math.max(
+      ...monthlyAverages.map((m) => m.avgAttendance),
+    );
 
     return {
       bestMonth: bestMonth.month,
-      score: bestMonth.avgAttendance / Math.max(...monthlyAverages.map(m => m.avgAttendance)),
+      score: peakAttendance > 0 ? bestMonth.avgAttendance / peakAttendance : 0,
       consistency,
       monthlyData: monthlyAverages,
     };
