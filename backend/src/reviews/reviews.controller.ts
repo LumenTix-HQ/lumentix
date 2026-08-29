@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { ReviewsService } from './reviews.service';
+import { ReviewSentimentService } from './review-sentiment.service';
 import { SubmitReviewDto } from './dto/submit-review.dto';
 import {
   AttendanceVerificationResultDto,
@@ -33,7 +34,35 @@ import {
 @Controller('reviews')
 @UseGuards(JwtAuthGuard)
 export class ReviewsController {
-  constructor(private readonly reviewsService: ReviewsService) {}
+  constructor(
+    private readonly reviewsService: ReviewsService,
+    private readonly sentimentService: ReviewSentimentService,
+  ) {}
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Sentiment analysis (#995)
+  // ───────────────────────────────────────────────────────────────────────
+
+  @Get('events/:eventId/sentiment')
+  @ApiOperation({
+    summary: 'Aggregate sentiment and common themes for an event',
+  })
+  @ApiParam({ name: 'eventId', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Sentiment summary generated.' })
+  generateSentimentSummary(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+  ) {
+    return this.sentimentService.generateSentimentSummary(eventId);
+  }
+
+  @Post(':reviewId/flag-toxic')
+  @ApiOperation({ summary: 'Assess a review for abuse and withhold it if toxic' })
+  @ApiParam({ name: 'reviewId', format: 'uuid' })
+  @ApiResponse({ status: 201, description: 'Toxicity assessment completed.' })
+  @ApiResponse({ status: 404, description: 'Review not found.' })
+  flagToxicReview(@Param('reviewId', ParseUUIDPipe) reviewId: string) {
+    return this.sentimentService.flagToxicReview(reviewId);
+  }
 
   // ── submit_event_review ───────────────────────────────────────────────────
 
