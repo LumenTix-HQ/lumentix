@@ -6189,6 +6189,27 @@ fn test_extend_event_end_time_emits_event() {
     assert!(found, "EventTimeExtended event not emitted");
 }
 
+#[test]
+fn test_extend_event_end_time_standard_user_fails_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let standard_user = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Standard user (non-organizer) attempting to extend event end time
+    let result = client.try_extend_event_end_time(&standard_user, &event_id, &88400u64);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+
+    // Verify end_time remains unchanged at original value (2000u64)
+    let event = client.get_event(&event_id);
+    assert_eq!(event.end_time, 2000u64);
+}
+
+
 // ============================================================================
 // AUTH CONSTRAINTS TESTS
 // ============================================================================
