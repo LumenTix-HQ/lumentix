@@ -38,6 +38,7 @@ import { EscrowService } from '../payments/services/escrow.service';
 import { RefundService } from '../payments/refunds/refund.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { EventImage } from './entities/event-image.entity';
+import { EventHistory } from './entities/event-history.entity';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
 import { buildListEventsOptions } from './build-list-events-options';

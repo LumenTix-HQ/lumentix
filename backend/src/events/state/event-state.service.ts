@@ -4,8 +4,9 @@ import { EventStatus } from '../entities/event.entity';
 const VALID_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
   [EventStatus.DRAFT]: [EventStatus.PUBLISHED],
   [EventStatus.PUBLISHED]: [EventStatus.COMPLETED, EventStatus.CANCELLED],
-  [EventStatus.COMPLETED]: [],
+  [EventStatus.COMPLETED]: [EventStatus.ARCHIVED],
   [EventStatus.CANCELLED]: [],
+  [EventStatus.ARCHIVED]: [],
 };
 
 @Injectable()

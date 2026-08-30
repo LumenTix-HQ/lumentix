@@ -27,6 +27,12 @@ export const envValidationSchema = Joi.object({
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
 
+  // Public API protection
+  RATE_LIMIT_WINDOW_SECONDS: Joi.number().integer().positive().default(60),
+  RATE_LIMIT_PER_IP: Joi.number().integer().positive().default(100),
+  RATE_LIMIT_PER_API_KEY: Joi.number().integer().positive().default(1000),
+  RATE_LIMIT_BLOCK_SECONDS: Joi.number().integer().positive().default(900),
+
   // Ticket Signing
   TICKET_SIGNING_SECRET: Joi.string().required(),
   TICKET_SIGNING_PUBLIC_KEY: Joi.string().required(),

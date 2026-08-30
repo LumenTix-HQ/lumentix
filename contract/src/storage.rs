@@ -1,16 +1,19 @@
 use crate::error::LumentixError;
+use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, BridgeTransaction, CarbonFootprint,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
     IdentityProvider, InsurancePolicy, InsurancePool, MemorabiliaClaim, MerchVoucher, NftCollectible,
-    OrganizerReputation, ResalePriceCeiling, Seat, SeatUpgradeBid,
+    OrganizerReputation, PromoCode, ResalePriceCeiling, ScheduleVote, ScheduleVoteCastRecord, Seat, SeatUpgradeBid,
     Ticket, TicketDidAssociation, TicketTransferRecord, TransferBlackout, ReferralLinkRecord,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeVote,
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
     CertificationStandard, EventCertificate, BiometricCredential, PassPackage,
+    WalletSession, ValidationProof, OfflineScanRecord,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -72,6 +75,15 @@ const BIOMETRIC_CRED_PREFIX: &str = "BIOCRED_";
 const EVENT_BIOMETRIC_REQUIRED_PREFIX: &str = "BIOREQ_";
 const PASS_PACKAGE_PREFIX: &str = "PPKG_";
 const PASS_PACKAGE_ID_COUNTER: &str = "PPKG_CTR";
+const SURVEY_ID_COUNTER: &str = "SURVEY_CTR";
+const SURVEY_PREFIX: &str = "SURVEY_";
+const SURVEY_EVENT_INDEX_PREFIX: &str = "SUREVT_";
+const SURVEY_NULLIFIER_PREFIX: &str = "SURNULL_";
+const SCHEDULE_VOTE_ID_COUNTER: &str = "SCHVOTE_CTR";
+const SCHEDULE_VOTE_PREFIX: &str = "SCHVOTE_";
+const SCHEDULE_VOTE_CAST_PREFIX: &str = "SCHCAST_";
+const PROMO_CODE_PREFIX: &str = "PROMO_";
+const PROMO_USER_USAGE_PREFIX: &str = "PROMOUSR_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -2118,3 +2130,327 @@ pub fn get_visual_layout(env: &Env, event_id: u64) -> Option<String> {
     layout
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ANONYMOUS SURVEY STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the next survey response ID
+pub fn get_next_survey_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&SURVEY_ID_COUNTER)
+        .unwrap_or(1u64);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment the survey response ID counter
+pub fn increment_survey_id(env: &Env) {
+    let next_id = get_next_survey_id(env) + 1;
+    env.storage().instance().set(&SURVEY_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist an anonymous survey response
+pub fn set_survey_response(env: &Env, survey_id: u64, response: &AnonymousSurveyResponse) {
+    let key = (SURVEY_PREFIX, survey_id);
+    env.storage().persistent().set(&key, response);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch an anonymous survey response by ID
+pub fn get_survey_response(
+    env: &Env,
+    survey_id: u64,
+) -> Result<AnonymousSurveyResponse, LumentixError> {
+    let key = (SURVEY_PREFIX, survey_id);
+    let response = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::NoSurveyResponses)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(response)
+}
+
+/// Append a survey response ID to the index of responses recorded for an event
+pub fn add_survey_to_event(env: &Env, event_id: u64, survey_id: u64) {
+    let key = (SURVEY_EVENT_INDEX_PREFIX, event_id);
+    let mut ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    ids.push_back(survey_id);
+    env.storage().persistent().set(&key, &ids);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Get all survey response IDs recorded for an event
+pub fn get_survey_ids_for_event(env: &Env, event_id: u64) -> Vec<u64> {
+    let key = (SURVEY_EVENT_INDEX_PREFIX, event_id);
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    ids
+}
+
+/// Check whether a survey nullifier has already been used (duplicate-submission guard)
+pub fn has_survey_nullifier(env: &Env, event_id: u64, nullifier: &BytesN<32>) -> bool {
+    let key = (SURVEY_NULLIFIER_PREFIX, event_id, nullifier.clone());
+    env.storage().persistent().has(&key)
+}
+
+/// Mark a survey nullifier as used
+pub fn mark_survey_nullifier_used(env: &Env, event_id: u64, nullifier: &BytesN<32>) {
+    let key = (SURVEY_NULLIFIER_PREFIX, event_id, nullifier.clone());
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULE VOTE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the next schedule vote ID
+pub fn get_next_schedule_vote_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&SCHEDULE_VOTE_ID_COUNTER)
+        .unwrap_or(1u64);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment the schedule vote ID counter
+pub fn increment_schedule_vote_id(env: &Env) {
+    let next_id = get_next_schedule_vote_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&SCHEDULE_VOTE_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Persist a schedule vote
+pub fn set_schedule_vote(env: &Env, vote_id: u64, vote: &ScheduleVote) {
+    let key = (SCHEDULE_VOTE_PREFIX, vote_id);
+    env.storage().persistent().set(&key, vote);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a schedule vote by ID
+pub fn get_schedule_vote(env: &Env, vote_id: u64) -> Result<ScheduleVote, LumentixError> {
+    let key = (SCHEDULE_VOTE_PREFIX, vote_id);
+    let vote = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::ScheduleVoteNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(vote)
+}
+
+/// Persist a voter's cast record for a schedule vote (duplicate-vote guard)
+pub fn set_schedule_vote_cast(
+    env: &Env,
+    vote_id: u64,
+    voter: &Address,
+    record: &ScheduleVoteCastRecord,
+) {
+    let key = (SCHEDULE_VOTE_CAST_PREFIX, vote_id, voter.clone());
+    env.storage().persistent().set(&key, record);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Check whether a voter has already cast a vote for this schedule vote
+pub fn has_cast_schedule_vote(env: &Env, vote_id: u64, voter: &Address) -> bool {
+    let key = (SCHEDULE_VOTE_CAST_PREFIX, vote_id, voter.clone());
+    env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROMO CODE STORAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Persist a promo code, scoped to a single event
+pub fn set_promo_code(env: &Env, event_id: u64, code: &String, promo: &PromoCode) {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    env.storage().persistent().set(&key, promo);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a promo code by event and code name
+pub fn get_promo_code(env: &Env, event_id: u64, code: &String) -> Result<PromoCode, LumentixError> {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    let promo = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::PromoCodeNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(promo)
+}
+
+/// Check whether a promo code already exists for an event
+pub fn has_promo_code(env: &Env, event_id: u64, code: &String) -> bool {
+    let key = (PROMO_CODE_PREFIX, event_id, code.clone());
+    env.storage().persistent().has(&key)
+}
+
+/// Get how many times a specific user has redeemed a promo code
+pub fn get_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Address) -> u32 {
+    let key = (PROMO_USER_USAGE_PREFIX, event_id, code.clone(), user.clone());
+    let usage = env.storage().persistent().get(&key).unwrap_or(0u32);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    usage
+}
+
+/// Persist a user's redemption count for a promo code
+pub fn set_promo_user_usage(env: &Env, event_id: u64, code: &String, user: &Address, usage: u32) {
+    let key = (PROMO_USER_USAGE_PREFIX, event_id, code.clone(), user.clone());
+    env.storage().persistent().set(&key, &usage);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WalletConnect session storage
+// ═══════════════════════════════════════════════════════════════════════════
+
+const WALLET_SESSION_PREFIX: &str = "WSESS_";
+const WALLET_SESSION_COUNTER: &str = "WSESSCTR";
+
+/// Next session id to hand out. Ids are monotonic and never reused.
+pub fn get_next_wallet_session_id(env: &Env) -> u64 {
+    let id: u64 = env
+        .storage()
+        .instance()
+        .get(&WALLET_SESSION_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+pub fn increment_wallet_session_id(env: &Env) {
+    let next = get_next_wallet_session_id(env) + 1;
+    env.storage().instance().set(&WALLET_SESSION_COUNTER, &next);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+pub fn set_wallet_session(env: &Env, session_id: u64, session: &WalletSession) {
+    let key = (WALLET_SESSION_PREFIX, session_id);
+    env.storage().persistent().set(&key, session);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_wallet_session(env: &Env, session_id: u64) -> Result<WalletSession, LumentixError> {
+    let key = (WALLET_SESSION_PREFIX, session_id);
+    let session: Option<WalletSession> = env.storage().persistent().get(&key);
+    match session {
+        Some(s) => {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+            Ok(s)
+        }
+        None => Err(LumentixError::WalletSessionNotFound),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Offline validation storage
+// ═══════════════════════════════════════════════════════════════════════════
+
+const VALIDATION_PROOF_PREFIX: &str = "VPROOF_";
+const OFFLINE_SCAN_PREFIX: &str = "OFFSCAN_";
+
+pub fn set_validation_proof(env: &Env, ticket_id: u64, proof: &ValidationProof) {
+    let key = (VALIDATION_PROOF_PREFIX, ticket_id);
+    env.storage().persistent().set(&key, proof);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_validation_proof(env: &Env, ticket_id: u64) -> Option<ValidationProof> {
+    let key = (VALIDATION_PROOF_PREFIX, ticket_id);
+    let proof: Option<ValidationProof> = env.storage().persistent().get(&key);
+    if proof.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    proof
+}
+
+/// Mark an offline scan as synced so a replayed batch cannot double-apply it.
+pub fn set_offline_scan_synced(env: &Env, ticket_id: u64, record: &OfflineScanRecord) {
+    let key = (OFFLINE_SCAN_PREFIX, ticket_id);
+    env.storage().persistent().set(&key, record);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+pub fn get_offline_scan(env: &Env, ticket_id: u64) -> Option<OfflineScanRecord> {
+    let key = (OFFLINE_SCAN_PREFIX, ticket_id);
+    let record: Option<OfflineScanRecord> = env.storage().persistent().get(&key);
+    if record.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    record
+}
+
+pub fn has_offline_scan_synced(env: &Env, ticket_id: u64) -> bool {
+    let key = (OFFLINE_SCAN_PREFIX, ticket_id);
+    env.storage().persistent().has(&key)
+}

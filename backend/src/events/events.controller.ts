@@ -27,6 +27,7 @@ import {
   ApiResponse,
   ApiBody,
   ApiConsumes,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Express } from 'express';
@@ -41,6 +42,7 @@ import { BulkUpdateSeriesDto } from './dto/bulk-update-series.dto';
 import { EventStatsResponseDto } from './dto/event-stats-response.dto';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
+import { HistoricalAnalysisDto } from './dto/historical-analysis.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -48,6 +50,7 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 import { TicketsService } from '../tickets/tickets.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { Event } from './entities/event.entity';
+import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 
 @ApiTags('Events')
 @ApiBearerAuth()
@@ -309,6 +312,57 @@ export class EventsController {
     return this.eventsService.completeEvent(id, req.user.id);
   }
 
+  @Post(':id/archive')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Archive a completed event',
+    description:
+      'Organizer-only. Transitions COMPLETED → ARCHIVED and preserves event history for future analysis.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'Event archived', type: Event })
+  @ApiResponse({ status: 400, description: 'Event is not completed or invalid transition' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  archive(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.archiveCompletedEvent(id, req.user.id);
+  }
+
+  @Post(':id/history')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({
+    summary: 'Preserve event history snapshot',
+    description:
+      'Organizer-only. Captures and stores a snapshot of event data (tickets, payments, sponsorships) for historical preservation.',
+  })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'History preserved' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  preserveHistory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.preserveEventHistory(id, req.user.id);
+  }
+
+  @Get('historical-analysis')
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Historical data analysis',
+    description:
+      'Query archived event history for trend analysis and reporting. Supports filtering by organizer, category, date range, and full-text search.',
+  })
+  @ApiResponse({ status: 200, description: 'Historical analysis results' })
+  historicalAnalysis(
+    @Query() filterDto: HistoricalAnalysisDto,
+  ) {
+    return this.eventsService.enableHistoricalAnalysis(filterDto);
+  }
+
   @Post(':id/cancel')
   @Roles(Role.ORGANIZER)
   @ApiOperation({
@@ -370,6 +424,10 @@ export class EventsController {
   @Get(':eventId/tickets')
   @Roles(Role.ORGANIZER)
   @ApiOperation({ summary: 'List tickets for an event' })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default 1)', type: Number })
+  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default 10)', type: Number })
+  @ApiQuery({ name: 'sortBy', required: false, description: 'Sort column (default createdAt)' })
+  @ApiQuery({ name: 'order', required: false, enum: ['ASC', 'DESC'], description: 'Sort order (default DESC)' })
   @ApiResponse({ status: 200, description: 'Event tickets returned' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
@@ -377,7 +435,7 @@ export class EventsController {
   async getEventTickets(
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @Req() req: AuthenticatedRequest,
-    @Query() paginationDto: any,
+    @Query() paginationDto: PaginationDto,
   ) {
     return this.ticketsService.findByEvent(eventId, req.user.id, paginationDto);
   }

@@ -10,6 +10,7 @@ import { AuditModule } from '../audit/audit.module';
 import { NotificationModule } from '../notifications/notification.module';
 import { UsersModule } from '../users/users.module';
 import { WaitlistExpiryJob } from './jobs/waitlist-expiry.job';
+import { CalendarModule } from '../calendar/calendar.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { WaitlistExpiryJob } from './jobs/waitlist-expiry.job';
     AuditModule,
     NotificationModule,
     UsersModule,
+    CalendarModule,
   ],
   controllers: [RegistrationsController],
   providers: [RegistrationsService, WaitlistExpiryJob],

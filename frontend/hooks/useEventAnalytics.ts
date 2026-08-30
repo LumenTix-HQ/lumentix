@@ -13,6 +13,22 @@ interface EventAnalytics {
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
+  report: RevenueReport | null;
+}
+
+export interface RevenueReportRow {
+  name: string;
+  quantity: number;
+  revenue: number;
+}
+
+export interface RevenueReport {
+  totalRevenue: number;
+  ticketRevenue: number;
+  merchRevenue: number;
+  ticketTiers: RevenueReportRow[];
+  promoCodes: RevenueReportRow[];
+  merchSales: RevenueReportRow[];
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -26,6 +42,7 @@ export function useEventAnalytics(eventId: string | null): EventAnalytics {
   const [escrowActual, setEscrowActual] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<RevenueReport | null>(null);
   const abortRef = useRef(false);
 
   const fetchAnalytics = useCallback(async () => {
@@ -39,12 +56,16 @@ export function useEventAnalytics(eventId: string | null): EventAnalytics {
     setError(null);
 
     try {
-      const [paymentsRes, escrowRes] = await Promise.all([
+      const [paymentsRes, escrowRes, reportRes] = await Promise.all([
         fetch(`${API_BASE}/payments/analytics/${eventId}`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
         }),
         fetch(`${API_BASE}/events/${eventId}/escrow/balance`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }),
+        fetch(`${API_BASE}/analytics/events/${eventId}/revenue/report`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
         }),
@@ -66,6 +87,8 @@ export function useEventAnalytics(eventId: string | null): EventAnalytics {
           setEscrowExpected(escrowData.expected ?? escrowData.delta ?? 0);
           setEscrowActual(escrowData.actual ?? escrowData.delta ?? 0);
         }
+
+        if (reportRes.ok) setReport(await reportRes.json());
       }
     } catch (err) {
       if (!abortRef.current) {
@@ -93,6 +116,7 @@ export function useEventAnalytics(eventId: string | null): EventAnalytics {
     isLoading,
     error,
     refetch: fetchAnalytics,
+    report,
   };
 }
 

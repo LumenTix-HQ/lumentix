@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Event } from './entities/event.entity';
 import { EventSeries } from './entities/event-series.entity';
+import { EventHistory } from './entities/event-history.entity';
 import { EventsService } from './events.service';
 import { EventsController } from './events.controller';
 import { EventStateService } from './state/event-state.service';
@@ -19,16 +20,18 @@ import { EventImage } from './entities/event-image.entity';
 import { BullModule } from '@nestjs/bull';
 import { CancelEventProcessor } from './jobs/cancel-event.processor';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { StellarModule } from '../stellar';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Event, EventSeries, User, TicketEntity, Payment, SponsorContribution]),
+    TypeOrmModule.forFeature([Event, EventSeries, EventHistory, User, TicketEntity, Payment, SponsorContribution]),
     forwardRef(() => TicketsModule),
     NotificationModule,
     EscrowModule,
     AuditModule,
     forwardRef(() => RefundModule),
     WebhooksModule,
+    StellarModule,
     BullModule.registerQueue({
       name: 'events',
     }),

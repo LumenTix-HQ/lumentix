@@ -47,3 +47,49 @@ export class RevenueDashboardDto {
   @ApiProperty({ example: '2025-07-01T12:00:00.000Z' })
   generatedAt: string;
 }
+
+export class RevenueBreakdownRow {
+  @ApiProperty({ example: 'VIP' })
+  name: string;
+
+  @ApiProperty({ example: 12 })
+  quantity: number;
+
+  @ApiProperty({ example: 240 })
+  revenue: number;
+}
+
+export class RevenueReportDto {
+  @ApiProperty({ example: 'event-1' })
+  eventId: string;
+
+  @ApiProperty({ example: '2026-01-01T00:00:00.000Z' })
+  startDate: string | null;
+
+  @ApiProperty({ example: '2026-01-31T23:59:59.999Z' })
+  endDate: string | null;
+
+  @ApiProperty({ example: 2400 })
+  totalRevenue: number;
+
+  @ApiProperty({ example: 100 })
+  ticketRevenue: number;
+
+  @ApiProperty({ example: 80 })
+  merchRevenue: number;
+
+  @ApiProperty({ example: 20 })
+  ticketCount: number;
+
+  @ApiProperty({ type: [RevenueBreakdownRow] })
+  ticketTiers: RevenueBreakdownRow[];
+
+  @ApiProperty({ type: [RevenueBreakdownRow] })
+  promoCodes: RevenueBreakdownRow[];
+
+  @ApiProperty({ type: [RevenueBreakdownRow] })
+  merchSales: RevenueBreakdownRow[];
+
+  @ApiProperty({ type: [RevenueTimePoint] })
+  timeSeries: RevenueTimePoint[];
+}

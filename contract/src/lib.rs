@@ -225,6 +225,7 @@ pub mod error;
 pub mod events;
 pub mod lumentix_contract;
 pub mod models;
+pub mod royalty;
 pub mod storage;
 pub mod types;
 pub mod validation;
@@ -259,6 +260,9 @@ mod biometric_pass_package_tests;
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
+    AnonymousSurveySubmitted, SurveyResultsCompiled,
+    ScheduleVoteCast, ScheduleVoteFinalized, ScheduleVoteInitialized,
+    PromoCodeApplied, PromoCodeCreated,
     AttendanceMemorabiliaMinted, AttendanceVerificationFailed, AttendanceVerified,
     BlockchainIdentityVerified,
     BridgeTransactionValidated, CarbonFootprintCalculated, CarbonOffsetPurchased,
@@ -281,10 +285,14 @@ pub use events::{
     EventCertificateIssued, CertificationStandardUpdated,
     BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
     PassPackageCreated, PassAllowanceDeducted,
+    AgeProofIssued, AgeProofVerified, UnderagePurchaseRejected,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
 pub use types::{
+    AnonymousSurveyResponse, SurveyResults,
+    ScheduleVote, ScheduleVoteCastRecord,
+    PromoCode,
     BridgeTransaction, CancellationReason, CarbonFootprint, CarbonOffsetPurchase,
     CollectibleInventory, CrossChainTransfer, CrossChainTransferStatus, EnvironmentalImpact,
     Event, EventMerchandise, EventReview, EventStatus, IdentityCredential, IdentityProof,
@@ -295,4 +303,5 @@ pub use types::{
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
     UserPreferences, CertificationStandard, EventCertificate,
     BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
+    AgeProof,
 };

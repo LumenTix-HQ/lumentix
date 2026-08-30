@@ -1619,3 +1619,197 @@ impl PassAllowanceDeducted {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Anonymous Event Feedback Surveys
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an anonymous survey response is submitted. Intentionally
+/// carries no respondent identity — only the aggregate shape of the
+/// response — to preserve the anonymity of the on-chain record.
+pub struct AnonymousSurveySubmitted;
+impl AnonymousSurveySubmitted {
+    pub fn emit(env: &Env, survey_id: u64, event_id: u64, question_count: u32, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("survsubm"),),
+            (survey_id, event_id, question_count, timestamp),
+        );
+    }
+}
+
+/// Emitted when aggregated survey results are compiled for an event
+pub struct SurveyResultsCompiled;
+impl SurveyResultsCompiled {
+    pub fn emit(env: &Env, event_id: u64, total_responses: u32, timestamp: u64) {
+        env.events().publish(
+            (symbol_short!("survcomp"),),
+            (event_id, total_responses, timestamp),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Decentralized Community Voting for Event Schedules
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a new schedule slot vote is opened for an event
+pub struct ScheduleVoteInitialized;
+impl ScheduleVoteInitialized {
+    pub fn emit(
+        env: &Env,
+        vote_id: u64,
+        event_id: u64,
+        slot_name: String,
+        candidate_count: u32,
+        voting_deadline: u64,
+    ) {
+        env.events().publish(
+            (symbol_short!("schedinit"),),
+            (vote_id, event_id, slot_name, candidate_count, voting_deadline),
+        );
+    }
+}
+
+/// Emitted when a ticket holder casts a vote on a schedule slot
+pub struct ScheduleVoteCast;
+impl ScheduleVoteCast {
+    pub fn emit(env: &Env, vote_id: u64, voter: Address, candidate_index: u32, new_count: u32) {
+        env.events().publish(
+            (symbol_short!("schedcast"),),
+            (vote_id, voter, candidate_index, new_count),
+        );
+    }
+}
+
+/// Emitted when a schedule vote is finalized and a winning candidate is set
+pub struct ScheduleVoteFinalized;
+impl ScheduleVoteFinalized {
+    pub fn emit(env: &Env, vote_id: u64, event_id: u64, winning_candidate: String, votes: u32) {
+        env.events().publish(
+            (symbol_short!("schedfin"),),
+            (vote_id, event_id, winning_candidate, votes),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Promo Codes with Usage Limits
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer creates a new promo code for an event
+pub struct PromoCodeCreated;
+impl PromoCodeCreated {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        code: String,
+        discount_bps: u32,
+        expires_at: u64,
+        max_global_uses: u32,
+        max_uses_per_user: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("promocrea"),),
+            (
+                event_id,
+                code,
+                discount_bps,
+                expires_at,
+                max_global_uses,
+                max_uses_per_user,
+            ),
+        );
+    }
+}
+
+/// Emitted when a promo code discount is applied to a purchase
+pub struct PromoCodeApplied;
+impl PromoCodeApplied {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        code: String,
+        user: Address,
+        original_amount: i128,
+        discounted_amount: i128,
+    ) {
+        env.events().publish(
+            (symbol_short!("promoappl"),),
+            (event_id, code, user, original_amount, discounted_amount),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WalletConnect session events
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when a dApp session is proposed for a wallet.
+pub struct WalletConnectInitiated;
+
+impl WalletConnectInitiated {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address, dapp_name: String) {
+        env.events()
+            .publish((symbol_short!("wcinit"),), (session_id, wallet, dapp_name));
+    }
+}
+
+/// Emitted when a wallet owner approves a pending session.
+pub struct WalletSessionApproved;
+
+impl WalletSessionApproved {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address, expires_at: u64) {
+        env.events()
+            .publish((symbol_short!("wcapprv"),), (session_id, wallet, expires_at));
+    }
+}
+
+/// Emitted when a session is torn down by its wallet owner.
+pub struct WalletDisconnected;
+
+impl WalletDisconnected {
+    pub fn emit(env: &Env, session_id: u64, wallet: Address) {
+        env.events()
+            .publish((symbol_short!("wcdisc"),), (session_id, wallet));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Offline validation events
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer caches a batch of validation proofs.
+pub struct ValidationProofsCached;
+
+impl ValidationProofsCached {
+    pub fn emit(env: &Env, event_id: u64, organizer: Address, cached_count: u32, valid_until: u64) {
+        env.events().publish(
+            (symbol_short!("vpcached"),),
+            (event_id, organizer, cached_count, valid_until),
+        );
+    }
+}
+
+/// Emitted for each offline scan successfully replayed on-chain.
+pub struct OfflineScanSynced;
+
+impl OfflineScanSynced {
+    pub fn emit(env: &Env, event_id: u64, ticket_id: u64, validator: Address, scanned_at: u64) {
+        env.events().publish(
+            (symbol_short!("offsync"),),
+            (event_id, ticket_id, validator, scanned_at),
+        );
+    }
+}
+
+/// Emitted once per `sync_offline_scans` call summarising the batch.
+pub struct OfflineScansSyncCompleted;
+
+impl OfflineScansSyncCompleted {
+    pub fn emit(env: &Env, event_id: u64, validator: Address, accepted: u32, rejected: u32) {
+        env.events().publish(
+            (symbol_short!("offdone"),),
+            (event_id, validator, accepted, rejected),
+        );
+    }
+}

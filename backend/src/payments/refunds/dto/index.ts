@@ -5,3 +5,7 @@ export { CreateRefundDisputeDto } from './create-refund-dispute.dto';
 export { RefundDisputeDto } from './refund-dispute.dto';
 export { AutomaticRefundResultDto } from './automatic-refund-result.dto';
 export { RefundResultDto } from './refund-result.dto';
+export { FileDisputeClaimDto } from './file-dispute-claim.dto';
+export { AssignArbitratorsDto } from './assign-arbitrators.dto';
+export { ResolveDisputeRefundDto } from './resolve-dispute-refund.dto';
+export { DisputeArbitrationDto } from './dispute-arbitration.dto';

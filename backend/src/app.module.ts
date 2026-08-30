@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -18,6 +18,7 @@ import { AppService } from './app.service';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
+import { WorkspaceModule } from './workspace/workspace.module';
 import { StellarModule } from './stellar/stellar.module';
 import { SponsorsModule } from './sponsors/sponsors.module';
 import { WalletModule } from './wallet/wallet.module';
@@ -31,6 +32,8 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AdminModule } from './admin/admin.module';
 import { RegistrationsModule } from './registrations/registrations.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
+import { SocialModule } from './social/social.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InsuranceModule } from './insurance/insurance.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -46,10 +49,17 @@ import { ZkpModule } from './zkp/zkp.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { MerchModule } from './merch/merch.module';
+import { UpgradeAuctionModule } from './upgrade-auction/upgrade-auction.module';
+import { MerchPreorderModule } from './merch-preorder/merch-preorder.module';
+import { PrivacyModule } from './privacy/privacy.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 import { TicketDesignModule } from './ticket-design/ticket-design.module';
 import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
+import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
+import { RateLimitModule } from './common/rate-limit.module';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 
 @Module({
@@ -60,6 +70,7 @@ import { InternalRoutingModule } from './internal/internal.module';
       validationSchema: envValidationSchema,
       validationOptions: { abortEarly: false },
     }),
+    RateLimitModule,
 
     // ── Redis-backed rate limiting — shared across all instances ──────────────
     ThrottlerModule.forRootAsync({
@@ -126,6 +137,12 @@ import { InternalRoutingModule } from './internal/internal.module';
     TicketsModule,
     AdminModule,
     RegistrationsModule,
+    LoyaltyModule,
+    SocialModule,
+    InsuranceModule,
+    ReviewsModule,
+    VenuesModule,
+    GamificationModule,
     AnalyticsModule,
     SchedulingModule,
     CategoriesModule,
@@ -134,11 +151,17 @@ import { InternalRoutingModule } from './internal/internal.module';
     DecentralizedStorageModule,
     ChatModule,
     ZkpModule,
+    WorkspaceModule,
     LoyaltyModule,
     TelemetryModule,
     MerchModule,
+    UpgradeAuctionModule,
+    MerchPreorderModule,
+    PrivacyModule,
+    CampaignsModule,
     TicketDesignModule,
     ScanAnalyticsModule,
+    TermsOfServiceModule,
     InternalModule,
     InternalRoutingModule,
   ],
@@ -150,6 +173,10 @@ import { InternalRoutingModule } from './internal/internal.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
     },
     {
       provide: APP_INTERCEPTOR,

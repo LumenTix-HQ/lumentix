@@ -26,11 +26,15 @@ import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
 import { FraudFlag } from './resale/fraud-detection/fraud-flag.entity';
 import { FraudDetectionService } from './resale/fraud-detection/fraud-detection.service';
 import { FraudDetectionController } from './resale/fraud-detection/fraud-detection.controller';
+import { TicketGift } from './gifting/ticket-gift.entity';
+import { GiftingService } from './gifting/gifting.service';
+import { GiftingController } from './gifting/gifting.controller';
+import { GiftDeliveryJob } from './gifting/gift-delivery.job';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction, FraudFlag]),
+    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction, FraudFlag, TicketGift]),
     forwardRef(() => PaymentsModule),
     StellarModule,
     NotificationModule,
@@ -46,6 +50,8 @@ import { FraudDetectionController } from './resale/fraud-detection/fraud-detecti
     ResaleService,
     DynamicQrService,
     FraudDetectionService,
+    GiftingService,
+    GiftDeliveryJob,
   ],
   controllers: [
     TicketsController,
@@ -55,7 +61,8 @@ import { FraudDetectionController } from './resale/fraud-detection/fraud-detecti
     ResaleMarketplaceController,
     DynamicQrController,
     FraudDetectionController,
+    GiftingController,
   ],
-  exports: [TicketsService, ResaleService, FraudDetectionService],
+  exports: [TicketsService, ResaleService, FraudDetectionService, GiftingService],
 })
 export class TicketsModule {}

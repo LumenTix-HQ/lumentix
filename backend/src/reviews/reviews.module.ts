@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { EventReview } from './entities/event-review.entity';
 import { OrganizerReputation } from './entities/organizer-reputation.entity';
 import { ReviewsService } from './reviews.service';
+import { ReviewSentimentService } from './review-sentiment.service';
 import { ReviewsController } from './reviews.controller';
 
 import { TicketEntity } from '../tickets/entities/ticket.entity';
@@ -20,8 +21,8 @@ import { AuditModule } from '../audit/audit.module';
     ]),
     AuditModule,
   ],
-  providers: [ReviewsService],
+  providers: [ReviewsService, ReviewSentimentService],
   controllers: [ReviewsController],
-  exports: [ReviewsService],
+  exports: [ReviewsService, ReviewSentimentService],
 })
 export class ReviewsModule {}

@@ -3,11 +3,13 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { useWallet } from "@/contexts/WalletContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { NetworkSwitcher } from "@/components/NetworkSwitcher";
 import { WalletButton } from "@/components/WalletButton";
 import MobileDrawer from "@/components/MobileDrawer";
+import LocaleSwitcher from "@/components/LocaleSwitcher";
 
 interface NavLink {
   name: string;
@@ -15,13 +17,14 @@ interface NavLink {
   requiresAuth?: boolean;
 }
 
-const navLinks: NavLink[] = [
-  { name: "Events", href: "/events" },
-  { name: "Create Event", href: "/create", requiresAuth: true },
-  { name: "My Tickets", href: "/my-tickets", requiresAuth: true },
+const navLinkDefs: Array<{ key: "events" | "create" | "myTickets"; href: string; requiresAuth?: boolean }> = [
+  { key: "events", href: "/events" },
+  { key: "create", href: "/create", requiresAuth: true },
+  { key: "myTickets", href: "/my-tickets", requiresAuth: true },
 ];
 
 const Navbar = () => {
+  const t = useTranslations("Nav");
   const pathname = usePathname();
   const router = useRouter();
   const { isConnected } = useWallet();
@@ -54,9 +57,9 @@ const Navbar = () => {
     return pathname.startsWith(href);
   };
 
-  const visibleLinks = navLinks.filter(
-    (link) => !link.requiresAuth || isAuthenticated
-  );
+  const visibleLinks: NavLink[] = navLinkDefs
+    .filter((link) => !link.requiresAuth || isAuthenticated)
+    .map((link) => ({ name: t(link.key), href: link.href, requiresAuth: link.requiresAuth }));
 
   const handleLogout = () => {
     logout();
@@ -98,6 +101,7 @@ const Navbar = () => {
             </div>
 
             <div className="hidden md:flex items-center gap-4">
+              <LocaleSwitcher />
               <NetworkSwitcher />
               <WalletButton />
               {isAuthenticated ? (
@@ -125,20 +129,20 @@ const Navbar = () => {
                         onClick={() => setShowProfileDropdown(false)}
                         className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
                       >
-                        Profile
+                        {t("profile")}
                       </Link>
                       <Link
                         href="/my-tickets"
                         onClick={() => setShowProfileDropdown(false)}
                         className="block px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
                       >
-                        My Tickets
+                        {t("myTickets")}
                       </Link>
                       <button
                         onClick={handleLogout}
                         className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-white/5 transition-colors"
                       >
-                        Sign out
+                        {t("logout")}
                       </button>
                     </div>
                   )}
@@ -149,13 +153,13 @@ const Navbar = () => {
                     href="/login"
                     className="px-3 py-1.5 text-sm font-medium text-gray-300 hover:text-white transition-colors"
                   >
-                    Log in
+                    {t("login")}
                   </Link>
                   <Link
                     href="/register"
                     className="px-4 py-1.5 text-sm font-medium text-white bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
                   >
-                    Sign up
+                    {t("register")}
                   </Link>
                 </div>
               )}
