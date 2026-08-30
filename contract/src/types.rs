@@ -918,6 +918,70 @@ pub struct EventCertificate {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Biometric Authentication (Issue #649)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Supported biometric modalities. The device performs the actual match —
+/// the contract only ever stores a public credential, never raw biometric data.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BiometricType {
+    Fingerprint,
+    FacialRecognition,
+}
+
+/// Privacy-control actions a user can take over their own biometric enrollment.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BiometricPrivacyAction {
+    /// Explicit consent to enroll/use biometric authentication.
+    GrantConsent,
+    /// Withdraw consent; disables any existing credential as a side effect.
+    RevokeConsent,
+    /// Re-enable a previously disabled (but not revoked) credential.
+    Enable,
+    /// Temporarily disable a credential without deleting it.
+    Disable,
+    /// Permanently delete the credential's public data.
+    Delete,
+}
+
+/// A registered biometric credential (WebAuthn/passkey-style public key),
+/// scoped to a single user and a single high-security event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BiometricCredential {
+    pub user: Address,
+    pub event_id: u64,
+    pub credential_id: BytesN<32>,
+    pub public_key: BytesN<32>,
+    pub biometric_type: BiometricType,
+    pub registered_at: u64,
+    pub enabled: bool,
+    pub revoked: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Event Pass Packages (Issue #906)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A package deal granting entry into a limited subset of eligible events,
+/// e.g. "any 3 of 10 events", tracked by a decrementing allowance.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PassPackage {
+    pub package_id: u64,
+    pub owner: Address,
+    pub organizer: Address,
+    pub eligible_events: Vec<u64>,
+    pub total_allowance: u32,
+    pub remaining_allowance: u32,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub active: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Anonymous Event Feedback Surveys
 // ═══════════════════════════════════════════════════════════════════════════
 

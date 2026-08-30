@@ -457,4 +457,32 @@ pub enum LumentixError {
     OfflineScanOutsideWindow = 233,
     /// Requested proof validity window is zero or exceeds the permitted maximum
     InvalidProofValidityWindow = 234,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Biometric Authentication errors (Issue #649)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// User has not granted biometric enrollment/consent
+    BiometricConsentRequired = 235,
+    /// No biometric credential is registered for this user/event
+    BiometricCredentialNotFound = 236,
+    /// A biometric credential already exists for this user/event
+    BiometricCredentialAlreadyExists = 237,
+    /// Biometric credential has been disabled by the user
+    BiometricCredentialDisabled = 238,
+    /// Biometric credential has been revoked/deleted
+    BiometricCredentialRevoked = 239,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages errors (Issue #906)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Pass package configuration is invalid (no events or zero allowance)
+    InvalidPassPackageConfig = 240,
+    /// Pass package with the given ID does not exist
+    PassPackageNotFound = 241,
+    /// Pass package has expired or been deactivated
+    PassPackageExpired = 242,
+    /// Pass package has no remaining allowance
+    PassPackageExhausted = 243,
+    /// Requested event is not part of this pass package
+    PassPackageEventNotEligible = 244,
 }

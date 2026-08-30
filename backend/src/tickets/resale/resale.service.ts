@@ -30,6 +30,8 @@ import { BuyResaleTicketDto } from './dto/buy-resale-ticket.dto';
 import { SetPriceCeilingDto } from './dto/set-price-ceiling.dto';
 import { VerifyResalePriceDto } from './dto/verify-resale-price.dto';
 import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto';
+import { FraudDetectionService } from './fraud-detection/fraud-detection.service';
+import { FraudRiskLevel } from './fraud-detection/fraud-flag.entity';
 
 const DEFAULT_DEFAULT_MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
 const ORGANIZER_FEE_BPS = 500; // 5% = 500 basis points
@@ -53,6 +55,7 @@ export class ResaleService {
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
+    private readonly fraudDetectionService: FraudDetectionService,
     @Inject(CACHE_MANAGER)
     private readonly cache: Cache,
   ) {}
@@ -136,6 +139,23 @@ export class ResaleService {
 
     const organizerFee = parseFloat((salePrice * (ORGANIZER_FEE_BPS / 10000)).toFixed(7));
     const sellerPayout = parseFloat((salePrice - organizerFee).toFixed(7));
+
+    // #908: run fraud heuristics before final settlement. Low-risk trades
+    // proceed untouched; medium-risk trades are flagged for audit but not
+    // blocked (avoids unnecessarily blocking legitimate trades); high-risk
+    // trades are flagged, held, and rejected here so settlement never occurs.
+    const { analysis, flag } = await this.fraudDetectionService.evaluateTrade({
+      ticketId: ticket.id,
+      eventId: ticket.eventId,
+      buyerId,
+      sellerId,
+      price: salePrice,
+    });
+    if (analysis.riskLevel === FraudRiskLevel.HIGH) {
+      throw new ForbiddenException(
+        `Trade held for fraud review (flag ${flag?.id}). Reasons: ${analysis.reasons.join(', ')}.`,
+      );
+    }
 
     let txRecord: Awaited<ReturnType<StellarService['getTransaction']>>;
     try {
