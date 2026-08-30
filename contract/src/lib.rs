@@ -253,6 +253,9 @@ mod merchandise_nft_tests;
 #[cfg(test)]
 mod certification_analytics_tests;
 
+#[cfg(test)]
+mod biometric_pass_package_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
@@ -276,6 +279,8 @@ pub use events::{
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     WaitlistOfferExpired, WaitlistSpotReleased,
     EventCertificateIssued, CertificationStandardUpdated,
+    BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
+    PassPackageCreated, PassAllowanceDeducted,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -289,4 +294,5 @@ pub use types::{
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
     UserPreferences, CertificationStandard, EventCertificate,
+    BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
 };

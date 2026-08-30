@@ -324,4 +324,32 @@ pub enum LumentixError {
     // ═══════════════════════════════════════════════════════════════════════
     /// Not enough historical sales data points were provided to produce a forecast
     InsufficientSalesHistory = 202,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Biometric Authentication errors (Issue #649)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// User has not granted biometric enrollment/consent
+    BiometricConsentRequired = 203,
+    /// No biometric credential is registered for this user/event
+    BiometricCredentialNotFound = 204,
+    /// A biometric credential already exists for this user/event
+    BiometricCredentialAlreadyExists = 205,
+    /// Biometric credential has been disabled by the user
+    BiometricCredentialDisabled = 206,
+    /// Biometric credential has been revoked/deleted
+    BiometricCredentialRevoked = 207,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages errors (Issue #906)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Pass package configuration is invalid (no events or zero allowance)
+    InvalidPassPackageConfig = 208,
+    /// Pass package with the given ID does not exist
+    PassPackageNotFound = 209,
+    /// Pass package has expired or been deactivated
+    PassPackageExpired = 210,
+    /// Pass package has no remaining allowance
+    PassPackageExhausted = 211,
+    /// Requested event is not part of this pass package
+    PassPackageEventNotEligible = 212,
 }

@@ -1557,3 +1557,65 @@ impl CertificationStandardUpdated {
             .publish((symbol_short!("certstd"),), (standard, enabled));
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Biometric Authentication (Issue #649)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct BiometricCredentialRegistered;
+impl BiometricCredentialRegistered {
+    pub fn emit(
+        env: &Env,
+        user: Address,
+        event_id: u64,
+        biometric_type: crate::types::BiometricType,
+    ) {
+        env.events()
+            .publish((symbol_short!("bioreg"),), (user, event_id, biometric_type));
+    }
+}
+
+pub struct BiometricAuthenticated;
+impl BiometricAuthenticated {
+    pub fn emit(env: &Env, user: Address, event_id: u64) {
+        env.events()
+            .publish((symbol_short!("bioauth"),), (user, event_id));
+    }
+}
+
+pub struct BiometricPrivacyUpdated;
+impl BiometricPrivacyUpdated {
+    pub fn emit(
+        env: &Env,
+        user: Address,
+        event_id: u64,
+        action: crate::types::BiometricPrivacyAction,
+    ) {
+        env.events()
+            .publish((symbol_short!("bioprivy"),), (user, event_id, action));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Event Pass Packages (Issue #906)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct PassPackageCreated;
+impl PassPackageCreated {
+    pub fn emit(env: &Env, package_id: u64, owner: Address, total_allowance: u32) {
+        env.events().publish(
+            (symbol_short!("ppkgnew"),),
+            (package_id, owner, total_allowance),
+        );
+    }
+}
+
+pub struct PassAllowanceDeducted;
+impl PassAllowanceDeducted {
+    pub fn emit(env: &Env, package_id: u64, event_id: u64, remaining_allowance: u32) {
+        env.events().publish(
+            (symbol_short!("ppkguse"),),
+            (package_id, event_id, remaining_allowance),
+        );
+    }
+}

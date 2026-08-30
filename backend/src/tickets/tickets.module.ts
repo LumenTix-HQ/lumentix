@@ -23,11 +23,14 @@ import { RedisModule } from '../redis/redis.module';
 import { ResaleTransaction } from './resale/resale-transaction.entity';
 import { DynamicQrService } from './dynamic-qr/dynamic-qr.service';
 import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
+import { FraudFlag } from './resale/fraud-detection/fraud-flag.entity';
+import { FraudDetectionService } from './resale/fraud-detection/fraud-detection.service';
+import { FraudDetectionController } from './resale/fraud-detection/fraud-detection.controller';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction]),
+    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction, FraudFlag]),
     forwardRef(() => PaymentsModule),
     StellarModule,
     NotificationModule,
@@ -35,8 +38,24 @@ import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
     // #861: provides CACHE_MANAGER for the marketplace listing cache.
     RedisModule,
   ],
-  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob, ResaleService, DynamicQrService],
-  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController, ResaleMarketplaceController, DynamicQrController],
-  exports: [TicketsService, ResaleService],
+  providers: [
+    TicketsService,
+    TicketSigningService,
+    TicketPdfService,
+    TicketExpiryJob,
+    ResaleService,
+    DynamicQrService,
+    FraudDetectionService,
+  ],
+  controllers: [
+    TicketsController,
+    TicketsPublicController,
+    VerificationController,
+    ResaleController,
+    ResaleMarketplaceController,
+    DynamicQrController,
+    FraudDetectionController,
+  ],
+  exports: [TicketsService, ResaleService, FraudDetectionService],
 })
 export class TicketsModule {}

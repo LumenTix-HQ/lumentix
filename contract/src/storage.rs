@@ -10,7 +10,7 @@ use crate::types::{
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
-    CertificationStandard, EventCertificate,
+    CertificationStandard, EventCertificate, BiometricCredential, PassPackage,
 };
 use soroban_sdk::{Address, BytesN, Env, String, Vec};
 
@@ -67,6 +67,11 @@ const CERTIFICATE_PREFIX: &str = "CERT_";
 const CERTIFICATE_ID_COUNTER: &str = "CERT_CTR";
 const EVENT_CERTIFICATE_PREFIX: &str = "EVCERT_";
 const CERT_STANDARD_PREFIX: &str = "CERTSTD_";
+const BIOMETRIC_CONSENT_PREFIX: &str = "BIOCONS_";
+const BIOMETRIC_CRED_PREFIX: &str = "BIOCRED_";
+const EVENT_BIOMETRIC_REQUIRED_PREFIX: &str = "BIOREQ_";
+const PASS_PACKAGE_PREFIX: &str = "PPKG_";
+const PASS_PACKAGE_ID_COUNTER: &str = "PPKG_CTR";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -298,6 +303,134 @@ pub fn is_certification_standard_enabled(env: &Env, standard: &CertificationStan
         certification_standard_discriminant(standard),
     );
     env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Biometric Authentication (Issue #649)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Record whether `user` has granted biometric enrollment consent.
+pub fn set_biometric_consent(env: &Env, user: &Address, consent_given: bool) {
+    let key = (BIOMETRIC_CONSENT_PREFIX, user.clone());
+    env.storage().persistent().set(&key, &consent_given);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether `user` currently has biometric consent granted.
+pub fn has_biometric_consent(env: &Env, user: &Address) -> bool {
+    let key = (BIOMETRIC_CONSENT_PREFIX, user.clone());
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Store a biometric credential, keyed by (user, event_id).
+pub fn set_biometric_credential(env: &Env, credential: &BiometricCredential) {
+    let key = (
+        BIOMETRIC_CRED_PREFIX,
+        credential.user.clone(),
+        credential.event_id,
+    );
+    env.storage().persistent().set(&key, credential);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the biometric credential registered for `user` on `event_id`.
+pub fn get_biometric_credential(
+    env: &Env,
+    user: &Address,
+    event_id: u64,
+) -> Result<BiometricCredential, LumentixError> {
+    let key = (BIOMETRIC_CRED_PREFIX, user.clone(), event_id);
+    let credential = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::BiometricCredentialNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(credential)
+}
+
+/// Whether a biometric credential is registered for `user` on `event_id`.
+pub fn has_biometric_credential(env: &Env, user: &Address, event_id: u64) -> bool {
+    let key = (BIOMETRIC_CRED_PREFIX, user.clone(), event_id);
+    env.storage().persistent().has(&key)
+}
+
+/// Permanently remove the stored biometric credential for `user` on `event_id`.
+pub fn remove_biometric_credential(env: &Env, user: &Address, event_id: u64) {
+    let key = (BIOMETRIC_CRED_PREFIX, user.clone(), event_id);
+    env.storage().persistent().remove(&key);
+}
+
+/// Organizer-configured flag: whether `event_id` requires biometric verification.
+pub fn set_event_biometric_required(env: &Env, event_id: u64, required: bool) {
+    let key = (EVENT_BIOMETRIC_REQUIRED_PREFIX, event_id);
+    env.storage().persistent().set(&key, &required);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether `event_id` currently requires biometric verification for entry.
+pub fn is_event_biometric_required(env: &Env, event_id: u64) -> bool {
+    let key = (EVENT_BIOMETRIC_REQUIRED_PREFIX, event_id);
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Event Pass Packages (Issue #906)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the next pass package ID (auto-incrementing, starts at 1).
+pub fn get_next_pass_package_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&PASS_PACKAGE_ID_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment the pass package ID counter.
+pub fn increment_pass_package_id(env: &Env) {
+    let next_id = get_next_pass_package_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&PASS_PACKAGE_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Store/update a pass package.
+pub fn set_pass_package(env: &Env, package_id: u64, package: &PassPackage) {
+    let key = (PASS_PACKAGE_PREFIX, package_id);
+    env.storage().persistent().set(&key, package);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a pass package by ID.
+pub fn get_pass_package(env: &Env, package_id: u64) -> Result<PassPackage, LumentixError> {
+    let key = (PASS_PACKAGE_PREFIX, package_id);
+    let package = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::PassPackageNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(package)
 }
 
 /// Set ticket data

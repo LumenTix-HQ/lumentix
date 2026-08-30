@@ -32,6 +32,8 @@ use crate::events::{
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     EventCertificateIssued, CertificationStandardUpdated,
+    BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
+    PassPackageCreated, PassAllowanceDeducted,
 };
 use crate::storage;
 use crate::types::{
@@ -49,6 +51,7 @@ use crate::types::{
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
     CertificationStandard,
+    BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, String, Vec};
@@ -1374,6 +1377,253 @@ impl LumentixContract {
         storage::set_certification_standard_enabled(&env, &standard, enabled);
         CertificationStandardUpdated::emit(&env, standard, enabled);
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Biometric Authentication (Issue #649)
+    //
+    // The contract never stores or transmits raw biometric data. It only
+    // persists a public credential (a WebAuthn/passkey-style public key and
+    // credential ID) — the fingerprint or facial match itself happens on the
+    // user's device, off-chain. `user.require_auth()` is the on-chain
+    // cryptographic verification step: the calling Soroban account must
+    // already prove control of its signing key (backed, for a passkey-based
+    // smart wallet, by the device's biometric-gated key) before any of these
+    // functions execute.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Organizer-only: mark whether `event_id` requires biometric verification
+    /// (a "high-security event") before `authenticate_biometric` is meaningful.
+    pub fn set_event_biometric_requirement(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        required: bool,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+        storage::set_event_biometric_required(&env, event_id, required);
+        Ok(())
+    }
+
+    /// Returns whether `event_id` currently requires biometric verification.
+    pub fn is_biometric_required(env: Env, event_id: u64) -> Result<bool, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(storage::is_event_biometric_required(&env, event_id))
+    }
+
+    /// Enroll a biometric credential for `user` on `event_id`. Requires the
+    /// user to have already granted consent via `manage_biometric_privacy`.
+    /// Only ever stores the public credential — never raw biometric data.
+    pub fn register_biometric_data(
+        env: Env,
+        user: Address,
+        event_id: u64,
+        credential_id: BytesN<32>,
+        public_key: BytesN<32>,
+        biometric_type: BiometricType,
+    ) -> Result<(), LumentixError> {
+        user.require_auth();
+        let _ = storage::get_event(&env, event_id)?;
+
+        if !storage::has_biometric_consent(&env, &user) {
+            return Err(LumentixError::BiometricConsentRequired);
+        }
+        if storage::has_biometric_credential(&env, &user, event_id) {
+            return Err(LumentixError::BiometricCredentialAlreadyExists);
+        }
+
+        let credential = BiometricCredential {
+            user: user.clone(),
+            event_id,
+            credential_id,
+            public_key,
+            biometric_type: biometric_type.clone(),
+            registered_at: env.ledger().timestamp(),
+            enabled: true,
+            revoked: false,
+        };
+        storage::set_biometric_credential(&env, &credential);
+        BiometricCredentialRegistered::emit(&env, user, event_id, biometric_type);
+        Ok(())
+    }
+
+    /// Verify `user` for entry into `event_id` using their registered
+    /// biometric credential. Rejects disabled, revoked, or missing
+    /// credentials, and requires standing consent. If accepted, the caller
+    /// (e.g. the check-in flow) may proceed to grant entry; a secure
+    /// fallback (PIN/QR code) should be offered by the application layer
+    /// whenever this call returns an error.
+    pub fn authenticate_biometric(env: Env, user: Address, event_id: u64) -> Result<bool, LumentixError> {
+        user.require_auth();
+        if !storage::has_biometric_consent(&env, &user) {
+            return Err(LumentixError::BiometricConsentRequired);
+        }
+        let credential = storage::get_biometric_credential(&env, &user, event_id)?;
+        if credential.revoked {
+            return Err(LumentixError::BiometricCredentialRevoked);
+        }
+        if !credential.enabled {
+            return Err(LumentixError::BiometricCredentialDisabled);
+        }
+
+        BiometricAuthenticated::emit(&env, user, event_id);
+        Ok(true)
+    }
+
+    /// Manage consent, enable/disable, and deletion for a user's biometric
+    /// credential on `event_id`. Withdrawing consent immediately disables any
+    /// existing credential. Deletion permanently removes the stored public
+    /// credential data.
+    pub fn manage_biometric_privacy(
+        env: Env,
+        user: Address,
+        event_id: u64,
+        action: BiometricPrivacyAction,
+    ) -> Result<(), LumentixError> {
+        user.require_auth();
+
+        match action.clone() {
+            BiometricPrivacyAction::GrantConsent => {
+                storage::set_biometric_consent(&env, &user, true);
+            }
+            BiometricPrivacyAction::RevokeConsent => {
+                storage::set_biometric_consent(&env, &user, false);
+                if let Ok(mut credential) = storage::get_biometric_credential(&env, &user, event_id) {
+                    credential.enabled = false;
+                    storage::set_biometric_credential(&env, &credential);
+                }
+            }
+            BiometricPrivacyAction::Enable => {
+                if !storage::has_biometric_consent(&env, &user) {
+                    return Err(LumentixError::BiometricConsentRequired);
+                }
+                let mut credential = storage::get_biometric_credential(&env, &user, event_id)?;
+                if credential.revoked {
+                    return Err(LumentixError::BiometricCredentialRevoked);
+                }
+                credential.enabled = true;
+                storage::set_biometric_credential(&env, &credential);
+            }
+            BiometricPrivacyAction::Disable => {
+                let mut credential = storage::get_biometric_credential(&env, &user, event_id)?;
+                credential.enabled = false;
+                storage::set_biometric_credential(&env, &credential);
+            }
+            BiometricPrivacyAction::Delete => {
+                let mut credential = storage::get_biometric_credential(&env, &user, event_id)?;
+                credential.enabled = false;
+                credential.revoked = true;
+                storage::set_biometric_credential(&env, &credential);
+                storage::remove_biometric_credential(&env, &user, event_id);
+            }
+        }
+
+        BiometricPrivacyUpdated::emit(&env, user, event_id, action);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages (Issue #906)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Create a package deal granting `owner` entry into any `total_allowance`
+    /// of the events listed in `eligible_events` (e.g. "any 3 of 10 events").
+    /// Organizer-only, and every eligible event must belong to that organizer.
+    pub fn create_pass_package(
+        env: Env,
+        organizer: Address,
+        owner: Address,
+        eligible_events: Vec<u64>,
+        total_allowance: u32,
+        expires_at: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        if eligible_events.is_empty() || total_allowance == 0 {
+            return Err(LumentixError::InvalidPassPackageConfig);
+        }
+        for event_id in eligible_events.iter() {
+            let event = storage::get_event(&env, event_id)?;
+            if event.organizer != organizer {
+                return Err(LumentixError::Unauthorized);
+            }
+        }
+
+        let package_id = storage::get_next_pass_package_id(&env);
+        storage::increment_pass_package_id(&env);
+
+        let package = PassPackage {
+            package_id,
+            owner: owner.clone(),
+            organizer,
+            eligible_events,
+            total_allowance,
+            remaining_allowance: total_allowance,
+            created_at: env.ledger().timestamp(),
+            expires_at,
+            active: true,
+        };
+        storage::set_pass_package(&env, package_id, &package);
+
+        PassPackageCreated::emit(&env, package_id, owner, total_allowance);
+        Ok(package_id)
+    }
+
+    /// Returns the remaining allowance and eligible event list for a pass package.
+    pub fn check_pass_balance(env: Env, package_id: u64) -> Result<(u32, Vec<u64>), LumentixError> {
+        let package = storage::get_pass_package(&env, package_id)?;
+        Ok((package.remaining_allowance, package.eligible_events))
+    }
+
+    /// Atomically consume one allowance from `package_id` for entry into
+    /// `event_id`. Fails if the package is expired/inactive, the event is not
+    /// part of the package, or the allowance is exhausted. Each Soroban
+    /// invocation executes as a single atomic read-modify-write against
+    /// ledger state, so concurrent entry attempts cannot overspend the
+    /// remaining balance.
+    pub fn deduct_pass_allowance(
+        env: Env,
+        holder: Address,
+        package_id: u64,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        holder.require_auth();
+        let mut package = storage::get_pass_package(&env, package_id)?;
+
+        if package.owner != holder {
+            return Err(LumentixError::Unauthorized);
+        }
+        if !package.active || env.ledger().timestamp() > package.expires_at {
+            if package.active {
+                package.active = false;
+                storage::set_pass_package(&env, package_id, &package);
+            }
+            return Err(LumentixError::PassPackageExpired);
+        }
+
+        let mut eligible = false;
+        for eligible_event_id in package.eligible_events.iter() {
+            if eligible_event_id == event_id {
+                eligible = true;
+                break;
+            }
+        }
+        if !eligible {
+            return Err(LumentixError::PassPackageEventNotEligible);
+        }
+        if package.remaining_allowance == 0 {
+            return Err(LumentixError::PassPackageExhausted);
+        }
+
+        package.remaining_allowance -= 1;
+        storage::set_pass_package(&env, package_id, &package);
+
+        PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
+        Ok(package.remaining_allowance)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
