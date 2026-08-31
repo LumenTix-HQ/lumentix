@@ -12,7 +12,7 @@ pub struct Tier {
     pub sponsor_count: u32,
 }
 
-// Register a sponsor tier for an event.
+
 #[contract]
 pub struct SponsorsContract;
 
@@ -33,7 +33,7 @@ impl SponsorsContract {
         };
         env.storage().persistent().set(&key, &tier);
 
-        // Emit SponsorTierRegistered event
+        
         #[allow(deprecated)]
         env.events().publish(
             (symbol_short!("sponstier"),),
