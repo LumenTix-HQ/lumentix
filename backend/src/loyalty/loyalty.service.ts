@@ -5,8 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, LessThan, Repository } from 'typeorm';
+import { DataSource, LessThan, Repository, QueryFailedError } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { randomBytes, randomInt } from 'crypto';
 import { LoyaltyAccount } from './entities/loyalty-account.entity';
 import {
   LoyaltyTransaction,
@@ -35,6 +36,9 @@ export const DISCOUNT_VALIDITY_DAYS = 90;
 
 /** Inactivity expiry threshold in months */
 export const INACTIVITY_EXPIRY_MONTHS = 12;
+
+/** Maximum retry attempts for code generation on collision */
+export const MAX_COLLISION_RETRIES = 5;
 
 @Injectable()
 export class LoyaltyService {
@@ -103,6 +107,7 @@ export class LoyaltyService {
    * Redeem loyalty points for a discount code.
    * 100 points = 1% discount, capped at 50%.
    * Discount code is valid for 90 days.
+   * Uses cryptographically secure code generation with automatic retry on collision.
    */
   async redeemPointsForDiscount(
     userId: string,
@@ -136,8 +141,8 @@ export class LoyaltyService {
       const rawPercent = points / POINTS_PER_PERCENT;
       const discountPercent = Math.min(rawPercent, MAX_DISCOUNT_PERCENT);
 
-      // Generate unique discount code
-      const code = this.generateDiscountCode();
+      // Generate unique discount code with collision retry
+      const code = await this.generateUniqueDiscountCode(em);
 
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + DISCOUNT_VALIDITY_DAYS);
@@ -601,6 +606,31 @@ export class LoyaltyService {
 
   // ── Private Helpers ────────────────────────────────────────────────────────
 
+  /**
+   * Generates a cryptographically secure discount code with automatic collision retry.
+   * Format: LOYALTY-XXXX-XXXX (16 chars alphanumeric)
+   * Retries up to MAX_COLLISION_RETRIES times on unique constraint violation.
+   */
+  private async generateUniqueDiscountCode(em: any): Promise<string> {
+    for (let attempt = 1; attempt <= MAX_COLLISION_RETRIES; attempt++) {
+      const code = this.generateDiscountCode();
+
+      // Check if code already exists
+      const existing = await em.findOne(LoyaltyDiscount, { where: { code } });
+      if (!existing) {
+        return code;
+      }
+
+      this.logger.warn(
+        `Discount code collision detected (attempt ${attempt}/${MAX_COLLISION_RETRIES}): ${code}`,
+      );
+    }
+
+    throw new Error(
+      `Failed to generate unique discount code after ${MAX_COLLISION_RETRIES} attempts`,
+    );
+  }
+
   private getTierUpgradeDiscountPercent(tier: string): number {
     switch (tier) {
       case 'Silver':
@@ -627,19 +657,33 @@ export class LoyaltyService {
     }
   }
 
+  /**
+   * Generates a cryptographically secure short code for tier-up discounts.
+   * Format: 8 alphanumeric characters
+   * Uses crypto.randomInt for secure randomness.
+   */
   private generateShortCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return Array.from({ length: 8 }, () =>
-      chars.charAt(Math.floor(Math.random() * chars.length)),
-    ).join('');
+    const code = Array.from({ length: 8 }, () => {
+      const randomIndex = randomInt(0, chars.length);
+      return chars[randomIndex];
+    }).join('');
+    return code;
   }
 
+  /**
+   * Generates a cryptographically secure discount code.
+   * Format: LOYALTY-XXXX-XXXX (16 chars alphanumeric)
+   * Uses crypto.randomBytes for secure randomness.
+   */
   private generateDiscountCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    const segment = (len: number) =>
-      Array.from({ length: len }, () =>
-        chars.charAt(Math.floor(Math.random() * chars.length)),
-      ).join('');
+    const segment = (len: number) => {
+      return Array.from({ length: len }, () => {
+        const randomIndex = randomInt(0, chars.length);
+        return chars[randomIndex];
+      }).join('');
+    };
     return `LOYALTY-${segment(4)}-${segment(4)}`;
   }
 
