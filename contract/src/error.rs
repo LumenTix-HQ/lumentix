@@ -493,4 +493,15 @@ pub enum LumentixError {
     IdempotencyKeyAlreadyUsed = 245,
     /// The supplied nonce does not match the account's expected next nonce
     InvalidTransactionNonce = 246,
+
+        InvalidTransactionNonce = 246,
+
+    // Emergency circuit breaker errors
+    CircuitBreakerActive = 247,
+    CircuitBreakerNotActive = 248,
+    CircuitBreakerNotConfigured = 249,
+    InvalidCircuitBreakerConfig = 250,
+    InsufficientResumeApprovals = 251,
+    DuplicateResumeApprover = 252,
+}
 }
