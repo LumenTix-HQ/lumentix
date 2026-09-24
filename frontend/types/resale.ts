@@ -1,3 +1,5 @@
+import type { Ticket } from '@/components/TicketCard';
+
 export interface ListTicketForResaleDto {
   price: number;
   currency: string;
@@ -14,7 +16,7 @@ export interface ResaleListingResult {
 }
 
 export interface ResalePurchaseResult {
-  ticket: any;
+  ticket: Ticket;
   salePrice: number;
   organizerFee: number;
   sellerPayout: number;
@@ -39,4 +41,23 @@ export interface ResaleTransaction {
 export interface OrganizerEarnings {
   totalEarnings: number;
   transactions: number;
+}
+
+export interface ResaleMarketplaceListing {
+  ticketId: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string | null;
+  askPrice: number;
+  currency: string;
+  sellerDisplayName: string;
+  listedAt: string;
+}
+
+export interface ResaleMarketplaceResponse {
+  data: ResaleMarketplaceListing[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }

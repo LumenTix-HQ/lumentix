@@ -42,6 +42,7 @@ import { EventHistory } from './entities/event-history.entity';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
 import { buildListEventsOptions } from './build-list-events-options';
+import { CalendarService, CalendarAttendeeContact } from '../calendar/calendar.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -84,7 +85,24 @@ export class EventsService {
     @InjectRepository(EventSeries)
     private readonly eventSeriesRepository: Repository<EventSeries>,
     @InjectQueue('events') private readonly eventsQueue: Queue,
+    private readonly calendarService: CalendarService,
   ) {}
+
+  /**
+   * Analytics #992 — distinct, non-empty attendee email/name contacts for
+   * an event, sourced from its ticket holders. Used to notify attendees of
+   * calendar-relevant changes (date/time/location updates, cancellation).
+   */
+  private async getCalendarAttendeeContacts(eventId: string): Promise<CalendarAttendeeContact[]> {
+    const tickets = await this.ticketRepository.find({ where: { eventId } });
+    const ownerIds = [...new Set(tickets.map((t) => t.ownerId))];
+    if (ownerIds.length === 0) return [];
+
+    const users = await this.userRepository.find({ where: { id: In(ownerIds) } });
+    return users
+      .filter((u) => Boolean(u.email))
+      .map((u) => ({ email: u.email, name: (u as any).displayName ?? undefined }));
+  }
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
     if (dto.currency) {
@@ -115,6 +133,9 @@ export class EventsService {
       this.eventStateService.validateTransition(event.status, dto.status);
     }
     const previousStatus = event.status;
+    const previousStartDate = event.startDate;
+    const previousEndDate = event.endDate;
+    const previousLocation = event.location;
     const isPublishing = dto.status === EventStatus.PUBLISHED && dto.status !== previousStatus;
     const updates: Partial<Event> = {
       ...(dto.title !== undefined && { title: dto.title }),
@@ -140,7 +161,29 @@ export class EventsService {
     if (dto.status !== undefined && dto.status !== previousStatus) {
       this.queueLifecycleEmail(saved).catch(() => undefined);
     }
+
+    const scheduleOrLocationChanged =
+      saved.startDate.getTime() !== previousStartDate.getTime() ||
+      saved.endDate.getTime() !== previousEndDate.getTime() ||
+      saved.location !== previousLocation;
+    if (scheduleOrLocationChanged && saved.status === EventStatus.PUBLISHED) {
+      this.notifyCalendarUpdate(saved).catch((err) =>
+        this.logger.error(`Failed to sync calendar update for event ${id}`, err?.stack),
+      );
+    }
+
     return saved;
+  }
+
+  /**
+   * Analytics #992 — email every ticket holder an updated calendar invite
+   * (RFC 5545 METHOD:REQUEST with an incremented SEQUENCE) after the
+   * event's date/time/location changes, so calendar apps that already
+   * imported the original invite pick up the change automatically.
+   */
+  private async notifyCalendarUpdate(event: Event): Promise<void> {
+    const attendees = await this.getCalendarAttendeeContacts(event.id);
+    await this.calendarService.sync_calendar_update(event, attendees);
   }
 
   async publishEvent(id: string, callerId: string): Promise<Event> {

@@ -9,6 +9,7 @@ import FilterPanel from "@/components/events/FilterPanel";
 import ErrorState from "@/components/events/ErrorState";
 import EmptyState from "@/components/events/EmptyState";
 import { useDebounce } from "@/hooks/useDebounce";
+import { precacheEventData, eventDataUrls } from "@/lib/pwa/offline-events";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const ITEMS_PER_PAGE = 12;
@@ -87,6 +88,16 @@ export default function EventsPage() {
 		observer.observe(sentinelRef.current);
 		return () => observer.disconnect();
 	}, [hasMore, isLoading, page, loadEvents]);
+
+	// Proactive cache-warming (issue #1162): once events render, hand the
+	// service worker the listing + detail URLs so the pages a user is likely
+	// to open next are already cached for offline use. Re-runs whenever the
+	// loaded set changes (filters, search, pagination) via the `events` dep.
+	useEffect(() => {
+		if (events.length === 0) return;
+		const ids = events.map((event) => event.id);
+		void precacheEventData(eventDataUrls(ids));
+	}, [events]);
 
 	const handleFilterChange = (newFilters: EventFilters) => {
 		setFilters(newFilters);

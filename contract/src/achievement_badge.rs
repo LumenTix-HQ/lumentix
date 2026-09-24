@@ -2,14 +2,17 @@
 //!
 //! Soulbound badges are minted to attendee wallets when milestone
 //! criteria are met. They are non-transferable (soulbound) and can be
-//! revoked by the admin after they expire.
+//! revoked by the contract admin after they expire.
 
+use crate::error::LumentixError;
+use crate::events::AchievementBadgeMinted;
+use crate::events::AchievementBadgeRevoked;
 use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 // ──────────────────────────── Types ─────────────────────────────────────────
 
 /// A soulbound achievement badge record.
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[soroban_sdk::contracttype]
 pub struct AchievementBadge {
     /// Unique badge identifier.
@@ -95,7 +98,8 @@ pub fn check_milestone_eligibility(
 /// Mint a soulbound achievement badge to `owner`.
 ///
 /// `expires_at` is a ledger timestamp; pass `0` for a non-expiring badge.
-/// Panics if the owner is not eligible.
+/// Returns `BadgeNotEligible` if the owner has not reached a milestone or
+/// already holds an active badge.
 pub fn mint_achievement_badge(
     env: &Env,
     owner: Address,
@@ -103,9 +107,9 @@ pub fn mint_achievement_badge(
     events_attended: u32,
     loyalty_points: u32,
     expires_at: u64,
-) -> AchievementBadge {
+) -> Result<AchievementBadge, LumentixError> {
     if !check_milestone_eligibility(env, &owner, events_attended, loyalty_points) {
-        panic!("Owner is not eligible for a milestone badge");
+        return Err(LumentixError::BadgeNotEligible);
     }
 
     let badge_id: u64 = env
@@ -143,37 +147,223 @@ pub fn mint_achievement_badge(
         .persistent()
         .set(&owner_badges_key(env, &owner), &owned);
 
-    env.events().publish(
-        (Symbol::new(env, "badge_minted"), badge_id),
-        (owner, milestone),
-    );
+    AchievementBadgeMinted::emit(env, badge_id, owner.clone(), milestone);
 
-    badge
+    Ok(badge)
 }
 
 /// Revoke an expired or invalid badge by ID.
 ///
 /// Only marks the badge as revoked in storage; does not delete the record
-/// so the ledger history is preserved. Panics if the badge does not exist.
-pub fn revoke_expired_badge(env: &Env, badge_id: u64) -> AchievementBadge {
+/// so the ledger history is preserved. Returns `BadgeNotFound` if the badge
+/// does not exist and `BadgeAlreadyRevoked` on a repeated revoke.
+pub fn revoke_expired_badge(
+    env: &Env,
+    badge_id: u64,
+) -> Result<AchievementBadge, LumentixError> {
     let key = badge_key(env, badge_id);
     let mut badge: AchievementBadge = env
         .storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| panic!("Badge {badge_id} does not exist"));
+        .ok_or(LumentixError::BadgeNotFound)?;
 
     if badge.revoked {
-        panic!("Badge {badge_id} is already revoked");
+        return Err(LumentixError::BadgeAlreadyRevoked);
     }
 
     badge.revoked = true;
     env.storage().persistent().set(&key, &badge);
 
-    env.events().publish(
-        (Symbol::new(env, "badge_revoked"), badge_id),
-        badge.owner.clone(),
-    );
+    AchievementBadgeRevoked::emit(env, badge_id, badge.owner.clone());
 
-    badge
+    Ok(badge)
+}
+
+/// Return a single badge by ID, or `BadgeNotFound`.
+pub fn get_badge(env: &Env, badge_id: u64) -> Result<AchievementBadge, LumentixError> {
+    env.storage()
+        .persistent()
+        .get(&badge_key(env, badge_id))
+        .ok_or(LumentixError::BadgeNotFound)
+}
+
+/// Return all badges currently held by `owner`.
+pub fn get_owner_badges(env: &Env, owner: &Address) -> Vec<AchievementBadge> {
+    let owned: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&owner_badges_key(env, owner))
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut badges: Vec<AchievementBadge> = Vec::new(env);
+    for badge_id in owned.iter() {
+        if let Some(badge) = env
+            .storage()
+            .persistent()
+            .get::<(Symbol, u64), AchievementBadge>(&badge_key(env, badge_id))
+        {
+            badges.push_back(badge);
+        }
+    }
+    badges
+}
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::error::LumentixError;
+    use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
+    use soroban_sdk::{testutils::Address as _, Env};
+
+    fn setup(env: &Env) -> (Address, LumentixContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register(LumentixContract, ());
+        let client = LumentixContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        client.initialize(&admin);
+        (admin, client)
+    }
+
+    fn milestone(env: &Env, text: &str) -> String {
+        String::from_str(env, text)
+    }
+
+    #[test]
+    fn mints_badge_when_events_threshold_met() {
+        let env = Env::default();
+        let (_admin, client) = setup(&env);
+        let owner = Address::generate(&env);
+
+        let badge = client.mint_achievement_badge(
+            &owner,
+            &milestone(&env, "Attended 10 Events"),
+            &10u32,
+            &0u32,
+            &0u64,
+        );
+
+        assert_eq!(badge.badge_id, 1);
+        assert_eq!(badge.owner, owner);
+        assert!(!badge.revoked);
+
+        let fetched = client.get_badge(&1);
+        assert_eq!(fetched.unwrap().owner, owner);
+        assert_eq!(client.get_owner_badges(&owner).len(), 1);
+    }
+
+    #[test]
+    fn mints_badge_when_loyalty_threshold_met() {
+        let env = Env::default();
+        let (_admin, client) = setup(&env);
+        let owner = Address::generate(&env);
+
+        let badge = client.mint_achievement_badge(
+            &owner,
+            &milestone(&env, "Loyalty Legend"),
+            &3u32,
+            &1000u32,
+            &0u64,
+        );
+
+        assert_eq!(badge.badge_id, 1);
+    }
+
+    #[test]
+    fn rejects_mint_below_all_thresholds() {
+        let env = Env::default();
+        let (_admin, client) = setup(&env);
+        let owner = Address::generate(&env);
+
+        let result = client.try_mint_achievement_badge(
+            &owner,
+            &milestone(&env, "Nope"),
+            &5u32,
+            &100u32,
+            &0u64,
+        );
+
+        assert_eq!(result, Err(Ok(LumentixError::BadgeNotEligible)));
+    }
+
+    #[test]
+    fn rejects_second_active_badge() {
+        let env = Env::default();
+        let (_admin, client) = setup(&env);
+        let owner = Address::generate(&env);
+
+        client.mint_achievement_badge(
+            &owner,
+            &milestone(&env, "First"),
+            &10u32,
+            &0u32,
+            &0u64,
+        );
+
+        let result = client.try_mint_achievement_badge(
+            &owner,
+            &milestone(&env, "Second"),
+            &10u32,
+            &0u32,
+            &0u64,
+        );
+        assert_eq!(result, Err(Ok(LumentixError::BadgeNotEligible)));
+    }
+
+    #[test]
+    fn revokes_badge_as_admin() {
+        let env = Env::default();
+        let (admin, client) = setup(&env);
+        let owner = Address::generate(&env);
+
+        client.mint_achievement_badge(&owner, &milestone(&env, "Shiny"), &10u32, &0u32, &0u64);
+
+        let revoked = client.revoke_expired_badge(&admin, &1);
+        assert!(revoked.unwrap().revoked);
+
+        // A repeated revoke is rejected.
+        let again = client.try_revoke_expired_badge(&admin, &1);
+        assert_eq!(again, Err(Ok(LumentixError::BadgeAlreadyRevoked)));
+    }
+
+    #[test]
+    fn rejects_revoke_by_non_admin() {
+        let env = Env::default();
+        let (_admin, client) = setup(&env);
+        let owner = Address::generate(&env);
+        let intruder = Address::generate(&env);
+
+        client.mint_achievement_badge(&owner, &milestone(&env, "Shiny"), &10u32, &0u32, &0u64);
+
+        let result = client.try_revoke_expired_badge(&intruder, &1);
+        assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+    }
+
+    #[test]
+    fn rejects_revoke_of_unknown_badge() {
+        let env = Env::default();
+        let (admin, client) = setup(&env);
+
+        let result = client.try_revoke_expired_badge(&admin, &99);
+        assert_eq!(result, Err(Ok(LumentixError::BadgeNotFound)));
+    }
+
+    #[test]
+    fn get_badge_returns_not_found() {
+        let env = Env::default();
+        let (_admin, client) = setup(&env);
+
+        let result = client.try_get_badge(&404);
+        assert_eq!(result, Err(Ok(LumentixError::BadgeNotFound)));
+    }
+
+    #[test]
+    fn check_milestone_eligibility_mirrors_thresholds() {
+        let env = Env::default();
+        let (_admin, client) = setup(&env);
+        let owner = Address::generate(&env);
+
+        assert!(!client.check_milestone_eligibility(&owner, &9u32, &999u32));
+        assert!(client.check_milestone_eligibility(&owner, &10u32, &999u32));
+        assert!(client.check_milestone_eligibility(&owner, &9u32, &1000u32));
+    }
 }

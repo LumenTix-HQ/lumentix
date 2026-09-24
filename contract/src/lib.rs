@@ -229,6 +229,7 @@ pub mod royalty;
 pub mod storage;
 pub mod types;
 pub mod validation;
+pub mod achievement_badge;
 
 #[cfg(test)]
 pub mod test;
@@ -286,6 +287,7 @@ pub use events::{
     BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
     PassPackageCreated, PassAllowanceDeducted,
     AgeProofIssued, AgeProofVerified, UnderagePurchaseRejected,
+    AchievementBadgeMinted, AchievementBadgeRevoked,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};

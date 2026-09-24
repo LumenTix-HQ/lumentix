@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import {
@@ -39,7 +40,7 @@ export class FraudDetectionController {
    */
   @Get('secondary-market-analytics/:eventId')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get secondary market fraud analytics' })
   @ApiResponse({
@@ -70,7 +71,7 @@ export class FraudDetectionController {
    */
   @Get('flagged-transactions')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get flagged transactions' })
   @ApiResponse({
@@ -94,26 +95,15 @@ export class FraudDetectionController {
    */
   @Get('flagged-transactions/:id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get flagged transaction details' })
   @ApiResponse({
     status: 200,
     description: 'Flagged transaction details',
   })
-  async getFlaggedTransactionById(@Param('id') id: string) {
-    const result = await this.fraudDetectionService.getFlaggedTransactions(
-      undefined,
-      0,
-      1,
-    );
-
-    const transaction = result.data.find((t) => t.id === id);
-    if (!transaction) {
-      throw new BadRequestException('Flagged transaction not found');
-    }
-
-    return transaction;
+  async getFlaggedTransactionById(@Param('id', ParseUUIDPipe) id: string) {
+    return this.fraudDetectionService.getFlaggedTransactionById(id);
   }
 
   /**
@@ -121,7 +111,7 @@ export class FraudDetectionController {
    */
   @Patch('flagged-transactions/:id/review')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Review flagged transaction' })
@@ -155,7 +145,7 @@ export class FraudDetectionController {
    */
   @Post('flag-transaction')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Flag transaction as fraudulent' })
@@ -195,7 +185,7 @@ export class FraudDetectionController {
    */
   @Post('hold-trade')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Hold suspicious trade' })
@@ -227,7 +217,7 @@ export class FraudDetectionController {
    */
   @Post('analyze-patterns')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Analyze trade patterns for fraud' })
@@ -269,7 +259,7 @@ export class FraudDetectionController {
    */
   @Post('detect-patterns')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(Role.ADMIN)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Detect fraud patterns' })
@@ -309,7 +299,7 @@ export class FraudDetectionController {
    */
   @Post('calculate-risk-score')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
+  @Roles(Role.ADMIN, Role.ORGANIZER)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Calculate trade risk score' })

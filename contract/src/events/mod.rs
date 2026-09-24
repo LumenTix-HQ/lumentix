@@ -1813,3 +1813,48 @@ impl OfflineScansSyncCompleted {
         );
     }
 }
+
+/// Event emitted when an age proof is registered for an event subject
+pub struct AgeProofIssued;
+impl AgeProofIssued {
+    pub fn emit(env: &Env, subject: Address, proof_id: u64) {
+        env.events()
+            .publish((symbol_short!("ageiss"),), (subject, proof_id));
+    }
+}
+
+/// Event emitted when an event age proof is verified
+pub struct AgeProofVerified;
+impl AgeProofVerified {
+    pub fn emit(env: &Env, subject: Address, event_id: u64) {
+        env.events()
+            .publish((symbol_short!("agever"),), (subject, event_id));
+    }
+}
+
+/// Event emitted when an underage purchase is rejected
+pub struct UnderagePurchaseRejected;
+impl UnderagePurchaseRejected {
+    pub fn emit(env: &Env, buyer: Address, event_id: u64) {
+        env.events()
+            .publish((symbol_short!("ageund"),), (buyer, event_id));
+    }
+}
+
+/// Event emitted when a gamification achievement badge is minted (Issue #1208)
+pub struct AchievementBadgeMinted;
+impl AchievementBadgeMinted {
+    pub fn emit(env: &Env, badge_id: u64, owner: Address, milestone: String) {
+        env.events()
+            .publish((symbol_short!("badgmint"),), (badge_id, owner, milestone));
+    }
+}
+
+/// Event emitted when an achievement badge is revoked (Issue #1208)
+pub struct AchievementBadgeRevoked;
+impl AchievementBadgeRevoked {
+    pub fn emit(env: &Env, badge_id: u64, owner: Address) {
+        env.events()
+            .publish((symbol_short!("badgrev"),), (badge_id, owner));
+    }
+}

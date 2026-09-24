@@ -58,6 +58,12 @@ export default function AttendeesPage({ params }: { params: { id: string } }) {
           </div>
           <div className="flex items-center gap-2">
             <Link
+              href={`/organizer/events/${eventId}/kiosk`}
+              className="inline-flex items-center rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2 text-sm font-bold text-white transition-transform hover:scale-[1.01]"
+            >
+              Launch Kiosk Mode
+            </Link>
+            <Link
               href={`/organizer/events/${eventId}/edit`}
               className="inline-flex items-center rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium text-gray-100 transition hover:bg-white/10"
             >

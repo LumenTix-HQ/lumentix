@@ -26,11 +26,12 @@ describe('SeatMap', () => {
   it('disables booked and held seats and ignores clicks on them', () => {
     const onSelect = vi.fn();
     render(<SeatMap seats={seats} sectionName="Main" onSelectSeat={onSelect} />);
-    const booked = screen.getByTitle('A2 - booked') as HTMLButtonElement;
-    const held = screen.getByTitle('A3 - held') as HTMLButtonElement;
-    expect(booked).toBeDisabled();
-    expect(held).toBeDisabled();
+    const booked = screen.getByTitle('A2 - booked');
+    const held = screen.getByTitle('A3 - held');
+    expect(booked).toHaveAttribute('aria-disabled', 'true');
+    expect(held).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(booked);
+    fireEvent.click(held);
     expect(onSelect).not.toHaveBeenCalled();
   });
 
@@ -42,5 +43,17 @@ describe('SeatMap', () => {
     seat.focus();
     await user.keyboard('{Enter}');
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
+  });
+
+  // Regression test for #1146: seat sizing must come from real SVG geometry,
+  // not an interpolated arbitrary-value class name like `w-[${SEAT_SIZE}px]`
+  // that the Tailwind JIT scanner can never see as a literal string.
+  it('applies a real width/height to each seat', () => {
+    render(<SeatMap seats={seats} sectionName="Main" onSelectSeat={() => {}} />);
+    const seat = screen.getByTitle('A1 - available');
+    const rect = seat.querySelector('rect');
+    expect(rect).not.toBeNull();
+    expect(rect).toHaveAttribute('width', '36');
+    expect(rect).toHaveAttribute('height', '36');
   });
 });

@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
+  Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -63,5 +65,20 @@ export class TermsOfServiceController {
   @ApiResponse({ status: 200, description: 'ToS history' })
   getHistory(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.tosService.getEventTosHistory(eventId);
+  }
+
+  @Post('validate/:version')
+  @ApiOperation({
+    summary: 'Validate a ToS agreement version',
+    description:
+      'Public. Checks whether a specific version of the Terms of Service is active and valid for the event.',
+  })
+  @ApiResponse({ status: 201, description: 'Validation result returned' })
+  @ApiResponse({ status: 404, description: 'ToS version not found' })
+  validateTosAgreement(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Param('version', ParseIntPipe) version: number,
+  ) {
+    return this.tosService.validateTosAgreement(eventId, version);
   }
 }

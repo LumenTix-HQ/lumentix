@@ -1,5 +1,50 @@
 import type { Event, PaginatedResponse } from "@/types/event";
 import type { CreateEventFormValues } from "@/lib/schemas/create-event.schema";
+import type { SponsorTier } from "@/components/SponsorTierCard";
+
+export interface SponsorEventSummary {
+  id: string;
+  title: string;
+  sponsorTiers?: SponsorTier[];
+}
+
+export interface InitiateSponsorshipResult {
+  xdr: string;
+  contributionId: string;
+}
+
+export interface ConfirmSponsorshipResult {
+  rank?: number;
+  transactionHash?: string;
+}
+
+export interface InitiateSponsorshipInput {
+  tierId: string;
+  amount: number;
+  displayName?: string;
+  logoUrl?: string;
+  sponsorPublicKey: string;
+}
+import type {
+  BuyResaleTicketDto,
+  ListTicketForResaleDto,
+  ResaleMarketplaceResponse,
+  ResalePurchaseResult,
+} from "@/types/resale";
+
+export interface BatchTransferEntry {
+  ticketId: string;
+  recipientUserId: string;
+}
+
+export interface BatchTransferResult {
+  success: boolean;
+  transferredCount: number;
+  errors?: string[];
+}
+  NotificationPreferences,
+  SaveNotificationPreferences,
+} from "@/types/notification-preference";
 
 const PROXY_BASE = "/api/proxy";
 
@@ -182,11 +227,72 @@ export const apiClient = {
       createdAt: string;
     }>("/users/me"),
 
+  getResaleMarketplace: (params?: Record<string, string>) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return request<ResaleMarketplaceResponse>(`/resale/marketplace${qs}`);
+  },
+  listTicketForResale: (ticketId, dto: ListTicketForResaleDto) =>
+    request(`/resale/list/${ticketId}`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+  buyResaleTicket: (ticketId, dto: BuyResaleTicketDto) =>
+    request<ResalePurchaseResult>(`/resale/buy/${ticketId}`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+  cancelResaleListing: (ticketId: string) =>
+    request(`/resale/cancel/${ticketId}`, { method: "POST" }),
+
+  batchTransferTickets: (transfers: BatchTransferEntry[]) =>
+    request<BatchTransferResult>("/tickets/batch-transfer", {
+      method: "POST",
+      body: JSON.stringify({ transfers }),
+    }),
+
   patchMe: (body: { displayName?: string }) =>
     request<{ id: string; displayName: string | null }>("/users/me", {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
 
+  getNotificationPreferences: () =>
+    request<NotificationPreferences>("/notifications/preferences"),
+
+  saveNotificationPreferences: (body: SaveNotificationPreferences) =>
+    request<NotificationPreferences>("/notifications/preferences", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  getSponsorEvent: (id: string) => request<SponsorEventSummary>(`/events/${id}`),
+  initiateSponsorship: (eventId: string, body: InitiateSponsorshipInput) =>
+    request<InitiateSponsorshipResult>(`/events/${eventId}/sponsors`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  confirmSponsorship: (contributionId: string, signedXdr: string) =>
+    request<ConfirmSponsorshipResult>(`/sponsors/contributions/${contributionId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ signedXdr }),
+    }),
+  submitReview: (
+    body: { eventId: string; ticketId: string; rating: number; comment?: string },
+    _token?: string,
+  ) =>
+    request<any>("/reviews", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getMyReviews: (_token?: string) =>
+    request<any>("/reviews/me"),
+
+  getOrganizerReputation: (organizerId: string, _token?: string) =>
+    request<any>(`/reviews/reputation/${organizerId}`),
+
+  getEventSentiment: (eventId: string) =>
+    request<any>(`/reviews/events/${eventId}/sentiment`),
 };

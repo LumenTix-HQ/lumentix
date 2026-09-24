@@ -6,39 +6,40 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, replace: vi.fn() }),
 }));
 
+const useAuth = vi.fn();
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => useAuth(),
+}));
+
 import AdminLayout from '@/app/admin/layout';
-
-function makeToken(payload: Record<string, unknown>): string {
-  const b64 = btoa(JSON.stringify(payload)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `header.${b64}.sig`;
-}
-
-const getItem = vi.fn();
 
 describe('AdminLayout auth gating', () => {
   beforeEach(() => {
     push.mockClear();
-    getItem.mockReset();
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      value: { getItem, setItem: vi.fn(), removeItem: vi.fn(), clear: vi.fn() },
-    });
+    useAuth.mockReset();
+  });
+
+  it('renders nothing while the session is still loading', () => {
+    useAuth.mockReturnValue({ user: null, isLoading: true });
+    const { container } = render(<AdminLayout><div>secret</div></AdminLayout>);
+    expect(container).toBeEmptyDOMElement();
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('redirects to login when unauthenticated', async () => {
-    getItem.mockReturnValue(null);
+    useAuth.mockReturnValue({ user: null, isLoading: false });
     render(<AdminLayout><div>secret</div></AdminLayout>);
     await waitFor(() => expect(push).toHaveBeenCalledWith('/login?redirect=/admin/users'));
   });
 
   it('redirects to home when the role is not admin', async () => {
-    getItem.mockReturnValue(makeToken({ sub: 'u1', role: 'user' }));
+    useAuth.mockReturnValue({ user: { id: 'u1', email: 'u1@example.com', role: 'user' }, isLoading: false });
     render(<AdminLayout><div>secret</div></AdminLayout>);
     await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
   });
 
-  it('renders children for an admin token', async () => {
-    getItem.mockReturnValue(makeToken({ sub: 'u1', role: 'admin' }));
+  it('renders children for an authenticated admin user', async () => {
+    useAuth.mockReturnValue({ user: { id: 'u1', email: 'admin@example.com', role: 'admin' }, isLoading: false });
     const { findByText } = render(<AdminLayout><div>secret</div></AdminLayout>);
     expect(await findByText('secret')).toBeInTheDocument();
     expect(push).not.toHaveBeenCalled();

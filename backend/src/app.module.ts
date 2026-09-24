@@ -46,7 +46,6 @@ import { StreamingModule } from './streaming/streaming.module';
 import { DecentralizedStorageModule } from './decentralized-storage/decentralized-storage.module';
 import { ChatModule } from './chat/chat.module';
 import { ZkpModule } from './zkp/zkp.module';
-import { LoyaltyModule } from './loyalty/loyalty.module';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { MerchModule } from './merch/merch.module';
 import { UpgradeAuctionModule } from './upgrade-auction/upgrade-auction.module';
@@ -56,6 +55,10 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { TicketDesignModule } from './ticket-design/ticket-design.module';
 import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
+import { IdentityModule } from './identity/identity.module';
+import { FraudDetectionModule } from './fraud-detection/fraud-detection.module';
+import { PassPackagesModule } from './pass-packages/pass-packages.module';
+import { TestingModule } from './testing/testing.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
 import { RateLimitModule } from './common/rate-limit.module';
@@ -152,7 +155,6 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     ChatModule,
     ZkpModule,
     WorkspaceModule,
-    LoyaltyModule,
     TelemetryModule,
     MerchModule,
     UpgradeAuctionModule,
@@ -162,8 +164,12 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     TicketDesignModule,
     ScanAnalyticsModule,
     TermsOfServiceModule,
+    FraudDetectionModule,
+    PassPackagesModule,
+    TestingModule,
     InternalModule,
     InternalRoutingModule,
+    IdentityModule,
   ],
   controllers: [AppController],
   providers: [

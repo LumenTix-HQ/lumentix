@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAccessToken, setTokens } from "@/lib/auth/auth";
 import TicketCard, { Ticket } from "@/components/TicketCard";
+import BatchTransferPanel from "@/components/BatchTransferPanel";
+import { apiClient } from "@/lib/api-client";
 
 type Tab = "upcoming" | "past" | "cancelled" | "refundable";
 
@@ -67,6 +69,12 @@ export default function MyTicketsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("upcoming");
   const [refundingId, setRefundingId] = useState<string | null>(null);
   const [refundSuccess, setRefundSuccess] = useState<string | null>(null);
+  const [resaleTarget, setResaleTarget] = useState<Ticket | null>(null);
+  const [resalePrice, setResalePrice] = useState("");
+  const [resaleCurrency, setResaleCurrency] = useState("XLM");
+  const [resaleBusy, setResaleBusy] = useState(false);
+  const [resaleError, setResaleError] = useState<string | null>(null);
+  const [resaleSuccess, setResaleSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     const token = getAccessToken();
@@ -121,8 +129,34 @@ export default function MyTicketsPage() {
     }
   };
 
+  const handleResaleSubmit = async (ticket: Ticket) => {
+    setResaleBusy(true);
+    setResaleError(null);
+    setResaleSuccess(null);
+    const price = Number(resalePrice);
+    if (!price || price <= 0) {
+      setResaleError("Enter a price greater than zero.");
+      setResaleBusy(false);
+      return;
+    }
+    try {
+      await apiClient.listTicketForResale(ticket.id, {
+        price,
+        currency: resaleCurrency || "XLM",
+      });
+      setResaleSuccess(`"${ticket.eventTitle}" is now listed for resale on the marketplace.`);
+      setResaleTarget(null);
+      setResalePrice("");
+    } catch (err) {
+      setResaleError(err instanceof Error ? err.message : "Failed to list ticket for resale.");
+    } finally {
+      setResaleBusy(false);
+    }
+  };
+
   const grouped = groupTickets(tickets, registrations);
   const tabTickets = grouped[activeTab];
+  const transferable = grouped.upcoming;
 
   return (
     <main className="min-h-screen bg-gray-900 text-white pt-24 pb-16">
@@ -156,6 +190,26 @@ export default function MyTicketsPage() {
           ))}
         </div>
 
+        {transferable.length > 0 && (
+          <div className="mb-8">
+            <BatchTransferPanel
+              tickets={transferable}
+              onTransferred={() =>
+                setRefundSuccess("Transfer applied. Refresh to see updated ownership.")
+              }
+            />
+          </div>
+        )}
+
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm text-gray-400 font-medium">
+            Resale marketplace
+          </h2>
+          <a href="/resale" className="text-sm text-blue-400 hover:text-blue-300 transition underline">
+            Browse listed tickets →
+          </a>
+        </div>
+
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -185,6 +239,14 @@ export default function MyTicketsPage() {
             {tabTickets.map((ticket) => (
               <div key={ticket.id} className="relative">
                 <TicketCard ticket={ticket} />
+                {ticket.status === "confirmed" && (
+                  <button
+                    onClick={() => { setResaleTarget(ticket); setResalePrice(""); setResaleError(null); setResaleSuccess(null); }}
+                    className="mt-2 w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+                  >
+                    List for resale
+                  </button>
+                )}
                 {activeTab === "refundable" && (
                   <button
                     onClick={() => handleRefund(ticket.id)}
@@ -198,7 +260,69 @@ export default function MyTicketsPage() {
             ))}
           </div>
         )}
+
+        {resaleSuccess && (
+          <div className="mb-4 p-3 rounded-xl bg-green-500/15 border border-green-500/30 text-sm text-green-300">
+            {resaleSuccess}
+          </div>
+        )}
       </div>
+
+      {resaleTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setResaleTarget(null)}>
+          <div
+            className="w-full max-w-md rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-white mb-1">List for resale</h3>
+            <p className="text-sm text-gray-500 mb-5">
+              List <span className="text-white">"{resaleTarget.eventTitle}"</span> on the resale
+              marketplace. Price is capped at 150% of the original ticket price.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+              <label className="block text-xs text-gray-400">
+                Price
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={resalePrice}
+                  onChange={(e) => setResalePrice(e.target.value)}
+                  placeholder="0.00"
+                  className="mt-1.5 w-full rounded-lg bg-gray-800 border border-gray-600 text-white px-3 py-2 text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                />
+              </label>
+              <label className="block text-xs text-gray-400">
+                Currency
+                <input
+                  type="text"
+                  value={resaleCurrency}
+                  onChange={(e) => setResaleCurrency(e.target.value.toUpperCase())}
+                  className="mt-1.5 w-full rounded-lg bg-gray-800 border border-gray-600 text-white px-3 py-2 text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                />
+              </label>
+            </div>
+            {resaleError && <p className="mb-4 text-sm text-red-400">{resaleError}</p>}
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setResaleTarget(null)}
+                className="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:text-white text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={resaleBusy}
+                onClick={() => handleResaleSubmit(resaleTarget)}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+              >
+                {resaleBusy ? "Listing…" : "List for resale"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -42,6 +42,26 @@ export class PassPackagesController {
   }
 
   /**
+   * Get user's pass packages
+   * Declared before GET :id so 'my-passes' is not captured as an id.
+   */
+  @Get('my-passes')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get my purchased pass packages' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of user pass packages',
+  })
+  async getMyPassPackages(
+    @Request() req: any,
+    @Query('skip') skip = 0,
+    @Query('take') take = 20,
+  ) {
+    return this.passPackagesService.getUserPassPackages(req.user.id, skip, take);
+  }
+
+  /**
    * Get pass package by ID
    */
   @Get(':id')
@@ -59,7 +79,7 @@ export class PassPackagesController {
    */
   @Post()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new pass package' })
@@ -96,25 +116,6 @@ export class PassPackagesController {
       packageId,
       body.stellarSignature,
     );
-  }
-
-  /**
-   * Get user's pass packages
-   */
-  @Get('my-passes')
-  @UseGuards(AuthGuard('jwt'))
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get my purchased pass packages' })
-  @ApiResponse({
-    status: 200,
-    description: 'List of user pass packages',
-  })
-  async getMyPassPackages(
-    @Request() req: any,
-    @Query('skip') skip = 0,
-    @Query('take') take = 20,
-  ) {
-    return this.passPackagesService.getUserPassPackages(req.user.id, skip, take);
   }
 
   /**
@@ -174,7 +175,7 @@ export class PassPackagesController {
    */
   @Patch(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Update pass package' })
@@ -199,7 +200,7 @@ export class PassPackagesController {
    */
   @Delete(':id')
   @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Delete pass package' })

@@ -1,7 +1,6 @@
 use crate::error::LumentixError;
-use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, AgeProof, BridgeTransaction,
     CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
@@ -84,6 +83,8 @@ const SCHEDULE_VOTE_PREFIX: &str = "SCHVOTE_";
 const SCHEDULE_VOTE_CAST_PREFIX: &str = "SCHCAST_";
 const PROMO_CODE_PREFIX: &str = "PROMO_";
 const PROMO_USER_USAGE_PREFIX: &str = "PROMOUSR_";
+const AGE_PROOF_PREFIX: &str = "AGEPF_";
+const EVENT_MIN_AGE_PREFIX: &str = "MINAGE_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -392,6 +393,47 @@ pub fn set_event_biometric_required(env: &Env, event_id: u64, required: bool) {
 pub fn is_event_biometric_required(env: &Env, event_id: u64) -> bool {
     let key = (EVENT_BIOMETRIC_REQUIRED_PREFIX, event_id);
     env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Age Verification (Issue #970)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Persist a fresh age proof for `subject`.
+pub fn set_age_proof(env: &Env, subject: &Address, proof: &AgeProof) {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    env.storage().persistent().set(&key, proof);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Read the current age proof for `subject`, if any.
+pub fn get_age_proof(env: &Env, subject: &Address) -> Option<AgeProof> {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    let proof: Option<AgeProof> = env.storage().persistent().get(&key);
+    if proof.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    proof
+}
+
+/// Set (or clear, with 0) the minimum age required to purchase a ticket to `event_id`.
+pub fn set_event_min_age(env: &Env, event_id: u64, min_age: u32) {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    env.storage().persistent().set(&key, &min_age);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Minimum age required to purchase a ticket to `event_id`. Returns 0 when no
+/// age restriction is configured.
+pub fn get_event_min_age(env: &Env, event_id: u64) -> u32 {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    env.storage().persistent().get(&key).unwrap_or(0)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2453,4 +2495,48 @@ pub fn get_offline_scan(env: &Env, ticket_id: u64) -> Option<OfflineScanRecord> 
 pub fn has_offline_scan_synced(env: &Env, ticket_id: u64) -> bool {
     let key = (OFFLINE_SCAN_PREFIX, ticket_id);
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Transaction replay protection (Issue #1007)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TX_NONCE_PREFIX: &str = "TXNONCE_";
+const IDEMPOTENCY_KEY_PREFIX: &str = "IDEMKEY_";
+
+/// Returns the next nonce that would be issued to `account`, without
+/// consuming it. Useful for a client to preview the value it should embed
+/// in an idempotency key before submitting a transaction.
+pub fn get_transaction_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_PREFIX, account.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Atomically returns the next nonce for `account` and advances its counter,
+/// so two calls in the same invocation never receive the same value.
+pub fn consume_transaction_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_PREFIX, account.clone());
+    let next: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &(next + 1));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    next
+}
+
+/// Whether `key` has already been consumed by a prior `consume_idempotency_key`
+/// call, i.e. whether accepting this call again would be a replay.
+pub fn is_idempotency_key_used(env: &Env, key: &BytesN<32>) -> bool {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, key.clone());
+    env.storage().persistent().has(&storage_key)
+}
+
+/// Marks `key` as used so a later call with the same key can be rejected as
+/// a replay. Callers should check `is_idempotency_key_used` first.
+pub fn consume_idempotency_key(env: &Env, key: &BytesN<32>) {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, key.clone());
+    env.storage().persistent().set(&storage_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }

@@ -5,6 +5,13 @@ import { Queue } from 'bull';
 import * as nodemailer from 'nodemailer';
 import { TemplateService } from '../common/mailer/template.service';
 
+export interface SendMailAttachment {
+  filename: string;
+  /** Raw attachment content (e.g. an .ics file's text). */
+  content: string;
+  contentType?: string;
+}
+
 export interface SendMailOptions {
   to: string;
   subject: string;
@@ -14,6 +21,7 @@ export interface SendMailOptions {
   template?: string;
   /** Context variables injected into the Handlebars template. */
   context?: Record<string, unknown>;
+  attachments?: SendMailAttachment[];
 }
 
 @Injectable()
@@ -37,11 +45,24 @@ export class MailerService {
       this.logger.warn('Missing SMTP configuration environment variables.');
     }
 
+    // Port 465 is implicit TLS and requires `secure: true`; 587/25 use
+    // STARTTLS and expect `secure: false`. An explicit SMTP_SECURE env var
+    // can still override this for providers that don't follow that
+    // convention.
+    const secureOverride = this.configService.get<string>('SMTP_SECURE');
+    const secure = secureOverride !== undefined ? secureOverride === 'true' : port === 465;
+
+    if (port === 465 && !secure) {
+      this.logger.warn(
+        'SMTP_PORT is 465 (implicit TLS) but SMTP_SECURE=false was set explicitly — this will likely fail to connect.',
+      );
+    }
+
     this.transporter = nodemailer.createTransport({
       host,
       port,
       auth: { user, pass },
-      secure: false,
+      secure,
     });
   }
 
@@ -56,6 +77,11 @@ export class MailerService {
       to: options.to,
       subject: options.subject,
       html,
+      attachments: options.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
   }
 

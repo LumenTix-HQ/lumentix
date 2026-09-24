@@ -266,20 +266,20 @@ pub enum LumentixError {
     SecurityIncidentNotFound = 108,
 
     // ═══════════════════════════════════════════════════════════════════════
-    // AI-Powered Networking & Matchmaking errors (111–120)
+    // AI-Powered Networking & Matchmaking errors (152–157)
     // ═══════════════════════════════════════════════════════════════════════
     /// Attendee profile not found
-    ProfileNotFound = 111,
+    ProfileNotFound = 152,
     /// Attendee profile already exists
-    ProfileAlreadyExists = 112,
+    ProfileAlreadyExists = 153,
     /// Connection request not found
-    ConnectionRequestNotFound = 113,
+    ConnectionRequestNotFound = 154,
     /// Connection request already exists between these attendees for this event
-    ConnectionAlreadyExists = 114,
+    ConnectionAlreadyExists = 155,
     /// Cannot send a connection request to yourself
-    CannotSelfConnect = 115,
+    CannotSelfConnect = 156,
     /// Attendee's privacy settings restrict this operation
-    PrivacyLevelRestricted = 116,
+    PrivacyLevelRestricted = 157,
     /// Ticket transfers are currently locked by an organizer-defined blackout window
     TransferBlackoutActive = 109,
     /// Referral link code is already claimed by another referrer
@@ -485,4 +485,52 @@ pub enum LumentixError {
     PassPackageExhausted = 243,
     /// Requested event is not part of this pass package
     PassPackageEventNotEligible = 244,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Transaction replay protection errors (Issue #1007)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// The supplied idempotency key has already been consumed by a prior call
+    IdempotencyKeyAlreadyUsed = 245,
+    /// The supplied nonce does not match the account's expected next nonce
+    InvalidTransactionNonce = 246,
+
+// ═══════════════════════════════════════════════════════════════════════
+    // Emergency circuit breaker errors
+    // ═══════════════════════════════════════════════════════════════════════
+    CircuitBreakerActive = 247,
+    CircuitBreakerNotActive = 248,
+    CircuitBreakerNotConfigured = 249,
+    InvalidCircuitBreakerConfig = 250,
+    InsufficientResumeApprovals = 251,
+    DuplicateResumeApprover = 252,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Age Verification errors (Issue #970)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No age proof exists for the subject
+    AgeProofNotFound = 253,
+    /// Age proof has passed its validity window
+    AgeProofExpired = 254,
+    /// Age proof does not clear the event's minimum age requirement
+    AgeVerificationFailed = 255,
+    /// Purchase rejected because the buyer is underage for the event
+    UnderageEventPurchase = 256,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Royalty splits errors (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No royalty splits configured for the event
+    RoyaltySplitsNotConfigured = 257,
+    /// Royalty split basis points must sum to 10 000 (100%)
+    InvalidRoyaltySplit = 258,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFT errors (Issue #1208)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Owner does not meet any milestone threshold for the badge
+    BadgeNotEligible = 259,
+    /// Badge does not exist
+    BadgeNotFound = 260,
+    /// Badge is already revoked
+    BadgeAlreadyRevoked = 261,
 }

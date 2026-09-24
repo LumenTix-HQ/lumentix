@@ -38,9 +38,11 @@ use crate::events::{
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     EventCertificateIssued, CertificationStandardUpdated, UnderagePurchaseRejected,
+    AgeProofIssued, AgeProofVerified,
     BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
     PassPackageCreated, PassAllowanceDeducted,
 };
+use crate::achievement_badge;
 use crate::storage;
 use crate::types::{
     OfflineScanRecord, OfflineScanResult, ValidationProof, WalletSession,
@@ -61,7 +63,7 @@ use crate::types::{
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
-    CertificationStandard, AgeProof,
+    CertificationStandard, AgeProof, EventCertificate,
     BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
 };
 use crate::validation;
@@ -853,6 +855,140 @@ impl LumentixContract {
         to: Address,
     ) -> Result<(), LumentixError> {
         from.require_auth();
+
+        let mut ticket = storage::get_ticket(&env, ticket_id)?;
+        Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+        Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from, to);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Transaction replay protection (Issue #1007)
+    //
+    // These are additive primitives, kept separate from the existing
+    // `purchase_ticket`/`transfer_ticket` entry points so existing callers
+    // and tests keep working unchanged. A caller that wants replay
+    // protection for a transfer fetches a nonce, derives an idempotency key
+    // from it (e.g. hashing the nonce together with the call's arguments),
+    // and calls `transfer_ticket_idempotent` instead of
+    // `transfer_ticket` directly.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Returns the caller's next transaction nonce and advances their
+    /// counter, so two calls never receive the same value. A client
+    /// includes this nonce when deriving an idempotency key for a
+    /// subsequent sensitive call, so a network-retried or replayed
+    /// transaction carrying the same key can be rejected.
+    pub fn generate_transaction_nonce(env: Env, account: Address) -> u64 {
+        storage::consume_transaction_nonce(&env, &account)
+    }
+
+    /// Returns whether `key` is still unused (`true`) or has already been
+    /// consumed by a prior `reject_replay_attempt` call (`false`). Read-only
+    /// — does not itself consume the key.
+    pub fn validate_idempotency_key(env: Env, key: BytesN<32>) -> bool {
+        !storage::is_idempotency_key_used(&env, &key)
+    }
+
+    /// Consumes `key`, erroring with `IdempotencyKeyAlreadyUsed` if it has
+    /// already been used. Call this once, before any state changes, at the
+    /// start of an operation that must not be double-applied by a network
+    /// retry or a replayed transaction.
+    pub fn reject_replay_attempt(env: Env, key: BytesN<32>) -> Result<(), LumentixError> {
+        if storage::is_idempotency_key_used(&env, &key) {
+            return Err(LumentixError::IdempotencyKeyAlreadyUsed);
+        }
+        storage::consume_idempotency_key(&env, &key);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFTs (Issue #1208)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Returns whether `owner` meets any gamification milestone threshold
+    /// (attended 10 events or earned 1,000 loyalty points) and does not
+    /// already hold an active badge. Read-only view.
+    pub fn check_milestone_eligibility(
+        env: Env,
+        owner: Address,
+        events_attended: u32,
+        loyalty_points: u32,
+    ) -> bool {
+        achievement_badge::check_milestone_eligibility(
+            &env,
+            &owner,
+            events_attended,
+            loyalty_points,
+        )
+    }
+
+    /// Mint a soulbound achievement badge for `owner`. The caller must be
+    /// the owner (self-serve claim of a milestone). Fails with
+    /// `BadgeNotEligible` unless a milestone threshold is met and the owner
+    /// does not already hold an active badge.
+    pub fn mint_achievement_badge(
+        env: Env,
+        owner: Address,
+        milestone: String,
+        events_attended: u32,
+        loyalty_points: u32,
+        expires_at: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        owner.require_auth();
+        achievement_badge::mint_achievement_badge(
+            &env,
+            owner,
+            milestone,
+            events_attended,
+            loyalty_points,
+            expires_at,
+        )
+    }
+
+    /// Revoke an expired or invalid badge by ID. Only the platform admin
+    /// can revoke. Returns `BadgeNotFound` for an unknown badge and
+    /// `BadgeAlreadyRevoked` on a repeated revoke.
+    pub fn revoke_expired_badge(
+        env: Env,
+        admin: Address,
+        badge_id: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        admin.require_auth();
+        if storage::get_admin(&env) != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        achievement_badge::revoke_expired_badge(&env, badge_id)
+    }
+
+    /// Return a single achievement badge by ID, or `BadgeNotFound`.
+    pub fn get_badge(
+        env: Env,
+        badge_id: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        achievement_badge::get_badge(&env, badge_id)
+    }
+
+    /// Return all achievement badges currently held by `owner`.
+    pub fn get_owner_badges(
+        env: Env,
+        owner: Address,
+    ) -> Vec<crate::achievement_badge::AchievementBadge> {
+        achievement_badge::get_owner_badges(&env, &owner)
+    }
+
+    /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
+    /// network-retried or replayed call carrying the same `idempotency_key`
+    /// is rejected instead of transferring the ticket a second time.
+    pub fn transfer_ticket_idempotent(
+        env: Env,
+        ticket_id: u64,
+        from: Address,
+        to: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+        Self::reject_replay_attempt(env.clone(), idempotency_key)?;
 
         let mut ticket = storage::get_ticket(&env, ticket_id)?;
         Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
@@ -6673,6 +6809,82 @@ impl LumentixContract {
         }
 
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ON-CHAIN ROYALTY SPLITS FOR MULTI-ARTIST EVENTS (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Configure the royalty split map for an event.
+    ///
+    /// `splits` maps each `artist_address` to a basis-point share; the shares
+    /// must sum to 10 000 (100 %). Only the event's organizer (or the platform
+    /// admin) may configure splits. Calling again replaces the previous map.
+    pub fn set_royalty_splits(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        splits: Map<Address, u32>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::royalty::set_royalty_splits(&env, event_id, splits)
+    }
+
+    /// Execute a royalty distribution of `total_amount` escrow revenue for an
+    /// event, paying each configured artist their share through the contract's
+    /// settlement token.
+    ///
+    /// Only the event's organizer (or the platform admin) may trigger a
+    /// distribution, and the event must not be cancelled. The distribution
+    /// settles against the event's escrow balance, so it fails with
+    /// `InsufficientEscrow` if the escrow cannot cover `total_amount`.
+    /// Cumulative paid amounts can be inspected via `query_royalty_ledger`.
+    pub fn distribute_royalties(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        total_amount: i128,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        crate::royalty::distribute_royalties(&env, event_id, total_amount)
+    }
+
+    /// Read the cumulative royalties already paid to each artist for an event.
+    /// Returns an empty map when no splits or distributions exist yet.
+    pub fn query_royalty_ledger(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        Ok(crate::royalty::query_royalty_ledger(&env, event_id))
     }
 
     // Issue #651: Automated compliance checking

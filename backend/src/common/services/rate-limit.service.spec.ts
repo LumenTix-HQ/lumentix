@@ -66,4 +66,42 @@ describe('RateLimitService', () => {
       300,
     );
   });
+
+  it('enforces a separate per-API-key window without blocking the IP when only the API key is exhausted', async () => {
+    redis.exists.mockResolvedValue(0);
+    redis.zcard.mockResolvedValueOnce(0).mockResolvedValueOnce(5);
+    const service = new RateLimitService(redis as any, config as any);
+
+    await expect(service.enforce('203.0.113.10', 'key-1')).resolves.toEqual({
+      allowed: false,
+      retryAfterSeconds: 60,
+    });
+    expect(redis.set).not.toHaveBeenCalled();
+    expect(redis.zcard).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns early for an IP that is already blocked', async () => {
+    redis.exists.mockResolvedValue(1);
+    const service = new RateLimitService(redis as any, config as any);
+
+    await expect(service.enforce('203.0.113.10')).resolves.toEqual({
+      allowed: false,
+      retryAfterSeconds: 300,
+    });
+    expect(redis.zcard).not.toHaveBeenCalled();
+  });
+
+  it('increments both IP and API-key counters when a request is allowed', async () => {
+    redis.exists.mockResolvedValue(0);
+    redis.zcard.mockResolvedValue(0);
+    const service = new RateLimitService(redis as any, config as any);
+
+    await expect(service.enforce('203.0.113.10', 'key-1')).resolves.toEqual({
+      allowed: true,
+      retryAfterSeconds: 0,
+    });
+    const zaddKeys = redis.zadd.mock.calls.map((call: unknown[]) => call[0]);
+    expect(zaddKeys).toContain('rate-limit:ip:203.0.113.10');
+    expect(zaddKeys).toContain('rate-limit:api-key:key-1');
+  });
 });

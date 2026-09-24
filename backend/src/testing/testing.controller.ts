@@ -21,11 +21,13 @@ import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+import { NonProductionGuard } from './non-production.guard';
 
 @ApiTags('Event Testing')
 @ApiBearerAuth()
+@ApiResponse({ status: 404, description: 'Disabled when NODE_ENV=production' })
 @Controller('testing/events')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(NonProductionGuard, JwtAuthGuard, RolesGuard)
 export class TestingController {
   constructor(private readonly testingService: TestingService) {}
 

@@ -4,23 +4,27 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AuditLogViewer } from '@/components/AuditLogViewer';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AuditLogPage() {
   const router = useRouter();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    const token = localStorage.getItem('lumentix_access_token');
-    const role = localStorage.getItem('lumentix_user_role');
-
-    if (!token) {
+    if (isLoading) return;
+    if (!user) {
       router.replace('/login');
       return;
     }
     // Only organizers (and admins) should see audit logs.
-    if (role && role !== 'organizer' && role !== 'admin') {
+    if (user.role !== 'organizer' && user.role !== 'admin') {
       router.replace('/');
     }
-  }, [router]);
+  }, [isLoading, user, router]);
+
+  if (isLoading || !user || (user.role !== 'organizer' && user.role !== 'admin')) {
+    return null;
+  }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">

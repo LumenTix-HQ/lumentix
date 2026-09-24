@@ -31,7 +31,7 @@ describe('WalletService', () => {
         },
         {
           provide: getRepositoryToken(User),
-          useValue: { findOne: jest.fn() },
+          useValue: { findOne: jest.fn(), update: jest.fn() },
         },
         {
           provide: getRepositoryToken(UserWallet),
@@ -93,7 +93,7 @@ describe('WalletService', () => {
       redis.get.mockResolvedValue(nonce);
 
       const message = `Sign this message to link wallet: ${nonce}`;
-      const validSignature = validKp.sign(Buffer.from(message)).toString('hex');
+      const validSignature = validKp.sign(Buffer.from(message)).toString('base64');
 
       usersRepository.findOne.mockResolvedValue({ id: 'user-2', stellarPublicKey: validPublicKey });
 
@@ -105,7 +105,7 @@ describe('WalletService', () => {
       redis.get.mockResolvedValue(nonce);
 
       const message = `Sign this message to link wallet: ${nonce}`;
-      const validSignature = validKp.sign(Buffer.from(message)).toString('hex');
+      const validSignature = validKp.sign(Buffer.from(message)).toString('base64');
 
       usersRepository.findOne.mockResolvedValue(null);
       stellarService.getAccount.mockResolvedValue({});
@@ -116,6 +116,63 @@ describe('WalletService', () => {
       expect(result).toEqual({ id: userId, stellarPublicKey: validPublicKey });
       expect(redis.del).toHaveBeenCalledWith(`wallet:nonce:${validPublicKey}`);
       expect(usersService.updateWallet).toHaveBeenCalledWith(userId, validPublicKey);
+    });
+  });
+
+  describe('verifyAndLink signature encoding', () => {
+    const userId = 'user-1';
+    const nonce = 'encoding-nonce';
+    const message = `Sign this message to link wallet: ${nonce}`;
+
+    beforeEach(() => {
+      redis.get.mockResolvedValue(nonce);
+      usersRepository.findOne.mockResolvedValue(null);
+      stellarService.getAccount.mockResolvedValue({});
+      userWalletsRepository.findOne.mockResolvedValue(null);
+      userWalletsRepository.count.mockResolvedValue(0);
+      userWalletsRepository.create.mockImplementation((w) => w);
+      usersService.updateWallet.mockResolvedValue({
+        id: userId,
+        stellarPublicKey: validPublicKey,
+      });
+    });
+
+    it('accepts a base64-encoded signature of the challenge message', async () => {
+      const signature = validKp
+        .sign(Buffer.from(message, 'utf8'))
+        .toString('base64');
+
+      await expect(
+        walletService.verifyAndLink(userId, validPublicKey, signature),
+      ).resolves.toEqual({ id: userId, stellarPublicKey: validPublicKey });
+      expect(userWalletsRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          publicKey: validPublicKey,
+          isPrimary: true,
+        }),
+      );
+    });
+
+    it('rejects a hex-encoded signature (base64 is the only supported encoding)', async () => {
+      const signature = validKp
+        .sign(Buffer.from(message, 'utf8'))
+        .toString('hex');
+
+      await expect(
+        walletService.verifyAndLink(userId, validPublicKey, signature),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(redis.del).not.toHaveBeenCalled();
+    });
+
+    it('rejects a base64 signature produced by a different key', async () => {
+      const signature = Keypair.random()
+        .sign(Buffer.from(message, 'utf8'))
+        .toString('base64');
+
+      await expect(
+        walletService.verifyAndLink(userId, validPublicKey, signature),
+      ).rejects.toThrow(UnauthorizedException);
     });
   });
 

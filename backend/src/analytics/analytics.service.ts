@@ -11,7 +11,6 @@ import { Event } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { Registration, RegistrationStatus } from '../registrations/entities/registration.entity';
-import { AgeVerification } from '../age-verification/entities/age-verification.entity';
 import { User } from '../users/entities/user.entity';
 
 import {
@@ -50,6 +49,12 @@ import { MerchItem } from '../merch/entities/merch-item.entity';
 import { MerchReservation } from '../merch/entities/merch-reservation.entity';
 import { RevenueBreakdownRow, RevenueReportDto } from './dto/revenue-dashboard.dto';
 
+/** Minimal shape analyzeAgeDemographics needs; the age-verification module that supplied it was retired (#1023). */
+interface AgeRecord {
+  dateOfBirth: Date | string | null;
+  status: string;
+}
+
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
@@ -63,8 +68,6 @@ export class AnalyticsService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(Registration)
     private readonly registrationRepository: Repository<Registration>,
-    @InjectRepository(AgeVerification)
-    private readonly ageVerificationRepository: Repository<AgeVerification>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(MerchItem)
@@ -256,12 +259,9 @@ export class AnalyticsService {
         r.status === RegistrationStatus.PENDING,
     );
 
-    // Get age verifications
-    const ageVerifications = await this.ageVerificationRepository.find({
-      where: { eventId },
-    });
-
-    const demographics = this.analyzeAgeDemographics(ageVerifications);
+    // No date-of-birth source since age verification was retired (#1023), so
+    // the age buckets report zero; the response shape is kept for clients.
+    const demographics = this.analyzeAgeDemographics([]);
 
     // Get currency breakdown
     const payments = await this.paymentRepository.find({
@@ -308,7 +308,7 @@ export class AnalyticsService {
   }
 
   private analyzeAgeDemographics(
-    ageVerifications: AgeVerification[],
+    ageVerifications: AgeRecord[],
   ): DemographicBreakdown {
     const today = new Date();
     const ages: number[] = [];

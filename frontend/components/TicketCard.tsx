@@ -179,7 +179,7 @@ export default function TicketCard({ ticket }: TicketCardProps) {
 
         {provenanceLoading ? (
           <div className="h-12 rounded-lg bg-gray-700/40 animate-pulse" aria-label="Loading ownership history" />
-        ) : render_provenance_timeline(provenance)}
+        ) : renderProvenanceTimeline(provenance)}
 
         <div className="flex flex-col gap-2 mt-1">
           <div className="flex gap-2">
@@ -263,7 +263,7 @@ export default function TicketCard({ ticket }: TicketCardProps) {
   );
 }
 
-export function render_provenance_timeline(transfers: ProvenanceTransfer[]) {
+export function renderProvenanceTimeline(transfers: ProvenanceTransfer[]) {
   return (
     <details className="rounded-lg border border-gray-700 bg-gray-900/40 px-3 py-2">
       <summary className="cursor-pointer text-sm font-medium text-gray-300">

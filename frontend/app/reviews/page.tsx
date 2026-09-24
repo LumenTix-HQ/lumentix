@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { EventReview, ReviewStatus, ReputationScore, PaginatedReviews } from '@/types/review';
+import { SentimentPanel } from '@/components/reviews/SentimentPanel';
 
 function getToken(): string {
   return typeof window !== 'undefined'
@@ -304,6 +305,30 @@ function ReputationLookup() {
   );
 }
 
+// ── Sentiment section (issue #1159) ───────────────────────────────────────────
+
+function SentimentSection() {
+  const [eventId, setEventId] = useState('');
+
+  return (
+    <div className="mb-10">
+      <div className="flex flex-col gap-3 mb-4">
+        <label className="block text-xs text-gray-400" htmlFor="sentiment-event-id">
+          Event UUID to analyse
+        </label>
+        <input
+          id="sentiment-event-id"
+          value={eventId}
+          onChange={e => setEventId(e.target.value)}
+          placeholder="550e8400-…"
+          className="w-full sm:max-w-xs bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500/50"
+        />
+      </div>
+      <SentimentPanel eventId={eventId} />
+    </div>
+  );
+}
+
 // ── page ──────────────────────────────────────────────────────────────────────
 
 export default function ReviewsPage() {
@@ -367,6 +392,8 @@ export default function ReviewsPage() {
           <>
             <SubmitReviewForm onSuccess={loadMyReviews} />
             <ReputationLookup />
+
+            <SentimentSection />
 
             <h2 className="text-lg font-semibold text-white mb-4">My Reviews</h2>
             {loading ? (

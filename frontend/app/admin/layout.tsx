@@ -1,32 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { decodeJwtPayload } from '@/lib/auth/token';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [authorized, setAuthorized] = useState(false);
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    const token = localStorage.getItem('lumentix_access_token');
-    if (!token) {
+    if (isLoading) return;
+    if (!user) {
       router.push('/login?redirect=/admin/users');
       return;
     }
-    const payload = decodeJwtPayload(token);
-    if (!payload) {
-      router.push('/login');
-      return;
-    }
-    if (payload.role !== 'admin') {
+    if (user.role !== 'admin') {
       router.push('/');
-      return;
     }
-    setAuthorized(true);
-  }, [router]);
+  }, [isLoading, user, router]);
 
-  if (!authorized) return null;
+  if (isLoading || !user || user.role !== 'admin') return null;
 
   return <>{children}</>;
 }

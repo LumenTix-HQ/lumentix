@@ -79,4 +79,20 @@ describe('WebhooksService', () => {
       });
     });
   });
+
+  describe('getDeadLettersForEvent', () => {
+    it('should return dead letters for an event', async () => {
+      const deadLetters = [{ id: 'dl1', eventId: 'e1' }];
+      mockDeadLetterRepo.find.mockResolvedValue(deadLetters);
+
+      const result = await service.getDeadLettersForEvent('e1', 'org1');
+
+      expect(result).toEqual(deadLetters);
+      expect(mockDeadLetterRepo.find).toHaveBeenCalledWith({
+        where: { eventId: 'e1' },
+        order: { createdAt: 'DESC' },
+        take: 50,
+      });
+    });
+  });
 });

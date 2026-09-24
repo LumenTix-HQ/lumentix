@@ -1,12 +1,40 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { useSponsorBanners } from '@/hooks/useSponsorBanners';
 
 const ROTATION_INTERVAL_MS = 8000;
 
 interface SponsorBannerProps {
   eventId: string;
+}
+
+function SponsorLogo({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div
+        className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-xs text-gray-400"
+        aria-hidden="true"
+      >
+        ★
+      </div>
+    );
+  }
+
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={40}
+      height={40}
+      sizes="40px"
+      className="h-10 w-10 rounded-lg object-contain"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 export function SponsorBanner({ eventId }: SponsorBannerProps) {
@@ -39,8 +67,7 @@ export function SponsorBanner({ eventId }: SponsorBannerProps) {
       className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3 transition-colors hover:border-white/30 hover:bg-white/10"
     >
       {active.logoUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={active.logoUrl} alt={active.displayName ?? 'Sponsor logo'} className="h-10 w-10 rounded-lg object-contain" />
+        <SponsorLogo src={active.logoUrl} alt={active.displayName ?? 'Sponsor logo'} />
       )}
       <span className="text-sm text-gray-300">
         Sponsored by <span className="font-semibold text-white">{active.displayName ?? 'our sponsor'}</span>

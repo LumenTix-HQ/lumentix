@@ -5,8 +5,7 @@ import { useWallet } from '@/contexts/WalletContext';
 import { SponsorTier } from '@/components/SponsorTierCard';
 import { signTransaction } from '@stellar/freighter-api';
 import { NetworkType } from '@/types/wallet';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+import { apiClient } from '@/lib/api-client';
 
 export type ContributionStatus = 'idle' | 'initiating' | 'signing' | 'confirming' | 'confirmed' | 'failed';
 
@@ -39,32 +38,16 @@ export function useSponsorContribution(eventId: string) {
       setResult(null);
 
       try {
-        const token = typeof window !== 'undefined'
-          ? localStorage.getItem('lumentix_access_token')
-          : null;
-
-        // Initiate sponsorship and get XDR to sign
-        const initRes = await fetch(`${API_BASE}/events/${eventId}/sponsors`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            tierId: tier.id,
-            amount,
-            displayName: displayName || undefined,
-            logoUrl: logoUrl || undefined,
-            sponsorPublicKey: publicKey,
-          }),
+        // Initiate sponsorship and get XDR to sign, through the shared
+        // api client so transient failures get the same retry/backoff and
+        // auth handling as the rest of the app.
+        const { xdr, contributionId } = await apiClient.initiateSponsorship(eventId, {
+          tierId: tier.id,
+          amount,
+          displayName: displayName || undefined,
+          logoUrl: logoUrl || undefined,
+          sponsorPublicKey: publicKey,
         });
-
-        if (!initRes.ok) {
-          const body = await initRes.json().catch(() => ({}));
-          throw new Error(body.message ?? `Failed to initiate sponsorship (${initRes.status})`);
-        }
-
-        const { xdr, contributionId } = await initRes.json();
 
         setStatus('signing');
 
@@ -82,21 +65,7 @@ export function useSponsorContribution(eventId: string) {
         setStatus('confirming');
 
         // Submit signed transaction
-        const submitRes = await fetch(`${API_BASE}/sponsors/contributions/${contributionId}/confirm`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ signedXdr }),
-        });
-
-        if (!submitRes.ok) {
-          const body = await submitRes.json().catch(() => ({}));
-          throw new Error(body.message ?? 'Failed to confirm contribution');
-        }
-
-        const confirmed = await submitRes.json();
+        const confirmed = await apiClient.confirmSponsorship(contributionId, signedXdr);
         setResult({ rank: confirmed.rank, transactionHash: confirmed.transactionHash, contributionId });
         setStatus('confirmed');
       } catch (err) {

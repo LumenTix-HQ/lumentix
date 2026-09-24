@@ -39,6 +39,25 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
 
+  source-integrity:
+    name: Source Integrity
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # Fails fast, and by name, on imports that don't resolve (e.g. a spec
+      # whose source was deleted) and on *.module.ts files never wired into
+      # AppModule. `npm test` also runs it, but there it is easy to miss.
+      - run: npm run test:integrity
+
   test:
     name: Unit Tests
     runs-on: ubuntu-latest

@@ -1,5 +1,3 @@
-// ...existing code...
-// ...existing code...
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -29,19 +27,21 @@ export class ExchangeRatesService {
   /**
    * Returns the rate: 1 unit of `fromCode` = N units of `toCode`.
    * Uses a DB cache; only calls the external provider when the cached rate
-   * is older than 1 hour or does not exist.
+   * is older than `staleRateThresholdHours` or does not exist.
    */
   async getRate(fromCode: string, toCode: string): Promise<number> {
     if (fromCode === toCode) return 1;
 
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const staleThreshold = new Date(
+      Date.now() - this.staleRateThresholdHours * 60 * 60 * 1000,
+    );
 
     const cached = await this.ratesRepository
       .createQueryBuilder('r')
       .where('r.fromCode = :from AND r.toCode = :to AND r.fetchedAt > :since', {
         from: fromCode,
         to: toCode,
-        since: oneHourAgo,
+        since: staleThreshold,
       })
       .orderBy('r.fetchedAt', 'DESC')
       .getOne();
