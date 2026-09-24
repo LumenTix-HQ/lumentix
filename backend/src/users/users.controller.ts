@@ -27,7 +27,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestRoleDto } from './dto/request-role.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
-import { Roles } from 'src/admin/roles.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from './enums/user-role.enum';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 

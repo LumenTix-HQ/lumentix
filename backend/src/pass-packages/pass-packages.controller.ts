@@ -17,8 +17,8 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { PassPackagesService } from './pass-packages.service';
 import { CreatePassPackageDto } from './dto/create-pass-package.dto';
 import { UserRole } from '../users/enums/user-role.enum';
-import { Roles } from '../admin/roles.decorator';
-import { RolesGuard } from '../admin/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 
 @ApiTags('Pass Packages')
 @Controller('pass-packages')
