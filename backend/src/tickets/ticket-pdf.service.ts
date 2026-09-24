@@ -39,7 +39,7 @@ export class TicketPdfService {
         const stream = fs.createWriteStream(dest);
         doc.pipe(stream);
 
-        this.embedAntiCounterfeitWatermark(doc, ticket.id);
+        this.embed_anti_counterfeit_watermark(doc, ticket.id);
 
         doc.fontSize(18).text(event.title, { align: 'center' });
         doc.moveDown();
@@ -88,12 +88,22 @@ export class TicketPdfService {
     return this.generatePdfTicket(ticket, event, userEmail, qrDataUrl);
   }
 
+  /** Generate a signed PDF ticket with its QR code and watermark. */
+  async generate_pdf_ticket(
+    ticket: TicketEntity,
+    event: any,
+    userEmail: string,
+    qrDataUrl: string,
+  ): Promise<string> {
+    return this.generatePdfTicket(ticket, event, userEmail, qrDataUrl);
+  }
+
   /**
    * Analytics #991 — draws a repeated, semi-transparent diagonal watermark
    * across the current page so a photocopy/screenshot is visibly
    * distinguishable from an original, without obscuring the ticket details.
    */
-  private embedAntiCounterfeitWatermark(doc: PDFKit.PDFDocument, ticketId: string) {
+  embedAntiCounterfeitWatermark(doc: PDFKit.PDFDocument, ticketId: string) {
     const label = `LUMENTIX · ${ticketId.slice(0, 8).toUpperCase()}`;
     const { width, height } = doc.page;
 
@@ -112,6 +122,11 @@ export class TicketPdfService {
     doc.restore();
   }
 
+  /** Embed a dynamic watermark that identifies the purchased ticket. */
+  embed_anti_counterfeit_watermark(doc: PDFKit.PDFDocument, ticketId: string): void {
+    this.embedAntiCounterfeitWatermark(doc, ticketId);
+  }
+
   /**
    * Analytics #991 — verifies a ticket's cryptographic signature (the same
    * one embedded as the PDF's visible security code and used by the QR
@@ -119,5 +134,10 @@ export class TicketPdfService {
    */
   verifyTicketSignature(ticketId: string, signature: string): boolean {
     return this.ticketSigningService.verify(ticketId, signature);
+  }
+
+  /** Verify the cryptographic signature embedded in a ticket PDF or QR code. */
+  verify_ticket_signature(ticketId: string, signature: string): boolean {
+    return this.verifyTicketSignature(ticketId, signature);
   }
 }

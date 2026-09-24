@@ -112,6 +112,11 @@ export class CalendarService {
     return lines.join('\r\n');
   }
 
+  /** Generate a calendar event for a purchased ticket. */
+  generate_ical_event(data: Parameters<CalendarService['generateIcalFile']>[0]): string {
+    return this.generateIcalFile(data);
+  }
+
   /**
    * Analytics #992 — build the (REQUEST-method, incremented-SEQUENCE) ICS
    * for an event that just changed, and email it to every attendee so
@@ -149,6 +154,14 @@ export class CalendarService {
     );
   }
 
+  /** Synchronize a purchased ticket's calendar entry after an event change. */
+  async sync_calendar_update(
+    event: Parameters<CalendarService['syncCalendarUpdate']>[0],
+    attendees: CalendarAttendeeContact[],
+  ): Promise<void> {
+    return this.syncCalendarUpdate(event, attendees);
+  }
+
   /**
    * Analytics #992 — build a CANCEL-method ICS for a cancelled event and
    * email it to every attendee, so calendar apps remove it automatically.
@@ -182,6 +195,14 @@ export class CalendarService {
     );
   }
 
+  /** Remove a cancelled purchased event from attendee calendars. */
+  async remove_cancelled_event(
+    event: Parameters<CalendarService['removeCancelledEvent']>[0],
+    attendees: CalendarAttendeeContact[],
+  ): Promise<void> {
+    return this.removeCancelledEvent(event, attendees);
+  }
+
   private async sendCalendarEmail(
     event: {
       id: string;
@@ -200,7 +221,7 @@ export class CalendarService {
       intro: string;
     },
   ): Promise<void> {
-    const icsContent = this.generateIcalFile({
+    const icsContent = this.generate_ical_event({
       eventTitle: event.title,
       eventDescription: event.description ?? undefined,
       startDate: event.startDate.toISOString(),
@@ -352,7 +373,7 @@ export class CalendarService {
       google: this.createGoogleCalendarLink(data),
       outlook: this.createOutlookCalendarLink(data),
       yahoo: this.createYahooCalendarLink(data),
-      icsContent: this.generateIcalFile({ ...data, uid: `all-${Date.now()}@lumentix` }),
+      icsContent: this.generate_ical_event({ ...data, uid: `all-${Date.now()}@lumentix` }),
     };
   }
 

@@ -44,6 +44,17 @@ describe('CalendarService', () => {
       expect(ics).toContain('STATUS:CONFIRMED');
     });
 
+    it('exposes the purchased-event calendar function name', () => {
+      const ics = service.generate_ical_event({
+        eventTitle: 'Purchased Event',
+        startDate: '2026-01-01T18:00:00Z',
+        endDate: '2026-01-01T21:00:00Z',
+        uid: 'ticket-1@lumentix',
+      });
+
+      expect(ics).toContain('UID:ticket-1@lumentix');
+    });
+
     it('supports a REQUEST method with a custom sequence', () => {
       const ics = service.generateIcalFile({
         eventTitle: 'Test Event',
@@ -86,6 +97,12 @@ describe('CalendarService', () => {
       expect(call.attachments?.[0].content).toContain('METHOD:REQUEST');
     });
 
+    it('supports the requested snake_case synchronization name', async () => {
+      await service.sync_calendar_update(baseEvent, [{ email: 'a@example.com' }]);
+
+      expect(mailerService.send).toHaveBeenCalledTimes(1);
+    });
+
     it('derives SEQUENCE from the event updatedAt timestamp', async () => {
       await service.syncCalendarUpdate(baseEvent, [{ email: 'a@example.com' }]);
 
@@ -124,6 +141,12 @@ describe('CalendarService', () => {
       expect(call.subject).toContain('Cancelled');
       expect(call.attachments?.[0].content).toContain('METHOD:CANCEL');
       expect(call.attachments?.[0].content).toContain('STATUS:CANCELLED');
+    });
+
+    it('supports the requested snake_case cancellation name', async () => {
+      await service.remove_cancelled_event(baseEvent, [{ email: 'a@example.com' }]);
+
+      expect(mailerService.send).toHaveBeenCalledTimes(1);
     });
 
     it('does nothing when there are no attendees', async () => {

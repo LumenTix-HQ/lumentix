@@ -183,7 +183,7 @@ export class EventsService {
    */
   private async notifyCalendarUpdate(event: Event): Promise<void> {
     const attendees = await this.getCalendarAttendeeContacts(event.id);
-    await this.calendarService.syncCalendarUpdate(event, attendees);
+    await this.calendarService.sync_calendar_update(event, attendees);
   }
 
   async publishEvent(id: string, callerId: string): Promise<Event> {

@@ -67,7 +67,7 @@ export class CancelEventProcessor {
         .filter((u) => Boolean(u.email))
         .map((u) => ({ email: u.email, name: (u as any).displayName ?? undefined }));
 
-      await this.calendarService.removeCancelledEvent(event, attendees);
+      await this.calendarService.remove_cancelled_event(event, attendees);
     } catch (error) {
       this.logger.error(`Failed to send calendar cancellation for event ${eventId}`, error?.stack);
     }

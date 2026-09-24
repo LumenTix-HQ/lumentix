@@ -122,6 +122,16 @@ describe('TicketPdfService', () => {
     expect(url).toBe('/tickets/ticket-ticket-123.pdf');
   });
 
+  it('generate_pdf_ticket() creates a downloadable signed PDF ticket', async () => {
+    const promise = service.generate_pdf_ticket(ticket, event, 'attendee@example.com', qrDataUrl);
+    await Promise.resolve();
+    await Promise.resolve();
+    mockStream.trigger('finish');
+
+    await expect(promise).resolves.toBe('/tickets/ticket-ticket-123.pdf');
+    expect(signingService.sign).toHaveBeenCalledWith('ticket-123');
+  });
+
   it('generate() is an alias for generatePdfTicket()', async () => {
     const promise = service.generate(ticket, event, 'attendee@example.com', qrDataUrl);
     await Promise.resolve();
@@ -145,5 +155,18 @@ describe('TicketPdfService', () => {
 
       expect(service.verifyTicketSignature('ticket-123', 'bad-signature')).toBe(false);
     });
+
+    it('supports the requested snake_case verification name', () => {
+      expect(service.verify_ticket_signature('ticket-123', 'some-signature')).toBe(true);
+      expect(signingService.verify).toHaveBeenCalledWith('ticket-123', 'some-signature');
+    });
+  });
+
+  it('supports the requested snake_case watermark name', () => {
+    const doc = (global as any).__lastPdfDoc;
+
+    service.embed_anti_counterfeit_watermark(doc, 'ticket-123');
+
+    expect(doc.rotate).toHaveBeenCalledWith(-35, expect.objectContaining({ origin: expect.any(Array) }));
   });
 });
