@@ -1,13 +1,22 @@
+/**
+ * Frontend contract (+type) module for issue #1243 — Personalized event
+ * recommendations.
+ *
+ * Kept as plain types so both the backend DTOs (recommendations.module) and
+ * the client component can import the same shape without a framework
+ * dependency; mirrors the `/recommendations` entry in docs/API_REFERENCE.
+ */
+
 export interface RecommendationDto {
   eventId: string;
   title: string;
-  category: string;
-  location: string;
+  category: string | null;
+  location: string | null;
   startDate: string;
   ticketPrice: number;
   currency: string;
   score: number;
-  reason?: string;
+  reason?: string | null;
 }
 
 export interface RecommendationResponse {
@@ -17,8 +26,8 @@ export interface RecommendationResponse {
 }
 
 export interface PreferenceEntryDto {
-  category?: string;
-  location?: string;
+  category?: string | null;
+  location?: string | null;
   weight: number;
 }
 
