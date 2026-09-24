@@ -16,7 +16,7 @@ import { DataDeletionRequest } from './entities/data-deletion-request.entity';
 import { LoyaltyAccount } from '../loyalty/entities/loyalty-account.entity';
 import { LoyaltyTransaction } from '../loyalty/entities/loyalty-transaction.entity';
 import { LoyaltyDiscount } from '../loyalty/entities/loyalty-discount.entity';
-import { InsurancePolicy } from '../insurance/entities/insurance-policy.entity';
+import { InsurancePolicyEntity } from '../insurance/entities/insurance-policy.entity';
 import { InsuranceClaim } from '../insurance/entities/insurance-claim.entity';
 import { UserAchievement } from '../gamification/entities/user-achievement.entity';
 import { UserBadge } from '../gamification/entities/user-badge.entity';
@@ -42,7 +42,7 @@ export interface UserDataExport {
   loyaltyTransactions: LoyaltyTransaction[];
   loyaltyDiscounts: LoyaltyDiscount[];
   // Insurance
-  insurancePolicies: InsurancePolicy[];
+  insurancePolicies: InsurancePolicyEntity[];
   insuranceClaims: InsuranceClaim[];
   // Gamification
   achievements: UserAchievement[];
@@ -88,8 +88,8 @@ export class PrivacyService {
     private readonly loyaltyTransactionRepository: Repository<LoyaltyTransaction>,
     @InjectRepository(LoyaltyDiscount)
     private readonly loyaltyDiscountRepository: Repository<LoyaltyDiscount>,
-    @InjectRepository(InsurancePolicy)
-    private readonly insurancePolicyRepository: Repository<InsurancePolicy>,
+    @InjectRepository(InsurancePolicyEntity)
+    private readonly insurancePolicyRepository: Repository<InsurancePolicyEntity>,
     @InjectRepository(InsuranceClaim)
     private readonly insuranceClaimRepository: Repository<InsuranceClaim>,
     @InjectRepository(UserAchievement)

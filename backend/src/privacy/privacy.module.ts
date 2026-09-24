@@ -11,7 +11,7 @@ import { DataDeletionRequest } from './entities/data-deletion-request.entity';
 import { LoyaltyAccount } from '../loyalty/entities/loyalty-account.entity';
 import { LoyaltyTransaction } from '../loyalty/entities/loyalty-transaction.entity';
 import { LoyaltyDiscount } from '../loyalty/entities/loyalty-discount.entity';
-import { InsurancePolicy } from '../insurance/entities/insurance-policy.entity';
+import { InsurancePolicyEntity } from '../insurance/entities/insurance-policy.entity';
 import { InsuranceClaim } from '../insurance/entities/insurance-claim.entity';
 import { UserAchievement } from '../gamification/entities/user-achievement.entity';
 import { UserBadge } from '../gamification/entities/user-badge.entity';
@@ -31,7 +31,7 @@ import { Payment } from '../payments/entities/payment.entity';
       LoyaltyAccount,
       LoyaltyTransaction,
       LoyaltyDiscount,
-      InsurancePolicy,
+      InsurancePolicyEntity,
       InsuranceClaim,
       UserAchievement,
       UserBadge,
