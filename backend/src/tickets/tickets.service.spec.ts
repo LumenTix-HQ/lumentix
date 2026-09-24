@@ -12,6 +12,7 @@ import { TicketSigningService } from './ticket-signing.service';
 import { NotificationService } from '../notifications/notification.service';
 import { Event } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
+import { GeoFenceService } from '../geo-fence/geo-fence.service';
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -41,6 +42,11 @@ describe('TicketsService', () => {
     get: jest.fn(),
   };
 
+  /** GeoFenceService mock — passes all checks by default */
+  const geoFenceServiceMock = {
+    enforceGeoRestriction: jest.fn().mockResolvedValue(undefined),
+  };
+
   const commonProviders = [
     TicketsService,
     { provide: getRepositoryToken(TicketEntity), useValue: repo },
@@ -57,6 +63,7 @@ describe('TicketsService', () => {
     },
     { provide: getRepositoryToken(Event), useValue: { findOne: jest.fn() } },
     { provide: getRepositoryToken(User), useValue: { findOne: jest.fn() } },
+    { provide: GeoFenceService, useValue: geoFenceServiceMock },
   ];
 
   beforeEach(async () => {
@@ -79,7 +86,7 @@ describe('TicketsService', () => {
       transactionHash: 'hash',
     });
 
-    await expect(service.issueTicket('p1')).rejects.toThrow(
+    await expect(service.issueTicket({ paymentId: 'p1' })).rejects.toThrow(
       'Payment not confirmed',
     );
   });
@@ -101,7 +108,7 @@ describe('TicketsService', () => {
       _links: {},
     });
 
-    const ticket = await service.issueTicket('p1');
+    const ticket = await service.issueTicket({ paymentId: 'p1' });
 
     expect(stellarServiceMock.getTransaction).toHaveBeenCalledWith('hash');
     expect(ticket.ownerId).toBe('u1');
@@ -182,6 +189,7 @@ describe('TicketsService', () => {
             provide: getRepositoryToken(User),
             useValue: { findOne: jest.fn() },
           },
+          { provide: GeoFenceService, useValue: geoFenceServiceMock },
         ],
       }).compile();
 

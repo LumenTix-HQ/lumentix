@@ -34,6 +34,7 @@ import { InsuranceModule } from './insurance/insurance.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { VenuesModule } from './venues/venues.module';
 import { GamificationModule } from './gamification/gamification.module';
+import { GeoFenceModule } from './geo-fence/geo-fence.module';
 
 @Module({
   imports: [
@@ -117,6 +118,7 @@ import { GamificationModule } from './gamification/gamification.module';
     ReviewsModule,
     VenuesModule,
     GamificationModule,
+    GeoFenceModule,
   ],
   controllers: [AppController],
   providers: [

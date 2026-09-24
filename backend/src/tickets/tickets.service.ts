@@ -17,12 +17,14 @@ import { TicketSigningService } from './ticket-signing.service';
 import { TicketPdfService } from './ticket-pdf.service';
 import { IssueTicketResponseDto } from './dto/issue-ticket-response.dto';
 import { BulkIssueResultDto } from './dto/bulk-issue-result.dto';
+import { IssueTicketDto } from './dto/issue-ticket.dto';
 import { PaymentsService } from '../payments/payments.service';
 import { PaymentStatus } from '../payments/entities/payment.entity';
 import { StellarService } from '../stellar/stellar.service';
 import { NotificationService } from '../notifications/notification.service';
 import { paginate } from '../common/pagination/pagination.helper';
 import { User } from '../users/entities/user.entity';
+import { GeoFenceService } from '../geo-fence/geo-fence.service';
 
 @Injectable()
 export class TicketsService {
@@ -40,6 +42,7 @@ export class TicketsService {
     private readonly eventRepo: Repository<Event>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    private readonly geoFenceService: GeoFenceService,
   ) {}
 
   async findByEvent(eventId: string, requesterId: string, paginationDto: any) {
@@ -103,7 +106,8 @@ export class TicketsService {
     return paginate(queryBuilder, paginationDto, 'ticket');
   }
 
-  async issueTicket(paymentId: string): Promise<IssueTicketResponseDto> {
+  async issueTicket(dto: IssueTicketDto): Promise<IssueTicketResponseDto> {
+    const { paymentId, latitude, longitude, countryCode } = dto;
     const payment = await this.paymentsService.getPaymentById(paymentId);
 
     if (payment.status !== PaymentStatus.CONFIRMED) {
@@ -117,6 +121,15 @@ export class TicketsService {
     // ── Capacity enforcement ───────────────────────────────────────────────
     const event = await this.eventRepo.findOne({ where: { id: payment.eventId } });
     if (!event) throw new NotFoundException('Event not found');
+
+    // ── Geo-fence enforcement ─────────────────────────────────────────────
+    // Throws ForbiddenException if any enabled rule rejects the buyer's location.
+    // No-op when no geo-fence rules are configured for the event.
+    await this.geoFenceService.enforceGeoRestriction(payment.eventId, {
+      latitude,
+      longitude,
+      countryCode,
+    });
 
     if (event.maxAttendees !== null) {
       const soldCount = await this.ticketRepo.count({
@@ -210,7 +223,7 @@ export class TicketsService {
 
   async bulkIssueTickets(paymentIds: string[]): Promise<BulkIssueResultDto[]> {
     const results = await Promise.allSettled(
-      paymentIds.map((id) => this.issueTicket(id)),
+      paymentIds.map((id) => this.issueTicket({ paymentId: id })),
     );
     return results.map((r, i) => ({
       paymentId: paymentIds[i],

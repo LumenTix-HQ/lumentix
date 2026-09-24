@@ -68,9 +68,10 @@ export class TicketsController {
   @Post('issue')
   @ApiOperation({ summary: 'Issue a ticket for a confirmed payment' })
   @ApiResponse({ status: 201, description: 'Ticket issued' })
-  @ApiResponse({ status: 400, description: 'Payment not confirmed' })
+  @ApiResponse({ status: 400, description: 'Payment not confirmed or event sold out' })
+  @ApiResponse({ status: 403, description: 'Buyer location blocked by geo-fence rule' })
   async issue(@Body() dto: IssueTicketDto) {
-    return this.ticketsService.issueTicket(dto.paymentId);
+    return this.ticketsService.issueTicket(dto);
   }
 
   @Get(':id/qr')

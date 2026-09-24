@@ -15,6 +15,7 @@ import { NotificationModule } from '../notifications/notification.module';
 import { VerificationController } from './verification/verification.controller';
 import { TicketExpiryJob } from './jobs/ticket-expiry.job';
 import { AuditModule } from '../audit/audit.module';
+import { GeoFenceModule } from '../geo-fence/geo-fence.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AuditModule } from '../audit/audit.module';
     StellarModule,
     NotificationModule,
     AuditModule,
+    GeoFenceModule,
   ],
   providers: [TicketsService, TicketSigningService, TicketExpiryJob],
   controllers: [TicketsController, TicketsPublicController, VerificationController],
