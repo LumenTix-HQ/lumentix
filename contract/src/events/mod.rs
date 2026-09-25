@@ -1858,3 +1858,65 @@ impl AchievementBadgeRevoked {
             .publish((symbol_short!("badgrev"),), (badge_id, owner));
     }
 }
+
+/// Event emitted when an escrow payment split is created (Issue #1247)
+pub struct EscrowSplitCreated;
+impl EscrowSplitCreated {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128, organizer_count: u32) {
+        env.events().publish(
+            (symbol_short!("esplitcr"),),
+            (split_id, event_id, total_amount, organizer_count),
+        );
+    }
+}
+
+/// Event emitted when an escrow split's funds are released to organizers (Issue #1247)
+pub struct EscrowSplitReleased;
+impl EscrowSplitReleased {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128) {
+        env.events()
+            .publish((symbol_short!("esplitrl"),), (split_id, event_id, total_amount));
+    }
+}
+
+/// Event emitted when an escrow split is disputed, freezing the funds (Issue #1247)
+pub struct EscrowSplitDisputed;
+impl EscrowSplitDisputed {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, caller: Address) {
+        env.events()
+            .publish((symbol_short!("esplitdp"),), (split_id, event_id, caller));
+    }
+}
+
+/// Event emitted when a venue max capacity is configured for an event (Issue #1245)
+pub struct VenueCapacitySet;
+impl VenueCapacitySet {
+    pub fn emit(env: &Env, event_id: u64, max_capacity: u32, current_count: u32) {
+        env.events().publish(
+            (symbol_short!("vencapst"),),
+            (event_id, max_capacity, current_count),
+        );
+    }
+}
+
+/// Event emitted when a mint is rejected for breaching venue capacity (Issue #1245)
+pub struct OverCapacityMintRejected;
+impl OverCapacityMintRejected {
+    pub fn emit(env: &Env, event_id: u64, quantity: u32, max_capacity: u32) {
+        env.events().publish(
+            (symbol_short!("ovcarjct"),),
+            (event_id, quantity, max_capacity),
+        );
+    }
+}
+
+/// Event emitted when the live attendance counter is incremented (Issue #1245)
+pub struct AttendanceCounterIncremented;
+impl AttendanceCounterIncremented {
+    pub fn emit(env: &Env, event_id: u64, minted_count: u32, max_capacity: u32) {
+        env.events().publish(
+            (symbol_short!("attnincr"),),
+            (event_id, minted_count, max_capacity),
+        );
+    }
+}

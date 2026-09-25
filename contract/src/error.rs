@@ -533,4 +533,28 @@ pub enum LumentixError {
     BadgeNotFound = 260,
     /// Badge is already revoked
     BadgeAlreadyRevoked = 261,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Escrow payment splits errors (Issue #1247)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Organizers/shares are empty, mismatched, non-positive, or do not sum to the escrow balance
+    InvalidEscrowSplit = 262,
+    /// Escrow split does not exist
+    EscrowSplitNotFound = 263,
+    /// Escrow split funds have already been released
+    EscrowSplitAlreadyReleased = 264,
+    /// Escrow split is disputed and its funds are frozen
+    EscrowSplitDisputed = 265,
+    /// Escrow split has already been disputed
+    EscrowSplitAlreadyDisputed = 266,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Venue capacity enforcement errors (Issue #1245)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Maximum venue capacity must be greater than zero
+    InvalidVenueCapacity = 267,
+    /// Mint would push the attendance counter past the configured maximum
+    VenueCapacityExceeded = 268,
+    /// No venue capacity has been configured for the event
+    VenueCapacityNotConfigured = 269,
 }

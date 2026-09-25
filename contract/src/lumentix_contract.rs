@@ -7850,4 +7850,111 @@ impl LumentixContract {
 
         None
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // VENUE CAPACITY ENFORCEMENT WITH LIVE ATTENDANCE COUNTER (Issue #1245)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Configure (or update) the maximum venue capacity for an event.
+    ///
+    /// Reconfiguring preserves the existing live counter so an update can
+    /// never silently unblock over-mints. Returns `InvalidVenueCapacity`
+    /// when `max_capacity` is zero.
+    pub fn set_venue_capacity(
+        env: Env,
+        admin: Address,
+        event_id: u64,
+        max_capacity: u32,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        admin.require_auth();
+        crate::venue_capacity::set_venue_capacity(&env, event_id, max_capacity)
+    }
+
+    /// Bump the on-chain attendance counter once a mint proceeds.
+    ///
+    /// Returns the new counter value, or `VenueCapacityExceeded` when the
+    /// increment would push the counter past the configured maximum.
+    pub fn increment_attendance_counter(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+    ) -> Result<u32, LumentixError> {
+        crate::venue_capacity::increment_attendance_counter(&env, event_id, quantity)
+    }
+
+    /// Guard called by every mint path *before* minting.
+    ///
+    /// Returns `Ok(())` when `quantity` still fits within the configured
+    /// capacity, and `VenueCapacityExceeded` when it would breach the limit.
+    /// Check-only: the counter is advanced by [`Self::increment_attendance_counter`]
+    /// once the mint succeeds.
+    pub fn reject_over_capacity_mint(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+    ) -> Result<(), LumentixError> {
+        crate::venue_capacity::reject_over_capacity_mint(&env, event_id, quantity)
+    }
+
+    /// Return the current on-chain capacity record for an event.
+    pub fn get_venue_capacity(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        crate::venue_capacity::get_venue_capacity(&env, event_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ESCROW PAYMENT SPLITS FOR MULTI-ORGANIZER EVENTS (Issue #1247)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Register a pre-agreed split of an event's held escrow balance.
+    ///
+    /// `organizers` and `shares` must be non-empty, equal in length, every
+    /// share positive, and the shares must sum to the event's current escrow
+    /// balance. Returns `InvalidEscrowSplit` when those constraints are
+    /// violated and `EventNotFound` when the event does not exist.
+    pub fn create_escrow_split(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        organizers: Vec<Address>,
+        shares: Vec<i128>,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        organizer.require_auth();
+        crate::escrow_split::create_escrow_split(&env, organizer, event_id, organizers, shares)
+    }
+
+    /// Release escrowed funds to every co-organizer named in the split.
+    ///
+    /// Only an organizer named in the split may trigger the release, and a
+    /// released or disputed split cannot be released again. Returns
+    /// `EscrowSplitAlreadyReleased` or `EscrowSplitDisputed` respectively.
+    pub fn release_escrow_funds(
+        env: Env,
+        caller: Address,
+        split_id: u64,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        caller.require_auth();
+        crate::escrow_split::release_escrow_funds(&env, caller, split_id)
+    }
+
+    /// Dispute an escrow split, freezing the funds until it is resolved.
+    ///
+    /// Only an organizer named in the split may dispute it. A released split
+    /// can no longer be disputed and a split may only be disputed once.
+    pub fn dispute_escrow_split(
+        env: Env,
+        caller: Address,
+        split_id: u64,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        caller.require_auth();
+        crate::escrow_split::dispute_escrow_split(&env, caller, split_id)
+    }
+
+    /// Return the escrow split with the given ID, or `EscrowSplitNotFound`.
+    pub fn get_escrow_split(
+        env: Env,
+        split_id: u64,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        crate::escrow_split::get_escrow_split(&env, split_id)
+    }
 }
