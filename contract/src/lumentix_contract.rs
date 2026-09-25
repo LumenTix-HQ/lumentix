@@ -2337,8 +2337,19 @@ impl LumentixContract {
         cancelled_events
     }
 
-    /// Implement batch_transfer_tickets write function for transferring multiple tickets in one call.
-    /// Iterate and enforce auth on from once, verifying from owns all tickets, updating paths to to.
+    /// Transfer multiple tickets from `from` to `to` in a single call (issue
+    /// #1203). Reduces per-ticket gas versus calling `transfer_ticket` once
+    /// per ticket, and gives group-booking transfers all-or-nothing
+    /// semantics: `validate_batch_recipients` checks every ticket in the
+    /// batch *before* any of them are written, so a single invalid ticket
+    /// (wrong owner, used, revoked, wrong event status, blackout window)
+    /// rejects the whole batch instead of leaving it partially applied.
+    ///
+    /// # Errors
+    /// Returns `InvalidAmount` if `ticket_ids` is empty or contains the
+    /// same ticket ID more than once. Otherwise returns whatever
+    /// `validate_ticket_transfer` would return for the first ticket that
+    /// fails validation.
     pub fn batch_transfer_tickets(
         env: Env,
         ticket_ids: Vec<u64>,
@@ -2347,9 +2358,9 @@ impl LumentixContract {
     ) -> Result<(), LumentixError> {
         from.require_auth();
 
-        for ticket_id in ticket_ids.iter() {
-            let mut ticket = storage::get_ticket(&env, ticket_id)?;
-            Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &to, &from)?;
+
+        for (ticket_id, mut ticket) in ticket_ids.iter().zip(tickets.iter()) {
             Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from.clone(), to.clone());
         }
 
@@ -2360,27 +2371,49 @@ impl LumentixContract {
         Ok(())
     }
 
-    /// Validate batch recipients before transfer
-    pub fn validate_batch_recipients(
-        env: Env,
-        ticket_ids: Vec<u64>,
-        from: Address,
-    ) -> Result<(), LumentixError> {
-        from.require_auth();
-        for ticket_id in ticket_ids.iter() {
-            let ticket = storage::get_ticket(&env, ticket_id)?;
-            Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+    /// Validates a proposed batch transfer before any ticket is written:
+    /// the ticket-ID list is non-empty and has no duplicates, the
+    /// recipient isn't the sender itself, and every ticket individually
+    /// passes the same ownership/status checks `transfer_ticket` applies.
+    /// Returns the loaded `Ticket` records (in `ticket_ids` order) so the
+    /// caller doesn't have to fetch them from storage a second time.
+    ///
+    /// Previously this function existed but was never called from
+    /// `batch_transfer_tickets` — it duplicated the per-ticket ownership
+    /// check without validating the recipient at all (despite the name),
+    /// and its being unused meant a batch with a duplicate ticket ID, an
+    /// empty list, or a self-transfer was never actually rejected.
+    fn validate_batch_recipients(
+        env: &Env,
+        ticket_ids: &Vec<u64>,
+        to: &Address,
+        from: &Address,
+    ) -> Result<Vec<Ticket>, LumentixError> {
+        if ticket_ids.is_empty() {
+            return Err(LumentixError::InvalidAmount);
         }
-        Ok(())
+        if to == from {
+            return Err(LumentixError::InvalidAddress);
+        }
+
+        let mut seen: Vec<u64> = Vec::new(env);
+        let mut tickets: Vec<Ticket> = Vec::new(env);
+        for ticket_id in ticket_ids.iter() {
+            if seen.contains(&ticket_id) {
+                return Err(LumentixError::InvalidAmount);
+            }
+            seen.push_back(ticket_id);
+
+            let ticket = storage::get_ticket(env, ticket_id)?;
+            Self::validate_ticket_transfer(env, &ticket, from, true)?;
+            tickets.push_back(ticket);
+        }
+
+        Ok(tickets)
     }
 
     /// Emit batch transfer events
-    pub fn emit_batch_transfer_events(
-        env: &Env,
-        from: Address,
-        to: Address,
-        ticket_ids: Vec<u64>,
-    ) {
+    fn emit_batch_transfer_events(env: &Env, from: Address, to: Address, ticket_ids: Vec<u64>) {
         BatchTicketsTransferred::emit(env, from, to, ticket_ids);
     }
 
