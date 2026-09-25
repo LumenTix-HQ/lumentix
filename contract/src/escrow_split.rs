@@ -74,7 +74,7 @@ pub fn create_escrow_split(
 ) -> Result<EscrowSplit, LumentixError> {
     storage::get_event(env, event_id)?;
 
-    if organizers.len() == 0 || organizers.len() != shares.len() {
+    if organizers.is_empty() || organizers.len() != shares.len() {
         return Err(LumentixError::InvalidEscrowSplit);
     }
 
@@ -128,7 +128,7 @@ pub fn create_escrow_split(
         .persistent()
         .set(&split_key(env, split_id), &split);
 
-    EscrowSplitCreated::emit(env, split_id, event_id, split_total, organizers.len() as u32);
+    EscrowSplitCreated::emit(env, split_id, event_id, split_total, organizers.len());
 
     Ok(split)
 }
@@ -236,9 +236,14 @@ mod test {
     use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
     use crate::types::EventStatus;
     use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::Ledger as _;
     use soroban_sdk::{Env, String, Vec};
 
-    fn create_and_publish_event(env: &Env, client: &LumentixContractClient, organizer: &Address) -> u64 {
+    fn create_and_publish_event(
+        env: &Env,
+        client: &LumentixContractClient,
+        organizer: &Address,
+    ) -> u64 {
         let now = env.ledger().timestamp();
         let event_id = client.create_event(
             organizer,
@@ -317,6 +322,7 @@ mod test {
     #[test]
     fn releases_funds_to_all_organizers() {
         let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
         let (_admin, client) = setup(&env);
         let organizer_a = Address::generate(&env);
         let organizer_b = Address::generate(&env);
@@ -338,8 +344,8 @@ mod test {
 
         assert!(released.released);
         assert!(released.released_at > 0);
-        assert_eq!(released.shares.get(0).unwrap().paid, true);
-        assert_eq!(released.shares.get(1).unwrap().paid, true);
+        assert!(released.shares.get(0).unwrap().paid);
+        assert!(released.shares.get(1).unwrap().paid);
         assert_eq!(client.get_escrow_balance(&event_id), 0);
     }
 

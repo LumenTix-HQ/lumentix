@@ -247,7 +247,7 @@ mod test {
         assert!(!badge.revoked);
 
         let fetched = client.get_badge(&1);
-        assert_eq!(fetched.unwrap().owner, owner);
+        assert_eq!(fetched.owner, owner);
         assert_eq!(client.get_owner_badges(&owner).len(), 1);
     }
 
@@ -318,7 +318,7 @@ mod test {
         client.mint_achievement_badge(&owner, &milestone(&env, "Shiny"), &10u32, &0u32, &0u64);
 
         let revoked = client.revoke_expired_badge(&admin, &1);
-        assert!(revoked.unwrap().revoked);
+        assert!(revoked.revoked);
 
         // A repeated revoke is rejected.
         let again = client.try_revoke_expired_badge(&admin, &1);

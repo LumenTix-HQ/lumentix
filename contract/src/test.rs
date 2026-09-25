@@ -405,7 +405,7 @@ fn test_batch_purchase_ten_tickets_reduces_availability_charges_tokens_and_maps_
     let env = Env::default();
     env.mock_all_auths();
 
-    let (admin, _, client) = create_test_contract_with_id(&env);
+    let (admin, contract_id, client) = create_test_contract_with_id(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
     let token_admin = Address::generate(&env);

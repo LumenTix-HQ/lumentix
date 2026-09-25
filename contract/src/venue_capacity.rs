@@ -132,7 +132,6 @@ pub fn get_venue_capacity(env: &Env, event_id: u64) -> Result<VenueCapacity, Lum
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use crate::error::LumentixError;
     use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
     use crate::types::EventStatus;

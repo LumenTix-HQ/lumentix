@@ -230,6 +230,7 @@ pub mod storage;
 pub mod types;
 pub mod validation;
 pub mod achievement_badge;
+pub mod email_campaign;
 pub mod escrow_split;
 pub mod venue_capacity;
 

@@ -7957,4 +7957,75 @@ impl LumentixContract {
     ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
         crate::escrow_split::get_escrow_split(&env, split_id)
     }
+
+    /// Create a draft email marketing campaign (Issue #673).
+    pub fn create_email_campaign(
+        env: Env,
+        organizer: Address,
+        event_id: Option<u64>,
+        subject: String,
+        body: String,
+        recipient_count: u32,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        crate::email_campaign::create_email_campaign(
+            &env,
+            organizer,
+            event_id,
+            subject,
+            body,
+            recipient_count,
+        )
+    }
+
+    /// Mark an email campaign as sent by its owner.
+    pub fn send_marketing_emails(
+        env: Env,
+        caller: Address,
+        campaign_id: u64,
+    ) -> Result<crate::types::EmailCampaign, LumentixError> {
+        caller.require_auth();
+        crate::email_campaign::send_marketing_emails(&env, caller, campaign_id)
+    }
+
+    /// Record cumulative engagement counters for a sent email campaign.
+    #[allow(clippy::too_many_arguments)]
+    pub fn track_email_analytics(
+        env: Env,
+        organizer: Address,
+        campaign_id: u64,
+        delivered: u32,
+        opened: u32,
+        clicked: u32,
+        bounced: u32,
+        unsubscribed: u32,
+    ) -> Result<crate::types::EmailCampaignAnalytics, LumentixError> {
+        organizer.require_auth();
+        crate::email_campaign::track_email_analytics(
+            &env,
+            organizer,
+            campaign_id,
+            delivered,
+            opened,
+            clicked,
+            bounced,
+            unsubscribed,
+        )
+    }
+
+    /// Read an email campaign record.
+    pub fn get_email_campaign(
+        env: Env,
+        campaign_id: u64,
+    ) -> Result<crate::types::EmailCampaign, LumentixError> {
+        crate::email_campaign::get_email_campaign(&env, campaign_id)
+    }
+
+    /// Read the engagement ledger for an email campaign.
+    pub fn get_email_campaign_analytics(
+        env: Env,
+        campaign_id: u64,
+    ) -> Result<crate::types::EmailCampaignAnalytics, LumentixError> {
+        crate::email_campaign::get_email_campaign_analytics(&env, campaign_id)
+    }
 }
