@@ -8,6 +8,7 @@ import {
   Logger,
   NotFoundException,
   Inject,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -43,6 +44,7 @@ import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
 import { buildListEventsOptions } from './build-list-events-options';
 import { CalendarService, CalendarAttendeeContact } from '../calendar/calendar.service';
+import { SchedulingService } from '../scheduling/scheduling.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -86,7 +88,44 @@ export class EventsService {
     private readonly eventSeriesRepository: Repository<EventSeries>,
     @InjectQueue('events') private readonly eventsQueue: Queue,
     private readonly calendarService: CalendarService,
+    @Optional() private readonly schedulingService: SchedulingService,
   ) {}
+
+  /**
+   * Runs a venue conflict check via SchedulingService and throws a
+   * ConflictException (HTTP 409) if any overlap is found.
+   *
+   * The exception message is structured JSON so callers can parse the
+   * conflict list and display meaningful suggestions to the user.
+   *
+   * No-ops gracefully when SchedulingService is not available (e.g. in
+   * unit tests that don't wire the scheduling module).
+   */
+  private async assertNoScheduleConflict(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    excludeEventId?: string,
+  ): Promise<void> {
+    if (!this.schedulingService) return;
+
+    const report = await this.schedulingService.detectScheduleConflict(
+      venue,
+      startDate,
+      endDate,
+      excludeEventId,
+    );
+
+    if (!report.hasConflict) return;
+
+    const names = report.conflicts.map((c) => `"${c.title}"`).join(', ');
+    throw new ConflictException({
+      message: `Venue "${venue}" is already booked during the requested time slot. Conflicting events: ${names}.`,
+      venue,
+      requestedSlot: { startDate, endDate },
+      conflicts: report.conflicts,
+    });
+  }
 
   /**
    * Analytics #992 — distinct, non-empty attendee email/name contacts for
@@ -113,6 +152,16 @@ export class EventsService {
           `Currency "${dto.currency}" is not supported. Supported: ${codes.join(', ')}`,
         );
       }
+    }
+
+    // ── Conflict detection ──────────────────────────────────────────────────
+    if (dto.location && dto.startDate && dto.endDate) {
+      await this.assertNoScheduleConflict(
+        dto.location,
+        new Date(dto.startDate),
+        new Date(dto.endDate),
+        undefined, // no existing event to exclude on creation
+      );
     }
 
     const event = this.eventRepository.create({
@@ -148,6 +197,28 @@ export class EventsService {
       ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
       ...(dto.endDate !== undefined && { endDate: new Date(dto.endDate) }),
     };
+
+    // ── Conflict detection on reschedule / relocation ──────────────────────
+    // Check when the slot or venue is changing, but only for events that
+    // already hold a venue (PUBLISHED/COMPLETED) or are being published now.
+    const slotOrVenueChanging =
+      dto.location !== undefined ||
+      dto.startDate !== undefined ||
+      dto.endDate !== undefined;
+
+    const eventWillHoldVenue =
+      isPublishing ||
+      event.status === EventStatus.PUBLISHED ||
+      event.status === EventStatus.COMPLETED;
+
+    const venueForCheck = dto.location ?? event.location;
+    const startForCheck = dto.startDate ? new Date(dto.startDate) : event.startDate;
+    const endForCheck = dto.endDate ? new Date(dto.endDate) : event.endDate;
+
+    if (slotOrVenueChanging && eventWillHoldVenue && venueForCheck) {
+      await this.assertNoScheduleConflict(venueForCheck, startForCheck, endForCheck, id);
+    }
+
     Object.assign(event, updates);
     if (isPublishing) {
       await this.eventRepository.save(event);

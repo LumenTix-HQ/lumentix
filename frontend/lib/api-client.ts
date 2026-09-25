@@ -295,4 +295,17 @@ export const apiClient = {
 
   getEventSentiment: (eventId: string) =>
     request<any>(`/reviews/events/${eventId}/sentiment`),
+
+  getRecommendations: (userId: string, limit?: number) =>
+    request<any>(`/recommendations/${userId}${limit ? `?limit=${limit}` : ""}`),
+
+  updateUserPreferences: (
+    userId: string,
+    body: { preferences: Array<{ category?: string | null; location?: string | null; weight: number }> },
+  ) =>
+    request<any>(`/recommendations/${userId}/preferences`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };

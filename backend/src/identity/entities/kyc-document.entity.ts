@@ -44,6 +44,18 @@ export class KycDocument {
   @Column({ type: 'varchar', default: KycStatus.PENDING })
   status: KycStatus;
 
+  /** UUID of the admin who reviewed this submission */
+  @Column({ type: 'uuid', nullable: true })
+  reviewedBy: string | null;
+
+  /** Optional notes added by the reviewing admin */
+  @Column({ type: 'text', nullable: true })
+  reviewerNotes: string | null;
+
+  /** When the admin approved or rejected this submission */
+  @Column({ type: 'timestamptz', nullable: true })
+  reviewedAt: Date | null;
+
   @CreateDateColumn()
   submittedAt: Date;
 
