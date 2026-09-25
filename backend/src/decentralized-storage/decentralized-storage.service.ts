@@ -5,27 +5,31 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as crypto from 'crypto';
+import { IpfsPinningService } from './ipfs-pinning.service';
 
 /**
  * Real IPFS pinning integration via configurable provider.
  *
- * Supports Pinata, web3.storage, or any IPFS-compatible pinning API.
- * Set IPFS_API_URL and IPFS_API_KEY in your environment to connect.
+ * Uploads through the Pinata file API, then replicates the CID through
+ * independently configured IPFS Pinning Service API providers.
  */
 @Injectable()
 export class DecentralizedStorageService {
   private readonly logger = new Logger(DecentralizedStorageService.name);
-  private readonly pinMetadata = new Map<string, { eventId: string; url: string; pinnedAt: Date }>();
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly pinning: IpfsPinningService,
+  ) {}
 
   async upload_media_to_decentralized_storage(
     eventId: string,
     fileName: string,
     mimeType: string,
     content: string,
-  ): Promise<{ hash: string; url: string; eventId: string; fileName: string; mimeType: string; uploaded: boolean }> {
+    contentEncoding: 'utf8' | 'base64' = 'utf8',
+  ) {
+    this.pinning.assertConfigured();
     const apiKey = this.configService.get<string>('IPFS_API_KEY');
     const apiUrl = this.configService.get<string>('IPFS_API_URL');
 
@@ -35,50 +39,71 @@ export class DecentralizedStorageService {
       );
     }
 
-    const contentBuffer = Buffer.from(content, 'utf-8');
+    // Binary images/video must use base64 rather than UTF-8 text.
+    if (
+      contentEncoding === 'base64' &&
+      (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+        content,
+      ) ||
+        !content)
+    ) {
+      throw new BadRequestException('content must be base64 encoded');
+    }
+    const contentBuffer = Buffer.from(content, contentEncoding);
     const formData = new FormData();
-    formData.append('file', new Blob([contentBuffer], { type: mimeType }), fileName);
-    formData.append('pinataMetadata', JSON.stringify({ name: fileName, keyvalues: { eventId } }));
+    formData.append(
+      'file',
+      new Blob([contentBuffer], { type: mimeType }),
+      fileName,
+    );
+    formData.append(
+      'pinataMetadata',
+      JSON.stringify({ name: fileName, keyvalues: { eventId } }),
+    );
 
     const response = await fetch(`${apiUrl}/pinning/pinFileToIPFS`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: formData,
+      signal: AbortSignal.timeout(30_000),
+      redirect: 'error',
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      this.logger.error(`IPFS pin failed: ${response.status} ${errorText}`);
-      throw new BadRequestException(`Failed to pin content to IPFS: ${response.statusText}`);
+      this.logger.error(`IPFS pin failed: ${response.status}`);
+      throw new BadRequestException(
+        `Failed to pin content to IPFS: ${response.statusText}`,
+      );
     }
 
     const result = (await response.json()) as { IpfsHash: string };
     const hash = result.IpfsHash;
-    const gateway = this.configService.get<string>('IPFS_GATEWAY', 'https://ipfs.io/ipfs');
+    const gateway = this.configService.get<string>(
+      'IPFS_GATEWAY',
+      'https://ipfs.io/ipfs',
+    );
     const url = `${gateway}/${hash}`;
 
-    this.pinMetadata.set(hash, { eventId, url, pinnedAt: new Date() });
-
-    return { hash, url, eventId, fileName, mimeType, uploaded: true };
+    const redundancy = await this.pinning.pin_to_ipfs(eventId, hash);
+    return { ...redundancy, url, fileName, mimeType, uploaded: true };
   }
 
-  async pin_event_media(
-    eventId: string,
-    hash: string,
-  ): Promise<{ hash: string; eventId: string; pinned: boolean; url: string }> {
-    const gateway = this.configService.get<string>('IPFS_GATEWAY', 'https://ipfs.io/ipfs');
-    const url = `${gateway}/${hash}`;
-    this.pinMetadata.set(hash, { eventId, url, pinnedAt: new Date() });
-    return { hash, eventId, pinned: true, url };
+  async pin_event_media(eventId: string, hash: string) {
+    const result = await this.pinning.pin_to_ipfs(eventId, hash);
+    return { ...result, url: this.gatewayUrl(hash) };
   }
 
-  async retrieve_media_by_hash(
-    hash: string,
-  ): Promise<{ eventId: string; url: string; pinnedAt: Date; hash: string }> {
-    const pinned = this.pinMetadata.get(hash);
-    if (!pinned) throw new NotFoundException(`Media with hash "${hash}" not found`);
-    return { ...pinned, hash };
+  async retrieve_media_by_hash(hash: string) {
+    const result = await this.pinning.verify_pin_status(hash);
+    if (result.providers.every((p) => p.status === 'missing')) {
+      throw new NotFoundException('Stored media not found');
+    }
+    return { ...result, url: this.gatewayUrl(hash) };
+  }
+
+  private gatewayUrl(hash: string) {
+    return `${this.configService.get<string>('IPFS_GATEWAY', 'https://ipfs.io/ipfs')}/${hash}`;
   }
 }

@@ -863,15 +863,10 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Transaction replay protection (Issue #1007)
-    //
-    // These are additive primitives, kept separate from the existing
-    // `purchase_ticket`/`transfer_ticket` entry points so existing callers
-    // and tests keep working unchanged. A caller that wants replay
-    // protection for a transfer fetches a nonce, derives an idempotency key
-    // from it (e.g. hashing the nonce together with the call's arguments),
-    // and calls `transfer_ticket_idempotent` instead of
-    // `transfer_ticket` directly.
+    // Transaction replay protection: keys are scoped to an authenticated
+    // account. Reuse the SAME key when retrying an operation; generate a new
+    // nonce only for a new logical operation. Persistent records survive TTL
+    // archival and must be restored, never treated as unused.
     // ═══════════════════════════════════════════════════════════════════════
 
     /// Returns the caller's next transaction nonce and advances their
@@ -880,25 +875,41 @@ impl LumentixContract {
     /// subsequent sensitive call, so a network-retried or replayed
     /// transaction carrying the same key can be rejected.
     pub fn generate_transaction_nonce(env: Env, account: Address) -> u64 {
+        account.require_auth();
         storage::consume_transaction_nonce(&env, &account)
     }
 
     /// Returns whether `key` is still unused (`true`) or has already been
     /// consumed by a prior `reject_replay_attempt` call (`false`). Read-only
     /// — does not itself consume the key.
-    pub fn validate_idempotency_key(env: Env, key: BytesN<32>) -> bool {
-        !storage::is_idempotency_key_used(&env, &key)
+    pub fn validate_idempotency_key(env: Env, account: Address, key: BytesN<32>) -> bool {
+        !storage::is_idempotency_key_used(&env, &account, &key)
     }
 
     /// Consumes `key`, erroring with `IdempotencyKeyAlreadyUsed` if it has
     /// already been used. Call this once, before any state changes, at the
     /// start of an operation that must not be double-applied by a network
     /// retry or a replayed transaction.
-    pub fn reject_replay_attempt(env: Env, key: BytesN<32>) -> Result<(), LumentixError> {
-        if storage::is_idempotency_key_used(&env, &key) {
+    pub fn reject_replay_attempt(
+        env: Env,
+        account: Address,
+        key: BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        account.require_auth();
+        Self::consume_replay_key(&env, &account, &key)
+    }
+
+    // Internal operations authorize the account once in their purchase/transfer
+    // path. Requiring auth twice in one Soroban frame is an error.
+    fn consume_replay_key(
+        env: &Env,
+        account: &Address,
+        key: &BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        if storage::is_idempotency_key_used(env, account, key) {
             return Err(LumentixError::IdempotencyKeyAlreadyUsed);
         }
-        storage::consume_idempotency_key(&env, &key);
+        storage::consume_idempotency_key(env, account, key);
         Ok(())
     }
 
@@ -977,6 +988,31 @@ impl LumentixContract {
         achievement_badge::get_owner_badges(&env, &owner)
     }
 
+    /// Atomically consume a buyer-scoped key and purchase one ticket.
+    /// A failed purchase rolls back the key along with all contract writes.
+    pub fn purchase_ticket_idempotent(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        amount: i128,
+        idempotency_key: BytesN<32>,
+    ) -> Result<u64, LumentixError> {
+        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
+        Self::purchase_ticket(env, buyer, event_id, amount)
+    }
+
+    /// Replay-protected group purchase; retries cannot mint another batch.
+    pub fn batch_purchase_idempotent(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        buyer: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<Vec<u64>, LumentixError> {
+        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
+        Self::batch_purchase_tickets(env, event_id, quantity, buyer)
+    }
+
     /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
     /// network-retried or replayed call carrying the same `idempotency_key`
     /// is rejected instead of transferring the ticket a second time.
@@ -988,7 +1024,7 @@ impl LumentixContract {
         idempotency_key: BytesN<32>,
     ) -> Result<(), LumentixError> {
         from.require_auth();
-        Self::reject_replay_attempt(env.clone(), idempotency_key)?;
+        Self::consume_replay_key(&env, &from, &idempotency_key)?;
 
         let mut ticket = storage::get_ticket(&env, ticket_id)?;
         Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
