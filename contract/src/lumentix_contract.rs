@@ -7958,7 +7958,7 @@ impl LumentixContract {
         crate::escrow_split::get_escrow_split(&env, split_id)
     }
 
-    /// Create a draft email marketing campaign (Issue #673).
+    /// Create a draft email marketing campaign.
     pub fn create_email_campaign(
         env: Env,
         organizer: Address,
