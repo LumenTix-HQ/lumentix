@@ -22,6 +22,7 @@ import { CancelEventProcessor } from './jobs/cancel-event.processor';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { StellarModule } from '../stellar';
 import { CalendarModule } from '../calendar/calendar.module';
+import { SchedulingModule } from '../scheduling/scheduling.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { CalendarModule } from '../calendar/calendar.module';
     WebhooksModule,
     StellarModule,
     CalendarModule,
+    SchedulingModule,
     BullModule.registerQueue({
       name: 'events',
     }),
