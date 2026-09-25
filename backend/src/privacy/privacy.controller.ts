@@ -12,8 +12,22 @@ export class PrivacyController {
   constructor(private readonly privacyService: PrivacyService) {}
 
   @Get('export-data')
-  @ApiOperation({ summary: 'Export all data held for the current user', description: 'Returns a machine-readable (JSON) export of the user profile and related records.' })
-  @ApiResponse({ status: 200, description: 'Data export returned' })
+  @ApiOperation({
+    summary: 'Export all data held for the current user (GDPR Article 15)',
+    description: `Returns a machine-readable (JSON) export of all personal data in the system including:
+    - User profile
+    - Event registrations, tickets, reviews
+    - Chat messages
+    - Loyalty program account and transactions
+    - Insurance policies and claims
+    - Gamification achievements and badges
+    - Social profile and connections
+    - Payment records and transaction history
+    
+    This implements the GDPR Article 15 right of access (data portability).
+    The export includes a coverage note documenting what is included.`,
+  })
+  @ApiResponse({ status: 200, description: 'Complete GDPR data export returned' })
   exportData(@Req() req: AuthenticatedRequest) {
     return this.privacyService.exportUserData(req.user.id);
   }

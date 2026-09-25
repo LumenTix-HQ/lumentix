@@ -90,6 +90,8 @@ export enum AuditAction {
 }
 
 @Index(['userId', 'action'])
+@Index(['createdAt'])
+@Index(['userId', 'createdAt'])
 @Entity('audit_logs')
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
@@ -109,6 +111,7 @@ export class AuditLog {
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, unknown> | null;
 
+  @Index()
   @CreateDateColumn()
   createdAt: Date;
 }

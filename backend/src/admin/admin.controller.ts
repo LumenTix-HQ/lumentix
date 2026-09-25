@@ -1,4 +1,3 @@
-import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 import {
   Body,
   Controller,
@@ -26,8 +25,8 @@ import { BruteForceService } from '../common/services/brute-force.service';
 import { ListAdminEventsDto } from './dto/list-admin-events.dto';
 import { ListAdminUsersDto } from './dto/list-admin-users.dto';
 import { UpdateAdminUserDto } from './dto/update-admin-user.dto';
-import { Roles } from './roles.decorator';
-import { RolesGuard } from './roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { AdminService } from './admin.service';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { RoleRequestStatus } from '../users/entities/role-request.entity';
@@ -35,6 +34,7 @@ import { UserRole } from '../users/enums/user-role.enum';
 import { StellarService } from '../stellar/stellar.service';
 import { StellarWebhookService } from '../stellar/stellar-webhook.service';
 import { RejectRoleRequestDto } from './dto/reject-role-request.dto';
+import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
