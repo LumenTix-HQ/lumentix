@@ -1817,27 +1817,33 @@ impl OfflineScansSyncCompleted {
 /// Event emitted when an age proof is registered for an event subject
 pub struct AgeProofIssued;
 impl AgeProofIssued {
-    pub fn emit(env: &Env, subject: Address, proof_id: u64) {
-        env.events()
-            .publish((symbol_short!("ageiss"),), (subject, proof_id));
+    pub fn emit(env: &Env, subject: Address, min_age: u32, expires_at: u64) {
+        env.events().publish(
+            (symbol_short!("ageiss"),),
+            (subject, min_age, expires_at),
+        );
     }
 }
 
 /// Event emitted when an event age proof is verified
 pub struct AgeProofVerified;
 impl AgeProofVerified {
-    pub fn emit(env: &Env, subject: Address, event_id: u64) {
-        env.events()
-            .publish((symbol_short!("agever"),), (subject, event_id));
+    pub fn emit(env: &Env, subject: Address, min_age_required: u32, verified: bool) {
+        env.events().publish(
+            (symbol_short!("agever"),),
+            (subject, min_age_required, verified),
+        );
     }
 }
 
 /// Event emitted when an underage purchase is rejected
 pub struct UnderagePurchaseRejected;
 impl UnderagePurchaseRejected {
-    pub fn emit(env: &Env, buyer: Address, event_id: u64) {
-        env.events()
-            .publish((symbol_short!("ageund"),), (buyer, event_id));
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, min_age_required: u32) {
+        env.events().publish(
+            (symbol_short!("ageund"),),
+            (event_id, buyer, min_age_required),
+        );
     }
 }
 
@@ -1856,5 +1862,116 @@ impl AchievementBadgeRevoked {
     pub fn emit(env: &Env, badge_id: u64, owner: Address) {
         env.events()
             .publish((symbol_short!("badgrev"),), (badge_id, owner));
+    }
+}
+
+/// Event emitted when an escrow payment split is created (Issue #1247)
+pub struct EscrowSplitCreated;
+impl EscrowSplitCreated {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128, organizer_count: u32) {
+        env.events().publish(
+            (symbol_short!("esplitcr"),),
+            (split_id, event_id, total_amount, organizer_count),
+        );
+    }
+}
+
+/// Event emitted when an escrow split's funds are released to organizers (Issue #1247)
+pub struct EscrowSplitReleased;
+impl EscrowSplitReleased {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128) {
+        env.events()
+            .publish((symbol_short!("esplitrl"),), (split_id, event_id, total_amount));
+    }
+}
+
+/// Event emitted when an escrow split is disputed, freezing the funds (Issue #1247)
+pub struct EscrowSplitDisputed;
+impl EscrowSplitDisputed {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, caller: Address) {
+        env.events()
+            .publish((symbol_short!("esplitdp"),), (split_id, event_id, caller));
+    }
+}
+
+/// Event emitted when a venue max capacity is configured for an event (Issue #1245)
+pub struct VenueCapacitySet;
+impl VenueCapacitySet {
+    pub fn emit(env: &Env, event_id: u64, max_capacity: u32, current_count: u32) {
+        env.events().publish(
+            (symbol_short!("vencapst"),),
+            (event_id, max_capacity, current_count),
+        );
+    }
+}
+
+/// Event emitted when a mint is rejected for breaching venue capacity (Issue #1245)
+pub struct OverCapacityMintRejected;
+impl OverCapacityMintRejected {
+    pub fn emit(env: &Env, event_id: u64, quantity: u32, max_capacity: u32) {
+        env.events().publish(
+            (symbol_short!("ovcarjct"),),
+            (event_id, quantity, max_capacity),
+        );
+    }
+}
+
+/// Event emitted when the live attendance counter is incremented (Issue #1245)
+pub struct AttendanceCounterIncremented;
+impl AttendanceCounterIncremented {
+    pub fn emit(env: &Env, event_id: u64, minted_count: u32, max_capacity: u32) {
+        env.events().publish(
+            (symbol_short!("attnincr"),),
+            (event_id, minted_count, max_capacity),
+        );
+    }
+}
+
+/// Event emitted when royalty splits are configured for an event (Issue #1206)
+pub struct RoyaltySplitsSet;
+impl RoyaltySplitsSet {
+    pub fn emit(env: &Env, event_id: u64, total_bps: u32) {
+        env.events()
+            .publish((symbol_short!("royset"),), (event_id, total_bps));
+    }
+}
+
+/// Event emitted when accrued royalties are distributed to artists (Issue #1206)
+pub struct RoyaltiesDistributed;
+impl RoyaltiesDistributed {
+    pub fn emit(env: &Env, event_id: u64, total_amount: i128) {
+        env.events()
+            .publish((symbol_short!("roydist"),), (event_id, total_amount));
+    }
+}
+
+/// Event emitted when an email campaign is created
+pub struct EmailCampaignCreated;
+impl EmailCampaignCreated {
+    pub fn emit(env: &Env, campaign_id: u64, organizer: Address, recipient_count: u32) {
+        env.events().publish(
+            (symbol_short!("emcampcr"),),
+            (campaign_id, organizer, recipient_count),
+        );
+    }
+}
+
+/// Event emitted when a marketing email campaign is sent
+pub struct EmailCampaignSent;
+impl EmailCampaignSent {
+    pub fn emit(env: &Env, campaign_id: u64, recipient_count: u32) {
+        env.events()
+            .publish((symbol_short!("emcampsn"),), (campaign_id, recipient_count));
+    }
+}
+
+/// Event emitted when engagement analytics are recorded for a campaign
+pub struct EmailCampaignAnalyticsRecorded;
+impl EmailCampaignAnalyticsRecorded {
+    pub fn emit(env: &Env, campaign_id: u64, delivered: u32, opened: u32, clicked: u32) {
+        env.events().publish(
+            (symbol_short!("emcampan"),),
+            (campaign_id, delivered, opened, clicked),
+        );
     }
 }

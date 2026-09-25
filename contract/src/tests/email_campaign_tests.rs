@@ -27,9 +27,7 @@ fn test_create_email_campaign_returns_id() {
     let subject = String::from_str(&env, "Big news from Lumentix!");
     let body = String::from_str(&env, "<h1>Hello</h1><p>Check out our next event.</p>");
 
-    let id = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &100u32)
-        .unwrap();
+    let id = client.create_email_campaign(&organizer, &None, &subject, &body, &100u32);
 
     assert_eq!(id, 1u64, "First campaign should have id = 1");
 }
@@ -42,16 +40,12 @@ fn test_create_email_campaign_increments_id() {
     let subject = String::from_str(&env, "Campaign A");
     let body = String::from_str(&env, "<p>Body A</p>");
 
-    let id1 = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &50u32)
-        .unwrap();
+    let id1 = client.create_email_campaign(&organizer, &None, &subject, &body, &50u32);
 
     let subject2 = String::from_str(&env, "Campaign B");
     let body2 = String::from_str(&env, "<p>Body B</p>");
 
-    let id2 = client
-        .create_email_campaign(&organizer, &None, &subject2, &body2, &75u32)
-        .unwrap();
+    let id2 = client.create_email_campaign(&organizer, &None, &subject2, &body2, &75u32);
 
     assert_eq!(id1 + 1, id2);
 }
@@ -65,12 +59,10 @@ fn test_create_email_campaign_with_event_scope() {
     let body = String::from_str(&env, "<p>See you there!</p>");
 
     // scope to event_id = 42
-    let id = client
-        .create_email_campaign(&organizer, &Some(42u64), &subject, &body, &30u32)
-        .unwrap();
+    let id = client.create_email_campaign(&organizer, &Some(42u64), &subject, &body, &30u32);
     assert_eq!(id, 1u64);
 
-    let saved = client.get_email_campaign(&id).unwrap();
+    let saved = client.get_email_campaign(&id);
     assert_eq!(saved.event_id, Some(42u64));
     assert_eq!(saved.recipient_count, 30u32);
 }
@@ -113,13 +105,11 @@ fn test_send_marketing_emails_transitions_to_sent() {
     let subject = String::from_str(&env, "Launch email");
     let body = String::from_str(&env, "<p>We are live!</p>");
 
-    let id = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &200u32)
-        .unwrap();
+    let id = client.create_email_campaign(&organizer, &None, &subject, &body, &200u32);
 
-    client.send_marketing_emails(&organizer, &id).unwrap();
+    client.send_marketing_emails(&organizer, &id);
 
-    let campaign = client.get_email_campaign(&id).unwrap();
+    let campaign = client.get_email_campaign(&id);
     assert_eq!(campaign.status, EmailCampaignStatus::Sent);
     assert!(campaign.sent_at.is_some());
 }
@@ -132,11 +122,9 @@ fn test_send_already_sent_campaign_returns_error() {
     let subject = String::from_str(&env, "Double-send test");
     let body = String::from_str(&env, "<p>Once.</p>");
 
-    let id = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &10u32)
-        .unwrap();
+    let id = client.create_email_campaign(&organizer, &None, &subject, &body, &10u32);
 
-    client.send_marketing_emails(&organizer, &id).unwrap();
+    client.send_marketing_emails(&organizer, &id);
 
     // Second send should fail
     let result = client.try_send_marketing_emails(&organizer, &id);
@@ -155,9 +143,7 @@ fn test_send_by_non_owner_returns_unauthorized() {
     let subject = String::from_str(&env, "Owned campaign");
     let body = String::from_str(&env, "<p>Mine.</p>");
 
-    let id = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &5u32)
-        .unwrap();
+    let id = client.create_email_campaign(&organizer, &None, &subject, &body, &5u32);
 
     let result = client.try_send_marketing_emails(&attacker, &id);
     assert_eq!(
@@ -176,14 +162,11 @@ fn test_track_email_analytics_stores_values() {
     let subject = String::from_str(&env, "Analytics test");
     let body = String::from_str(&env, "<p>Track me.</p>");
 
-    let id = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &100u32)
-        .unwrap();
-    client.send_marketing_emails(&organizer, &id).unwrap();
+    let id = client.create_email_campaign(&organizer, &None, &subject, &body, &100u32);
+    client.send_marketing_emails(&organizer, &id);
 
-    let analytics = client
-        .track_email_analytics(&organizer, &id, &90u32, &60u32, &30u32, &5u32, &2u32)
-        .unwrap();
+    let analytics =
+        client.track_email_analytics(&organizer, &id, &90u32, &60u32, &30u32, &5u32, &2u32);
 
     assert_eq!(analytics.total_delivered, 90u32);
     assert_eq!(analytics.total_opened, 60u32);
@@ -201,12 +184,11 @@ fn test_track_analytics_delivered_exceeds_sent_returns_error() {
     let subject = String::from_str(&env, "Over-delivery test");
     let body = String::from_str(&env, "<p>Oops.</p>");
 
-    let id = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &50u32)
-        .unwrap();
+    let id = client.create_email_campaign(&organizer, &None, &subject, &body, &50u32);
 
     // delivered > recipient_count (50) — should fail
-    let result = client.try_track_email_analytics(&organizer, &id, &999u32, &0u32, &0u32, &0u32, &0u32);
+    let result =
+        client.try_track_email_analytics(&organizer, &id, &999u32, &0u32, &0u32, &0u32, &0u32);
     assert_eq!(
         result.unwrap_err().unwrap(),
         LumentixError::EmailCampaignInvalidDeliveryCount
@@ -221,11 +203,9 @@ fn test_get_email_campaign_analytics_returns_initial_zeros() {
     let subject = String::from_str(&env, "New campaign");
     let body = String::from_str(&env, "<p>Hi!</p>");
 
-    let id = client
-        .create_email_campaign(&organizer, &None, &subject, &body, &20u32)
-        .unwrap();
+    let id = client.create_email_campaign(&organizer, &None, &subject, &body, &20u32);
 
-    let analytics = client.get_email_campaign_analytics(&id).unwrap();
+    let analytics = client.get_email_campaign_analytics(&id);
     assert_eq!(analytics.total_sent, 0u32);
     assert_eq!(analytics.total_opened, 0u32);
 }

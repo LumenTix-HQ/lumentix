@@ -230,6 +230,9 @@ pub mod storage;
 pub mod types;
 pub mod validation;
 pub mod achievement_badge;
+pub mod email_campaign;
+pub mod escrow_split;
+pub mod venue_capacity;
 
 #[cfg(test)]
 pub mod test;
@@ -288,6 +291,8 @@ pub use events::{
     PassPackageCreated, PassAllowanceDeducted,
     AgeProofIssued, AgeProofVerified, UnderagePurchaseRejected,
     AchievementBadgeMinted, AchievementBadgeRevoked,
+    EscrowSplitCreated, EscrowSplitReleased, EscrowSplitDisputed,
+    VenueCapacitySet, OverCapacityMintRejected, AttendanceCounterIncremented,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
