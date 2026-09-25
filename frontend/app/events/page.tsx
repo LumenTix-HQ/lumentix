@@ -6,6 +6,7 @@ import EventCard from "@/components/events/EventCard";
 import EventCardSkeleton from "@/components/events/EventCardSkeleton";
 import SearchBar from "@/components/events/SearchBar";
 import FilterPanel from "@/components/events/FilterPanel";
+import RecommendationStrip from "@/components/recommendations/RecommendationStrip";
 import ErrorState from "@/components/events/ErrorState";
 import EmptyState from "@/components/events/EmptyState";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -199,6 +200,9 @@ export default function EventsPage() {
 							</button>
 						</div>
 					</div>
+
+					{/* Personalized event recommendations (#1243) */}
+					<RecommendationStrip />
 
 					{/* Active filter tags */}
 					{hasAnyFilters && (

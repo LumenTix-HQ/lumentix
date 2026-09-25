@@ -37,6 +37,7 @@ import { SocialModule } from './social/social.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InsuranceModule } from './insurance/insurance.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { RecommendationsModule } from './recommendations/recommendations.module';
 import { VenuesModule } from './venues/venues.module';
 import { GamificationModule } from './gamification/gamification.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
@@ -144,6 +145,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     SocialModule,
     InsuranceModule,
     ReviewsModule,
+    RecommendationsModule,
     VenuesModule,
     GamificationModule,
     AnalyticsModule,
