@@ -4,7 +4,7 @@
 use crate::error::LumentixError;
 use crate::lumentix_contract::{LumentixContract, LumentixContractClient};
 use crate::types::{BiometricPrivacyAction, BiometricType, EventStatus};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, BytesN, Env, String, Vec};
 
 fn setup(env: &Env) -> (Address, Address, LumentixContractClient<'_>) {
     env.mock_all_auths();

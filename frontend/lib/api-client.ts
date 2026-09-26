@@ -1,6 +1,11 @@
 import type { Event, PaginatedResponse } from "@/types/event";
 import type { CreateEventFormValues } from "@/lib/schemas/create-event.schema";
 import type { SponsorTier } from "@/components/SponsorTierCard";
+import type {
+  GiftTicketInput,
+  GiftWrapResult,
+  UnwrapAnimation,
+} from "@/types/gifting";
 
 export interface SponsorEventSummary {
   id: string;
@@ -42,6 +47,8 @@ export interface BatchTransferResult {
   transferredCount: number;
   errors?: string[];
 }
+
+import type {
   NotificationPreferences,
   SaveNotificationPreferences,
 } from "@/types/notification-preference";
@@ -248,6 +255,28 @@ export const apiClient = {
     request<BatchTransferResult>("/tickets/batch-transfer", {
       method: "POST",
       body: JSON.stringify({ transfers }),
+    }),
+
+  giftTicket: (ticketId: string, body: GiftTicketInput) =>
+    request<GiftWrapResult>(`/tickets/${ticketId}/gift`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  rescheduleGift: (giftId: string, scheduledFor: string) =>
+    request<GiftWrapResult>(`/tickets/gifts/${giftId}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ scheduledFor }),
+    }),
+
+  unwrapGift: (giftId: string) =>
+    request<UnwrapAnimation>(`/tickets/gifts/${giftId}/unwrap`, {
+      method: "POST",
+    }),
+
+  cancelGift: (giftId: string) =>
+    request<GiftWrapResult>(`/tickets/gifts/${giftId}/cancel`, {
+      method: "POST",
     }),
 
   patchMe: (body: { displayName?: string }) =>

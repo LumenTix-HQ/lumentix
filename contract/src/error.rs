@@ -533,4 +533,28 @@ pub enum LumentixError {
     BadgeNotFound = 260,
     /// Badge is already revoked
     BadgeAlreadyRevoked = 261,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Venue capacity errors (Issue #1245)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No venue capacity has been configured for the event
+    VenueCapacityNotConfigured = 262,
+    /// Requested venue capacity is zero
+    InvalidVenueCapacity = 263,
+    /// Minting this many more tickets would exceed the venue capacity
+    VenueCapacityExceeded = 264,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Escrow payment split errors (Issue #1247)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No escrow split exists with the given ID
+    EscrowSplitNotFound = 265,
+    /// The proposed split is empty, names an organizer twice, or does not add up
+    InvalidEscrowSplit = 266,
+    /// The escrow split has already been released
+    EscrowSplitAlreadyReleased = 267,
+    /// The escrow split is already frozen by an open dispute
+    EscrowSplitAlreadyDisputed = 268,
+    /// The event has not finished yet, so held funds cannot be split out
+    EscrowSplitEventNotConcluded = 269,
 }

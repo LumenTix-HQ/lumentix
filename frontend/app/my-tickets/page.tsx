@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { getAccessToken, setTokens } from "@/lib/auth/auth";
 import TicketCard, { Ticket } from "@/components/TicketCard";
 import BatchTransferPanel from "@/components/BatchTransferPanel";
+import GiftTicketModal from "@/components/gifting/GiftTicketModal";
+import GiftUnwrapAnimation from "@/components/gifting/GiftUnwrapAnimation";
+import { useTicketGifting } from "@/hooks/useTicketGifting";
 import { apiClient } from "@/lib/api-client";
 
 type Tab = "upcoming" | "past" | "cancelled" | "refundable";
@@ -75,6 +78,8 @@ export default function MyTicketsPage() {
   const [resaleBusy, setResaleBusy] = useState(false);
   const [resaleError, setResaleError] = useState<string | null>(null);
   const [resaleSuccess, setResaleSuccess] = useState<string | null>(null);
+
+  const gifting = useTicketGifting();
 
   useEffect(() => {
     const token = getAccessToken();
@@ -240,12 +245,20 @@ export default function MyTicketsPage() {
               <div key={ticket.id} className="relative">
                 <TicketCard ticket={ticket} />
                 {ticket.status === "confirmed" && (
-                  <button
-                    onClick={() => { setResaleTarget(ticket); setResalePrice(""); setResaleError(null); setResaleSuccess(null); }}
-                    className="mt-2 w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
-                  >
-                    List for resale
-                  </button>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => { setResaleTarget(ticket); setResalePrice(""); setResaleError(null); setResaleSuccess(null); }}
+                      className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+                    >
+                      List for resale
+                    </button>
+                    <button
+                      onClick={() => gifting.openGift({ ticketId: ticket.id, eventTitle: ticket.eventTitle })}
+                      className="flex-1 py-2 rounded-lg border border-pink-500/50 bg-pink-500/10 hover:bg-pink-500/20 text-pink-200 text-sm font-medium transition-colors"
+                    >
+                      Gift this ticket
+                    </button>
+                  </div>
                 )}
                 {activeTab === "refundable" && (
                   <button
@@ -266,7 +279,44 @@ export default function MyTicketsPage() {
             {resaleSuccess}
           </div>
         )}
+
+        {gifting.success && (
+          <div
+            role="status"
+            className="mb-4 p-3 rounded-xl bg-green-500/15 border border-green-500/30 text-sm text-green-300"
+          >
+            {gifting.success}
+          </div>
+        )}
+
+        {gifting.error && !gifting.giftTarget && (
+          <div
+            role="alert"
+            className="mb-4 p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-sm text-red-300"
+          >
+            {gifting.error}
+          </div>
+        )}
       </div>
+
+      {gifting.giftTarget && (
+        <GiftTicketModal
+          ticketId={gifting.giftTarget.ticketId}
+          eventTitle={gifting.giftTarget.eventTitle}
+          eventDate={
+            tickets.find((t) => t.id === gifting.giftTarget?.ticketId)?.eventDate ??
+            new Date().toISOString()
+          }
+          busy={gifting.isBusy}
+          error={gifting.error}
+          onSubmit={gifting.submitGift}
+          onClose={gifting.closeGift}
+        />
+      )}
+
+      {gifting.reveal && (
+        <GiftUnwrapAnimation reveal={gifting.reveal} onDone={gifting.closeReveal} />
+      )}
 
       {resaleTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setResaleTarget(null)}>
