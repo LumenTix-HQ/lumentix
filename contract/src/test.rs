@@ -405,7 +405,7 @@ fn test_batch_purchase_ten_tickets_reduces_availability_charges_tokens_and_maps_
     let env = Env::default();
     env.mock_all_auths();
 
-    let (admin, _, client) = create_test_contract_with_id(&env);
+    let (admin, contract_id, client) = create_test_contract_with_id(&env);
     let organizer = Address::generate(&env);
     let buyer = Address::generate(&env);
     let token_admin = Address::generate(&env);
@@ -7658,4 +7658,539 @@ fn test_royalty_ledger_empty_before_any_distribution() {
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
     assert_eq!(client.query_royalty_ledger(&event_id).len(), 0);
+}
+
+// ============================================================================
+// VENUE CAPACITY (Issue #1245)
+// ============================================================================
+
+#[test]
+fn test_set_venue_capacity_by_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let capacity = client.set_venue_capacity(&event_id, &500u32, &organizer);
+    assert_eq!(capacity.max_capacity, 500u32);
+    assert_eq!(capacity.minted_count, 0u32);
+
+    let fetched = client.get_venue_capacity(&event_id);
+    assert_eq!(fetched.max_capacity, 500u32);
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), Some(500u32));
+}
+
+#[test]
+fn test_set_venue_capacity_rejects_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_set_venue_capacity(&event_id, &0u32, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidVenueCapacity)));
+}
+
+#[test]
+fn test_set_venue_capacity_unauthorized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let intruder = Address::generate(&env);
+    let result = client.try_set_venue_capacity(&event_id, &500u32, &intruder);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_venue_capacity_unconfigured_is_unlimited() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // No capacity configured: the counter is absent and the event is unlimited.
+    let result = client.try_get_venue_capacity(&event_id);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityNotConfigured)));
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), None);
+
+    // Buying still works, exactly as before the feature existed.
+    let buyer = Address::generate(&env);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    assert!(client.try_get_ticket_info(&ticket_id).is_ok());
+}
+
+#[test]
+fn test_set_venue_capacity_seeds_counter_from_tickets_sold() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Two tickets go out before any capacity is configured.
+    let buyer = Address::generate(&env);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+
+    // The counter picks those up instead of starting from zero.
+    let capacity = client.set_venue_capacity(&event_id, &10u32, &organizer);
+    assert_eq!(capacity.minted_count, 2u32);
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), Some(8u32));
+}
+
+#[test]
+fn test_set_venue_capacity_cannot_drop_below_tickets_sold() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &10u32, &organizer);
+
+    let buyer = Address::generate(&env);
+    client.batch_purchase_tickets(&event_id, &4u32, &buyer);
+
+    // Lowering the limit below what is already minted would silently
+    // unblock over-mints, so it is refused.
+    let result = client.try_set_venue_capacity(&event_id, &2u32, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+}
+
+#[test]
+fn test_increment_attendance_counter_up_to_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &3u32, &organizer);
+
+    assert_eq!(client.increment_attendance_counter(&event_id, &1u32, &organizer), 1u32);
+    assert_eq!(client.increment_attendance_counter(&event_id, &2u32, &organizer), 3u32);
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), Some(0u32));
+}
+
+#[test]
+fn test_increment_attendance_counter_rejects_over_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &2u32, &organizer);
+    client.increment_attendance_counter(&event_id, &2u32, &organizer);
+
+    let result = client.try_increment_attendance_counter(&event_id, &1u32, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+
+    // The refused increment left the counter alone.
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, 2u32);
+}
+
+#[test]
+fn test_reject_over_capacity_mint_is_check_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &5u32, &organizer);
+
+    // Fits, and checking does not consume anything.
+    client.reject_over_capacity_mint(&event_id, &5u32);
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, 0u32);
+
+    client.increment_attendance_counter(&event_id, &5u32, &organizer);
+    let result = client.try_reject_over_capacity_mint(&event_id, &1u32);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+}
+
+#[test]
+fn test_purchase_ticket_respects_venue_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // The venue is capped well below the event's 50-ticket maximum.
+    client.set_venue_capacity(&event_id, &1u32, &organizer);
+
+    let buyer = Address::generate(&env);
+    client.purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, 1u32);
+
+    // tickets_sold is nowhere near max_tickets, so only the venue counter can
+    // be what turns the second purchase away.
+    assert_eq!(client.get_event(&event_id).tickets_sold, 1u32);
+    let result = client.try_purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+}
+
+#[test]
+fn test_batch_purchase_rejected_by_venue_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &3u32, &organizer);
+
+    let buyer = Address::generate(&env);
+
+    // A batch that straddles the limit is refused whole, with no partial mint.
+    let result = client.try_batch_purchase_tickets(&event_id, &4u32, &buyer);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+    assert_eq!(client.get_event(&event_id).tickets_sold, 0u32);
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, 0u32);
+
+    // A batch that fits goes through and advances the counter.
+    client.batch_purchase_tickets(&event_id, &3u32, &buyer);
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, 3u32);
+}
+
+#[test]
+fn test_refund_frees_venue_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &1u32, &organizer);
+
+    let buyer = Address::generate(&env);
+    let ticket_id = client.purchase_ticket(&buyer, &event_id, &100i128);
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), Some(0u32));
+
+    client.cancel_event(&organizer, &event_id);
+    client.refund_ticket(&ticket_id, &buyer);
+
+    // The freed seat goes back to the venue instead of locking the event.
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), Some(1u32));
+    assert_eq!(client.get_event(&event_id).tickets_sold, 0u32);
+}
+
+// ============================================================================
+// ESCROW PAYMENT SPLITS (Issue #1247)
+// ============================================================================
+
+#[test]
+fn test_create_escrow_split_by_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let co_b = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a.clone(), 6000u32), (co_b.clone(), 4000u32)]);
+
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+    assert_eq!(split.shares.len(), 2u32);
+    assert!(!split.released);
+    assert!(!split.disputed);
+
+    let stored = client.get_escrow_split(&event_id);
+    assert_eq!(stored.shares.len(), 2u32);
+}
+
+#[test]
+fn test_create_escrow_split_rejects_bad_sum() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let co_b = Address::generate(&env);
+
+    // Shares that do not add up to 100% are not an agreement.
+    let splits = Map::from_array(&env, [(co_a, 6000u32), (co_b, 3000u32)]);
+    let result = client.try_create_escrow_split(&event_id, &splits, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidEscrowSplit)));
+}
+
+#[test]
+fn test_create_escrow_split_rejects_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let splits = Map::new(&env);
+    let result = client.try_create_escrow_split(&event_id, &splits, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidEscrowSplit)));
+}
+
+#[test]
+fn test_create_escrow_split_unauthorized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let intruder = Address::generate(&env);
+    let co_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a, 10000u32)]);
+
+    let result = client.try_create_escrow_split(&event_id, &splits, &intruder);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_create_escrow_split_requires_funds_in_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Nothing has been sold, so there is no pool to divide.
+    let co_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a, 10000u32)]);
+
+    let result = client.try_create_escrow_split(&event_id, &splits, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::InsufficientEscrow)));
+}
+
+#[test]
+fn test_release_escrow_funds_pays_co_organizers() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // Configure a settlement token so the payout moves real balances.
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_address = token_contract.address();
+    let token_client = token::Client::new(&env, &token_address);
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+    client.set_token(&admin, &token_address);
+
+    token_admin_client.mint(&organizer, &5_000i128);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let co_b = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a.clone(), 6000u32), (co_b.clone(), 4000u32)]);
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+
+    // Revenue is only split out once the event it was earned for is over.
+    let result = client.try_release_escrow_funds(&event_id, &split.split_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::EscrowSplitEventNotConcluded)));
+
+    env.ledger().with_mut(|li| li.timestamp += 3_000);
+    let payouts = client.release_escrow_funds(&event_id, &split.split_id, &organizer);
+
+    assert_eq!(payouts.get(co_a.clone()).unwrap(), 600i128);
+    assert_eq!(payouts.get(co_b.clone()).unwrap(), 400i128);
+    assert_eq!(token_client.balance(&co_a), 600i128);
+    assert_eq!(token_client.balance(&co_b), 400i128);
+
+    // The pool is empty and the split is closed.
+    assert_eq!(client.get_escrow_balance(&event_id), 0i128);
+    assert!(client.get_escrow_split(&event_id).released);
+}
+
+#[test]
+fn test_release_escrow_funds_rounding_pays_out_exact_total() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let token_admin = Address::generate(&env);
+    let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_address = token_contract.address();
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
+    client.set_token(&admin, &token_address);
+
+    // 1053 splits three ways leaves a rounding remainder that must land
+    // somewhere, and nowhere but the contract.
+    token_admin_client.mint(&organizer, &5_000i128);
+    client.deposit_funds(&organizer, &event_id, &1_053i128);
+
+    let co_a = Address::generate(&env);
+    let co_b = Address::generate(&env);
+    let co_c = Address::generate(&env);
+    let splits = Map::from_array(
+        &env,
+        [
+            (co_a.clone(), 1000u32),
+            (co_b.clone(), 2000u32),
+            (co_c.clone(), 7000u32),
+        ],
+    );
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+
+    env.ledger().with_mut(|li| li.timestamp += 3_000);
+    let payouts = client.release_escrow_funds(&event_id, &split.split_id, &organizer);
+
+    // 105, 210 and the remainder-bearing 738 add back up to the full pool.
+    assert_eq!(payouts.get(co_a.clone()).unwrap(), 105i128);
+    assert_eq!(payouts.get(co_b.clone()).unwrap(), 210i128);
+    assert_eq!(payouts.get(co_c.clone()).unwrap(), 738i128);
+    assert_eq!(client.get_escrow_balance(&event_id), 0i128);
+}
+
+#[test]
+fn test_release_escrow_funds_cannot_run_twice() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a, 10000u32)]);
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+
+    env.ledger().with_mut(|li| li.timestamp += 3_000);
+    client.release_escrow_funds(&event_id, &split.split_id, &organizer);
+
+    let result = client.try_release_escrow_funds(&event_id, &split.split_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::EscrowSplitAlreadyReleased)));
+}
+
+#[test]
+fn test_release_escrow_funds_unauthorized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a, 10000u32)]);
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+
+    env.ledger().with_mut(|li| li.timestamp += 3_000);
+    let intruder = Address::generate(&env);
+    let result = client.try_release_escrow_funds(&event_id, &split.split_id, &intruder);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_dispute_escrow_split_freezes_release() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let co_b = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a.clone(), 6000u32), (co_b.clone(), 4000u32)]);
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+
+    env.ledger().with_mut(|li| li.timestamp += 3_000);
+
+    // A co-organizer who disagrees freezes the pool before anyone is paid.
+    let disputed = client.dispute_escrow_split(&event_id, &split.split_id, &co_b);
+    assert!(disputed.disputed);
+
+    let result = client.try_release_escrow_funds(&event_id, &split.split_id, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::EscrowSplitAlreadyDisputed)));
+
+    // The funds are still held, untouched.
+    assert_eq!(client.get_escrow_balance(&event_id), 1_000i128);
+}
+
+#[test]
+fn test_dispute_escrow_split_by_outsider_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a, 10000u32)]);
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+
+    let stranger = Address::generate(&env);
+    let result = client.try_dispute_escrow_split(&event_id, &split.split_id, &stranger);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+}
+
+#[test]
+fn test_dispute_escrow_split_only_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    client.deposit_funds(&organizer, &event_id, &1_000i128);
+
+    let co_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(co_a.clone(), 10000u32)]);
+    let split = client.create_escrow_split(&event_id, &splits, &organizer);
+
+    client.dispute_escrow_split(&event_id, &split.split_id, &co_a);
+    let result = client.try_dispute_escrow_split(&event_id, &split.split_id, &co_a);
+    assert_eq!(result, Err(Ok(LumentixError::EscrowSplitAlreadyDisputed)));
+}
+
+#[test]
+fn test_get_escrow_split_not_found() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_get_escrow_split(&event_id);
+    assert_eq!(result, Err(Ok(LumentixError::EscrowSplitNotFound)));
 }

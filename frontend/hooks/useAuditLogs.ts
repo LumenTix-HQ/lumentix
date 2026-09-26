@@ -19,11 +19,14 @@ export interface AuditLogFilters {
   action?: string;
   userId?: string;
   resourceId?: string;
+  search?: string;
   fromDate?: string;
   toDate?: string;
   page?: number;
   limit?: number;
 }
+
+export type AuditExportFormat = 'csv' | 'json';
 
 export interface AuditLogPage {
   data: AuditLog[];
@@ -31,6 +34,8 @@ export interface AuditLogPage {
   page: number;
   limit: number;
   totalPages: number;
+  /** Reported by the backend paginate helper as `lastPage`. */
+  lastPage?: number;
 }
 
 export interface UseAuditLogsResult {
@@ -44,7 +49,7 @@ export interface UseAuditLogsResult {
   setFilters: (filters: AuditLogFilters) => void;
   queryAuditLogs: (filters?: AuditLogFilters) => Promise<void>;
   filterByActionType: (actionType: string) => Promise<void>;
-  exportAuditTrail: (filters?: AuditLogFilters) => Promise<void>;
+  exportAuditTrail: (format?: AuditExportFormat) => Promise<void>;
   refresh: () => void;
 }
 
@@ -54,6 +59,7 @@ function buildQueryString(filters: AuditLogFilters): string {
   if (filters.action) params['action'] = filters.action;
   if (filters.userId) params['userId'] = filters.userId;
   if (filters.resourceId) params['resourceId'] = filters.resourceId;
+  if (filters.search) params['search'] = filters.search;
   if (filters.fromDate) params['fromDate'] = filters.fromDate;
   if (filters.toDate) params['toDate'] = filters.toDate;
   if (filters.page !== undefined) params['page'] = String(filters.page);
@@ -125,10 +131,14 @@ export function useAuditLogs(initialFilters: AuditLogFilters = {}): UseAuditLogs
         setTotalPages(1);
         setCurrentPage(1);
       } else {
+        const page = payload.page ?? 1;
         setLogs(payload.data ?? []);
         setTotal(payload.total ?? 0);
-        setTotalPages(payload.totalPages ?? 1);
-        setCurrentPage(payload.page ?? 1);
+        // The paginate helper reports `lastPage`; older payloads used
+        // `totalPages`. Prefer the former and fall back so both work.
+        const pages = payload.lastPage ?? payload.totalPages ?? 1;
+        setTotalPages(pages);
+        setCurrentPage(page);
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
@@ -149,47 +159,53 @@ export function useAuditLogs(initialFilters: AuditLogFilters = {}): UseAuditLogs
   }, [filters, queryAuditLogs]);
 
   /**
-   * export_audit_trail — triggers a CSV download from the export endpoint.
-   * Streams the response as a Blob and initiates a browser download.
+   * export_audit_trail — downloads every record matching the current filters.
+   *
+   * Pagination is dropped server-side so the export covers the whole filtered
+   * set, and the active search term is carried through. `format` picks between
+   * the CSV endpoint and the JSON one, which keeps the metadata blob intact.
    */
-  const exportAuditTrail = useCallback(async (overrideFilters?: AuditLogFilters) => {
-    const active = overrideFilters ?? filters;
-    // Remove pagination — export should cover all matching records.
-    const exportFilters: AuditLogFilters = { ...active };
-    delete exportFilters.page;
-    delete exportFilters.limit;
+  const exportAuditTrail = useCallback(
+    async (format: AuditExportFormat = 'csv') => {
+      // Remove pagination — export should cover all matching records.
+      const exportFilters: AuditLogFilters = { ...filters };
+      delete exportFilters.page;
+      delete exportFilters.limit;
 
-    const token = getAccessToken();
-    const qs = buildQueryString(exportFilters);
+      const token = getAccessToken();
+      const qs = buildQueryString(exportFilters);
+      const endpoint = format === 'json' ? 'export/json' : 'export';
 
-    try {
-      const res = await fetch(`${PROXY_BASE}/admin/audit/export${qs}`, {
-        method: 'GET',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        cache: 'no-store',
-      });
+      try {
+        const res = await fetch(`${PROXY_BASE}/admin/audit/${endpoint}${qs}`, {
+          method: 'GET',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          cache: 'no-store',
+        });
 
-      if (!res.ok) {
-        throw new Error(await parseResponseError(res));
+        if (!res.ok) {
+          throw new Error(await parseResponseError(res));
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        const stamp = new Date().toISOString().slice(0, 10);
+        anchor.href = url;
+        anchor.download = `audit-trail-${stamp}.${format}`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        // Surface export errors via the shared error state so the UI can respond.
+        setError(err instanceof Error ? err.message : 'Failed to export audit trail');
       }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      const stamp = new Date().toISOString().slice(0, 10);
-      anchor.href = url;
-      anchor.download = `audit-trail-${stamp}.csv`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      // Surface export errors via the shared error state so the UI can respond.
-      setError(err instanceof Error ? err.message : 'Failed to export audit trail');
-    }
-  }, [filters]);
+    },
+    [filters],
+  );
 
   const setFilters = useCallback((next: AuditLogFilters) => {
     setFiltersState(next);

@@ -1,26 +1,68 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
-import type { AuditLogFilters } from '@/hooks/useAuditLogs';
+import { useEffect, useCallback, useState } from 'react';
+import type { AuditExportFormat, AuditLogFilters } from '@/hooks/useAuditLogs';
 import { useAuditLogs } from '@/hooks/useAuditLogs';
 
 // ─── Action type options ───────────────────────────────────────────────────────
+//
+// These have to match the values the backend actually writes into
+// `AuditAction` — the audit trail is a record of what happened, so an option
+// that matches nothing is worse than no option at all.
 
 const ACTION_TYPE_OPTIONS = [
   { value: '', label: 'All actions' },
-  { value: 'ticket.created', label: 'Ticket Created' },
-  { value: 'ticket.updated', label: 'Ticket Updated' },
-  { value: 'ticket.cancelled', label: 'Ticket Cancelled' },
-  { value: 'ticket.transferred', label: 'Ticket Transferred' },
-  { value: 'refund.initiated', label: 'Refund Initiated' },
-  { value: 'refund.completed', label: 'Refund Completed' },
-  { value: 'access.granted', label: 'Access Granted' },
-  { value: 'access.revoked', label: 'Access Revoked' },
-  { value: 'event.created', label: 'Event Created' },
-  { value: 'event.updated', label: 'Event Updated' },
-  { value: 'event.cancelled', label: 'Event Cancelled' },
-  { value: 'payment.confirmed', label: 'Payment Confirmed' },
-  { value: 'payment.failed', label: 'Payment Failed' },
+
+  // Payments
+  { value: 'PAYMENT_INTENT_CREATED', label: 'Payment Intent Created' },
+  { value: 'PAYMENT_CONFIRMED', label: 'Payment Confirmed' },
+  { value: 'PAYMENT_FAILED', label: 'Payment Failed' },
+  { value: 'PAYMENT_EXPIRED', label: 'Payment Expired' },
+
+  // Refunds
+  { value: 'REFUND_REQUESTED', label: 'Refund Requested' },
+  { value: 'REFUND_APPROVED', label: 'Refund Approved' },
+  { value: 'REFUND_REJECTED', label: 'Refund Rejected' },
+
+  // Escrow
+  { value: 'ESCROW_CREATED', label: 'Escrow Created' },
+  { value: 'ESCROW_RELEASED', label: 'Escrow Released' },
+  { value: 'ESCROW_MERGED', label: 'Escrow Merged' },
+
+  // Events
+  { value: 'EVENT_PUBLISHED', label: 'Event Published' },
+  { value: 'EVENT_CANCELLED', label: 'Event Cancelled' },
+  { value: 'EVENT_COMPLETED', label: 'Event Completed' },
+  { value: 'MASS_REFUND_EXECUTED_ON_CHAIN', label: 'Mass Refund Executed' },
+
+  // Ticket gifting
+  { value: 'TICKET_GIFT_WRAPPED', label: 'Ticket Gift Wrapped' },
+  { value: 'TICKET_GIFT_SCHEDULED', label: 'Ticket Gift Scheduled' },
+  { value: 'TICKET_GIFT_RESCHEDULED', label: 'Ticket Gift Rescheduled' },
+  { value: 'TICKET_GIFT_DELIVERED', label: 'Ticket Gift Delivered' },
+  { value: 'TICKET_GIFT_UNWRAPPED', label: 'Ticket Gift Unwrapped' },
+  { value: 'TICKET_GIFT_CANCELLED', label: 'Ticket Gift Cancelled' },
+
+  // Resale marketplace
+  { value: 'RESALE_LISTED', label: 'Resale Listed' },
+  { value: 'RESALE_BOUGHT', label: 'Resale Bought' },
+  { value: 'RESALE_CANCELLED', label: 'Resale Cancelled' },
+
+  // Venue capacity
+  { value: 'IOT_SENSOR_REGISTERED', label: 'IoT Sensor Registered' },
+  { value: 'CAPACITY_ALERT_FIRED', label: 'Capacity Alert Fired' },
+  { value: 'CAPACITY_LIMIT_UPDATED', label: 'Capacity Limit Updated' },
+
+  // Multi-signature payout
+  { value: 'PAYOUT_INITIATED', label: 'Payout Initiated' },
+  { value: 'PAYOUT_APPROVED', label: 'Payout Approved' },
+  { value: 'PAYOUT_EXECUTED', label: 'Payout Executed' },
+  { value: 'PAYOUT_FAILED', label: 'Payout Failed' },
+
+  // Reviews
+  { value: 'REVIEW_SUBMITTED', label: 'Review Submitted' },
+  { value: 'REVIEW_VERIFIED', label: 'Review Verified' },
+  { value: 'REVIEW_REJECTED', label: 'Review Rejected' },
 ];
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -41,15 +83,24 @@ function SkeletonRow() {
 }
 
 function ActionBadge({ action }: { action: string }) {
-  const [ns] = action.split('.');
-  const colorMap: Record<string, string> = {
-    ticket: 'bg-indigo-900/50 text-indigo-300 border-indigo-700',
-    refund: 'bg-amber-900/50 text-amber-300 border-amber-700',
-    access: 'bg-purple-900/50 text-purple-300 border-purple-700',
-    event: 'bg-blue-900/50 text-blue-300 border-blue-700',
-    payment: 'bg-green-900/50 text-green-300 border-green-700',
-  };
-  const cls = colorMap[ns] ?? 'bg-gray-700/50 text-gray-300 border-gray-600';
+  // Actions are UPPER_SNAKE_CASE, so colour by the leading words rather than
+  // splitting on a dot. Unknown actions fall through to the neutral style
+  // instead of losing their badge entirely.
+  const colorMap: Array<[RegExp, string]> = [
+    [/^TICKET_GIFT_/, 'bg-rose-900/50 text-rose-300 border-rose-700'],
+    [/^PAYMENT_/, 'bg-green-900/50 text-green-300 border-green-700'],
+    [/^REFUND_/, 'bg-amber-900/50 text-amber-300 border-amber-700'],
+    [/^ESCROW_/, 'bg-teal-900/50 text-teal-300 border-teal-700'],
+    [/^PAYOUT_/, 'bg-teal-900/50 text-teal-300 border-teal-700'],
+    [/^EVENT_|^MASS_REFUND_/, 'bg-blue-900/50 text-blue-300 border-blue-700'],
+    [/^RESALE_/, 'bg-purple-900/50 text-purple-300 border-purple-700'],
+    [/^CAPACITY_|^IOT_/, 'bg-cyan-900/50 text-cyan-300 border-cyan-700'],
+    [/^AGE_/, 'bg-indigo-900/50 text-indigo-300 border-indigo-700'],
+    [/^REVIEW_/, 'bg-pink-900/50 text-pink-300 border-pink-700'],
+  ];
+  const cls =
+    colorMap.find(([pattern]) => pattern.test(action))?.[1] ??
+    'bg-gray-700/50 text-gray-300 border-gray-600';
   return (
     <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ${cls}`}>
       {action}
@@ -108,6 +159,12 @@ export function AuditLogViewer({ resourceId, title = 'Audit Trail' }: AuditLogVi
     exportAuditTrail,
   } = useAuditLogs({ resourceId, page: 1, limit: 25 });
 
+  // The search box is driven locally and pushed to the server on submit. Typing
+  // a query fires a request per keystroke otherwise, which is both slow and
+  // noisy in the audit log of an admin session.
+  const [searchInput, setSearchInput] = useState('');
+  const [exportFormat, setExportFormat] = useState<AuditExportFormat>('csv');
+
   // Initial load
   useEffect(() => {
     queryAuditLogs({ resourceId, page: 1, limit: 25 });
@@ -134,9 +191,29 @@ export function AuditLogViewer({ resourceId, title = 'Audit Trail' }: AuditLogVi
     [filters, setFilters, queryAuditLogs],
   );
 
-  const handleExport = useCallback(() => {
-    exportAuditTrail(filters);
-  }, [exportAuditTrail, filters]);
+  const handleSearchSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const next: AuditLogFilters = { ...filters, search: searchInput || undefined, page: 1 };
+      setFilters(next);
+      queryAuditLogs(next);
+    },
+    [filters, searchInput, setFilters, queryAuditLogs],
+  );
+
+  const handleSearchClear = useCallback(() => {
+    setSearchInput('');
+    const next: AuditLogFilters = { ...filters, search: undefined, page: 1 };
+    setFilters(next);
+    queryAuditLogs(next);
+  }, [filters, setFilters, queryAuditLogs]);
+
+  const handleExport = useCallback(
+    (format: AuditExportFormat) => {
+      exportAuditTrail(format);
+    },
+    [exportAuditTrail],
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -153,21 +230,67 @@ export function AuditLogViewer({ resourceId, title = 'Audit Trail' }: AuditLogVi
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={handleExport}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-600 bg-gray-800 hover:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Export CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <label htmlFor="audit-export-format" className="sr-only">
+            Export format
+          </label>
+          <select
+            id="audit-export-format"
+            value={exportFormat}
+            onChange={(e) => setExportFormat(e.target.value as AuditExportFormat)}
+            className="rounded-lg border border-gray-600 bg-gray-800 text-gray-300 text-sm px-2 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="csv">CSV</option>
+            <option value="json">JSON</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => handleExport(exportFormat)}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-600 bg-gray-800 hover:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Export {exportFormat.toUpperCase()}
+          </button>
+        </div>
       </div>
 
       {/* Filter bar */}
       <div className="rounded-xl border border-gray-700 bg-gray-800/60 p-4">
+        <form onSubmit={handleSearchSubmit} className="mb-4 flex flex-wrap items-end gap-2">
+          <div className="flex flex-col gap-1 flex-1 min-w-[220px]">
+            <label htmlFor="audit-search" className="text-xs font-medium text-gray-400">
+              Search
+            </label>
+            <input
+              id="audit-search"
+              type="search"
+              placeholder="Search actions, user IDs, resource IDs, metadata…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="rounded-lg border border-gray-600 bg-gray-900 text-white text-sm px-3 py-2 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <button
+            type="submit"
+            className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 transition-colors"
+          >
+            Search
+          </button>
+          {(searchInput || filters.search) && (
+            <button
+              type="button"
+              onClick={handleSearchClear}
+              className="rounded-lg border border-gray-600 bg-gray-900 hover:bg-gray-700 text-gray-400 hover:text-white text-sm px-3 py-2 transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </form>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Action type */}
           <div className="flex flex-col gap-1">
@@ -251,6 +374,7 @@ export function AuditLogViewer({ resourceId, title = 'Audit Trail' }: AuditLogVi
             <button
               type="button"
               onClick={() => {
+                setSearchInput('');
                 const cleared: AuditLogFilters = { resourceId, page: 1, limit: filters.limit };
                 setFilters(cleared);
                 queryAuditLogs(cleared);

@@ -464,6 +464,10 @@ impl LumentixContract {
             return Err(LumentixError::EventSoldOut);
         }
 
+        // Enforce the on-chain venue capacity (Issue #1245). No-op for events
+        // with no configured capacity.
+        crate::venue_capacity::guard_mint_against_capacity(&env, event_id, 1)?;
+
         // Validate payment amount against time-based dynamic pricing
         let required_price =
             Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
@@ -493,6 +497,10 @@ impl LumentixContract {
         // Increment tickets_sold counter
         event.tickets_sold += 1;
         storage::set_event(&env, event_id, &event);
+
+        // Record the seat against the on-chain venue capacity (Issue #1245).
+        // No-ops for events that never had a capacity configured.
+        crate::venue_capacity::increment_attendance_counter_if_configured(&env, event_id, 1)?;
 
         // Create ticket
         let ticket_id = storage::get_next_ticket_id(&env);
@@ -587,6 +595,10 @@ impl LumentixContract {
             return Err(LumentixError::EventSoldOut);
         }
 
+        // Enforce the on-chain venue capacity for the whole batch at once
+        // (Issue #1245). No-op for events with no configured capacity.
+        crate::venue_capacity::guard_mint_against_capacity(&env, event_id, quantity)?;
+
         // Calculate total amount using dynamic per-ticket pricing
         let unit_price = Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
         let total_amount = unit_price * quantity as i128;
@@ -613,6 +625,10 @@ impl LumentixContract {
         // Update tickets_sold counter
         event.tickets_sold += quantity;
         storage::set_event(&env, event_id, &event);
+
+        // Record the seats against the on-chain venue capacity (Issue #1245).
+        // No-ops for events that never had a capacity configured.
+        crate::venue_capacity::increment_attendance_counter_if_configured(&env, event_id, quantity)?;
 
         // Create tickets and collect IDs
         let mut ticket_ids = Vec::new(&env);
@@ -1272,6 +1288,9 @@ impl LumentixContract {
         // Decrement tickets_sold to free up capacity
         event.tickets_sold = event.tickets_sold.saturating_sub(1);
         storage::set_event(&env, ticket.event_id, &event);
+
+        // Return the seat to the on-chain venue capacity (Issue #1245).
+        crate::venue_capacity::decrement_attendance_counter(&env, ticket.event_id, 1);
 
         if event.status == EventStatus::Cancelled {
             // Cancelled events do not issue waitlist offers.
@@ -7882,5 +7901,181 @@ impl LumentixContract {
         storage::set_offline_scan_synced(env, ticket_id, scan);
 
         None
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VENUE CAPACITY (Issue #1245)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configure the maximum venue capacity for an event.
+    ///
+    /// Only the event's organizer or the contract admin may set it. The first
+    /// configuration seeds the on-chain counter from the tickets already sold,
+    /// so setting a limit after sales have begun still counts them; later
+    /// changes keep the live counter and are rejected when the new limit is
+    /// below the number of tickets already minted.
+    pub fn set_venue_capacity(
+        env: Env,
+        event_id: u64,
+        max_capacity: u32,
+        organizer: Address,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::venue_capacity::set_venue_capacity(&env, event_id, max_capacity)
+    }
+
+    /// Read the venue capacity and live attendance counter for an event.
+    pub fn get_venue_capacity(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::venue_capacity::get_venue_capacity(&env, event_id)
+    }
+
+    /// Seats still available under the configured venue capacity.
+    ///
+    /// Returns `None` when no capacity is configured, which reads as unlimited.
+    pub fn get_remaining_venue_capacity(env: Env, event_id: u64) -> Result<Option<u32>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::venue_capacity::remaining_capacity(&env, event_id))
+    }
+
+    /// Advance an event's on-chain attendance counter by `quantity`.
+    ///
+    /// Fails with `VenueCapacityExceeded` when the counter would pass the
+    /// configured maximum, leaving the counter untouched.
+    pub fn increment_attendance_counter(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        organizer: Address,
+    ) -> Result<u32, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::venue_capacity::increment_attendance_counter(&env, event_id, quantity)
+    }
+
+    /// Check whether minting `quantity` more tickets would breach the venue
+    /// capacity, without touching the counter.
+    ///
+    /// Every ticket-minting path runs this guard internally; it is exposed so a
+    /// client can grey out a purchase button before the buyer signs anything.
+    pub fn reject_over_capacity_mint(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+    ) -> Result<(), LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::venue_capacity::reject_over_capacity_mint(&env, event_id, quantity)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ESCROW PAYMENT SPLITS (Issue #1247)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Register a pre-agreed basis-point split of an event's held escrow among
+    /// its co-organizers.
+    ///
+    /// `splits` maps each co-organizer wallet to their share in basis points and
+    /// must sum to 10 000. Only the event's organizer or the contract admin may
+    /// register a split. Registering a split replaces any previous one for the
+    /// event, so an agreement that was never acted on can still be corrected.
+    pub fn create_escrow_split(
+        env: Env,
+        event_id: u64,
+        splits: Map<Address, u32>,
+        organizer: Address,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::escrow_split::create_escrow_split(&env, event_id, splits)
+    }
+
+    /// Pay an event's held escrow out to every co-organizer in its split.
+    ///
+    /// The whole current pool is released in one call, each co-organizer taking
+    /// their basis-point share. Only the event's organizer or the contract admin
+    /// may release, the event must have concluded, and a split under dispute is
+    /// frozen until the disagreement is resolved. Returns each co-organizer and
+    /// the amount they received.
+    pub fn release_escrow_funds(
+        env: Env,
+        event_id: u64,
+        split_id: u64,
+        organizer: Address,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::escrow_split::release_escrow_funds(&env, event_id, split_id)
+    }
+
+    /// Freeze an event's escrow split pending a resolution between organizers.
+    ///
+    /// Any co-organizer named in the split may dispute it, which prevents the
+    /// pool from being released. A released split is too late to dispute.
+    pub fn dispute_escrow_split(
+        env: Env,
+        event_id: u64,
+        split_id: u64,
+        disputer: Address,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        disputer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        crate::escrow_split::dispute_escrow_split(&env, event_id, split_id, &disputer)
+    }
+
+    /// Read the escrow split currently registered for an event.
+    pub fn get_escrow_split(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        crate::escrow_split::get_event_escrow_split(&env, event_id)
+            .ok_or(LumentixError::EscrowSplitNotFound)
     }
 }
