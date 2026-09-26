@@ -42,9 +42,76 @@ export interface BatchTransferResult {
   transferredCount: number;
   errors?: string[];
 }
+
+import type {
   NotificationPreferences,
   SaveNotificationPreferences,
 } from "@/types/notification-preference";
+
+
+export interface EventTos {
+  id: string;
+  eventId: string;
+  termsContent: string;
+  liabilityDisclaimers?: string | null;
+  customAgreements?: string | null;
+  version: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveEventTosInput {
+  termsContent: string;
+  liabilityDisclaimers?: string;
+  customAgreements?: string;
+}
+
+export interface TosTemplate {
+  id: string;
+  name: string;
+  category: 'general' | 'liability' | 'media' | 'refund';
+  description: string;
+  defaultTerms: string;
+  defaultDisclaimers: string;
+  defaultAgreements: string;
+}
+
+export interface ScanVelocityResult {
+  eventId: string;
+  gateId: string | null;
+  scansPerMinute: number;
+}
+
+export interface GateThroughputStats {
+  gateId: string | null;
+  scanVelocity: number;
+  avgScanTimeMs: number;
+  totalScans: number;
+  failedScans: number;
+  errorRate: number;
+}
+
+export interface ScanMetricData {
+  id: string;
+  eventId: string;
+  gateId: string | null;
+  scansPerMinute: number;
+  avgScanTimeMs: number;
+  totalScansInWindow: number;
+  failedScans: number;
+  errorRate: number;
+  recordedAt: string;
+}
+
+export interface StaffingRecommendation {
+  eventId: string;
+  gateId: string | null;
+  currentVelocity: number;
+  recommendedGates: number;
+  queueStatus: 'low' | 'optimal' | 'congested' | 'critical';
+  recommendationText: string;
+}
 
 const PROXY_BASE = "/api/proxy";
 
@@ -308,4 +375,87 @@ export const apiClient = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+
+  // Terms of Service (Issue #1191)
+  save_event_tos: (eventId: string, body: SaveEventTosInput, token?: string) =>
+    request<EventTos>(`/events/${eventId}/terms-of-service`, {
+      method: "PATCH",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify(body),
+    }),
+  saveEventTos: (eventId: string, body: SaveEventTosInput, token?: string) =>
+    apiClient.save_event_tos(eventId, body, token),
+
+  validate_tos_agreement: (eventId: string, version: number) =>
+    request<boolean>(`/events/${eventId}/terms-of-service/validate/${version}`, {
+      method: "POST",
+    }),
+  validateTosAgreement: (eventId: string, version: number) =>
+    apiClient.validate_tos_agreement(eventId, version),
+
+  fetch_tos_for_checkout: (eventId: string) =>
+    request<EventTos>(`/events/${eventId}/terms-of-service`),
+  fetchTosForCheckout: (eventId: string) =>
+    apiClient.fetch_tos_for_checkout(eventId),
+
+  get_tos_templates: (eventId: string = "default") =>
+    request<TosTemplate[]>(`/events/${eventId}/terms-of-service/templates`),
+  getTosTemplates: (eventId: string = "default") =>
+    apiClient.get_tos_templates(eventId),
+
+  apply_tos_template: (
+    eventId: string,
+    templateId: string,
+    customOverrides?: Partial<SaveEventTosInput>,
+    token?: string,
+  ) =>
+    request<EventTos>(`/events/${eventId}/terms-of-service/apply-template/${templateId}`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: JSON.stringify(customOverrides ?? {}),
+    }),
+  applyTosTemplate: (
+    eventId: string,
+    templateId: string,
+    customOverrides?: Partial<SaveEventTosInput>,
+    token?: string,
+  ) =>
+    apiClient.apply_tos_template(eventId, templateId, customOverrides, token),
+
+  // Scan Velocity & Gate Throughput (Issue #1195)
+  calculate_scan_velocity: (eventId: string, gateId?: string, token?: string) =>
+    request<ScanVelocityResult>(
+      `/events/${eventId}/scan-analytics/scan-velocity${gateId ? `?gateId=${encodeURIComponent(gateId)}` : ""}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    ),
+  calculateScanVelocity: (eventId: string, gateId?: string, token?: string) =>
+    apiClient.calculate_scan_velocity(eventId, gateId, token),
+
+  track_gate_throughput: (eventId: string, gateId?: string, token?: string) =>
+    request<GateThroughputStats>(
+      `/events/${eventId}/scan-analytics/throughput${gateId ? `?gateId=${encodeURIComponent(gateId)}` : ""}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    ),
+  trackGateThroughput: (eventId: string, gateId?: string, token?: string) =>
+    apiClient.track_gate_throughput(eventId, gateId, token),
+
+  fetch_realtime_scan_speed: (eventId: string, gateId?: string, minutesBack: number = 5, token?: string) => {
+    const params = new URLSearchParams();
+    if (gateId) params.set("gateId", gateId);
+    if (minutesBack) params.set("minutesBack", minutesBack.toString());
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return request<ScanMetricData[]>(`/events/${eventId}/scan-analytics/realtime-speed${qs}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  },
+  fetchRealtimeScanSpeed: (eventId: string, gateId?: string, minutesBack: number = 5, token?: string) =>
+    apiClient.fetch_realtime_scan_speed(eventId, gateId, minutesBack, token),
+
+  get_staffing_recommendation: (eventId: string, gateId?: string, token?: string) =>
+    request<StaffingRecommendation>(
+      `/events/${eventId}/scan-analytics/staffing-recommendation${gateId ? `?gateId=${encodeURIComponent(gateId)}` : ""}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    ),
+  getStaffingRecommendation: (eventId: string, gateId?: string, token?: string) =>
+    apiClient.get_staffing_recommendation(eventId, gateId, token),
 };

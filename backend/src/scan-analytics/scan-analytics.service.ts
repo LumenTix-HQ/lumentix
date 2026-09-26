@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThanOrEqual } from 'typeorm';
 import { ScanMetric } from './entities/scan-metric.entity';
 import { RecordScanDto } from './dto/record-scan.dto';
-import { EventsService } from '../events/events.service';
+import type { EventsService } from '../events/events.service';
 
 export interface GateThroughputStats {
   gateId: string | null;
@@ -137,6 +137,68 @@ export class ScanAnalyticsService {
     }
 
     return qb.orderBy('metric.recordedAt', 'DESC').take(100).getMany();
+  }
+
+  
+  // Aliases for snake_case function requirements in issue #1195
+  async calculate_scan_velocity(eventId: string, gateId?: string): Promise<number> {
+    return this.calculateScanVelocity(eventId, gateId);
+  }
+
+  async track_gate_throughput(
+    eventId: string,
+    gateId?: string,
+  ): Promise<GateThroughputStats> {
+    return this.trackGateThroughput(eventId, gateId);
+  }
+
+  async fetch_realtime_scan_speed(
+    eventId: string,
+    gateId?: string,
+    minutesBack: number = 5,
+  ): Promise<ScanMetric[]> {
+    return this.fetchRealtimeScanSpeed(eventId, gateId, minutesBack);
+  }
+
+  async getStaffingRecommendation(
+    eventId: string,
+    gateId?: string,
+  ): Promise<{
+    eventId: string;
+    gateId: string | null;
+    currentVelocity: number;
+    recommendedGates: number;
+    queueStatus: 'low' | 'optimal' | 'congested' | 'critical';
+    recommendationText: string;
+  }> {
+    const throughput = await this.trackGateThroughput(eventId, gateId);
+    const velocity = throughput.scanVelocity;
+    let recommendedGates = Math.max(1, Math.ceil(velocity / 60));
+    let queueStatus: 'low' | 'optimal' | 'congested' | 'critical' = 'optimal';
+    let recommendationText = 'Gate throughput is within normal operating limits.';
+
+    if (velocity >= 150 || throughput.errorRate > 15) {
+      queueStatus = 'critical';
+      recommendedGates = Math.max(recommendedGates, 4);
+      recommendationText = 'Critical queue congestion detected. Immediately deploy auxiliary gate staff.';
+    } else if (velocity >= 90 || throughput.errorRate > 8) {
+      queueStatus = 'congested';
+      recommendedGates = Math.max(recommendedGates, 3);
+      recommendationText = 'Elevated queue velocity. Consider opening additional scanner lanes.';
+    } else if (velocity <= 15) {
+      queueStatus = 'low';
+      recommendedGates = 1;
+      recommendationText = 'Low entry volume. 1 gate staff is sufficient.';
+    }
+
+    return {
+      eventId,
+      gateId: gateId ?? null,
+      currentVelocity: velocity,
+      recommendedGates,
+      queueStatus,
+      recommendationText,
+    };
   }
 
   private async flushScanBuffer(key: string): Promise<void> {
