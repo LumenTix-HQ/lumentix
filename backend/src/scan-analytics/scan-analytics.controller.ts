@@ -98,4 +98,20 @@ export class ScanAnalyticsController {
       minutesBack,
     );
   }
+
+  @Get('staffing-recommendation')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get gate staffing recommendations',
+    description: 'Organizer-only. Calculates recommended gate staffing based on scan velocity and queue volume.',
+  })
+  @ApiResponse({ status: 200, description: 'Staffing recommendation' })
+  async getStaffingRecommendation(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Query('gateId') gateId?: string,
+  ) {
+    return this.scanService.getStaffingRecommendation(eventId, gateId);
+  }
 }

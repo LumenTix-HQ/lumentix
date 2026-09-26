@@ -23,6 +23,34 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 export class TermsOfServiceController {
   constructor(private readonly tosService: TermsOfServiceService) {}
 
+  @Get('templates')
+  @ApiOperation({
+    summary: 'Get customizable ToS templates for organizers',
+    description: 'Returns available pre-built ToS templates including liability disclaimers, media waivers, and refund policies.',
+  })
+  @ApiResponse({ status: 200, description: 'List of ToS templates' })
+  getTemplates() {
+    return this.tosService.getTosTemplates();
+  }
+
+  @Post('apply-template/:templateId')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Apply a customizable template to an event',
+    description: 'Organizer-only. Initializes or updates event ToS from a standard template with optional custom overrides.',
+  })
+  @ApiResponse({ status: 201, description: 'Template applied to event ToS' })
+  applyTemplate(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Param('templateId') templateId: string,
+    @Body() customOverrides: Partial<SaveEventTosDto>,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.tosService.applyTemplate(eventId, templateId, req.user.id, customOverrides);
+  }
+
   @Patch()
   @UseGuards(JwtAuthGuard)
   @Roles(UserRole.ORGANIZER)
