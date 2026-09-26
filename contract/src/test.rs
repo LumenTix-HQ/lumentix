@@ -7659,3 +7659,105 @@ fn test_royalty_ledger_empty_before_any_distribution() {
 
     assert_eq!(client.query_royalty_ledger(&event_id).len(), 0);
 }
+
+// =============================================================================
+// ISSUE #1192 TESTS: Real-Time Health & Telemetry
+// =============================================================================
+
+#[test]
+fn test_record_and_fetch_telemetry_status() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let status = crate::types::TelemetryStatus {
+        api_latency_ms: 120,
+        node_status: crate::types::ServiceHealthStatus::Up,
+        response_latency_ms: 85,
+        last_updated: env.ledger().timestamp(),
+    };
+
+    client.record_telemetry_status(&admin, status.clone()).unwrap();
+    let fetched = client.fetch_telemetry_status().unwrap();
+    assert_eq!(fetched.api_latency_ms, 120);
+    assert_eq!(fetched.node_status, crate::types::ServiceHealthStatus::Up);
+}
+
+#[test]
+fn test_ping_system_services_returns_up() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let health = client.ping_system_services();
+    assert_eq!(health.api, crate::types::ServiceHealthStatus::Up);
+    assert_eq!(health.indexer, crate::types::ServiceHealthStatus::Up);
+}
+
+#[test]
+fn test_record_and_get_latest_metric() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    client.record_metric_datapoint(&admin, &String::from_str(&env, "api_latency_ms"), &50i128, &String::from_str(&env, "backend")).unwrap();
+    let latest = client.get_latest_metric(&String::from_str(&env, "api_latency_ms")).unwrap();
+    assert_eq!(latest.value, 50i128);
+    assert_eq!(latest.source, String::from_str(&env, "backend"));
+}
+
+// =============================================================================
+// ISSUE #1193 TESTS: Token-Gated Merchandise
+// =============================================================================
+
+#[test]
+fn test_token_gate_blocks_purchase_when_inactive() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let merch_id = client.create_event_merchandise(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "VIP Hoodie"),
+        &String::from_str(&env, "Exclusive"),
+        &100i128,
+        &10u32,
+    );
+
+    let buyer = Address::generate(&env);
+    let token_address = Address::generate(&env);
+    client.restrict_merch_purchase(&organizer, &merch_id, &token_address, &10i128, &None).unwrap();
+    client.release_token_gate(&organizer, &merch_id).unwrap();
+
+    let eligibility = client.verify_token_gate_eligibility(&buyer, &merch_id).unwrap();
+    assert!(!eligibility.eligible);
+}
+
+#[test]
+fn test_token_gate_eligibility_checks_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let merch_id = client.create_event_merchandise(
+        &organizer,
+        &event_id,
+        &String::from_str(&env, "VIP Pass"),
+        &String::from_str(&env, "Exclusive"),
+        &100i128,
+        &10u32,
+    );
+
+    let token_address = Address::generate(&env);
+    client.restrict_merch_purchase(&organizer, &merch_id, &token_address, &100i128, &None).unwrap();
+
+    let buyer = Address::generate(&env);
+    let eligibility = client.verify_token_gate_eligibility(&buyer, &merch_id).unwrap();
+    assert!(!eligibility.eligible);
+    assert_eq!(eligibility.reason, String::from_str(&env, "Insufficient token balance"));
+}

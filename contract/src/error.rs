@@ -533,4 +533,30 @@ pub enum LumentixError {
     BadgeNotFound = 260,
     /// Badge is already revoked
     BadgeAlreadyRevoked = 261,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Real-Time Health & Telemetry errors (Issue #1192)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// System health check failed for a required service
+    HealthCheckFailed = 262,
+    /// Telemetry metric name is invalid or empty
+    InvalidMetricName = 263,
+    /// Metric value is out of acceptable range
+    InvalidMetricValue = 264,
+    /// Telemetry data source is not registered
+    TelemetrySourceNotFound = 265,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Token-Gated Merchandise errors (Issue #1193)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Token gate is not configured for this merchandise
+    TokenGateNotConfigured = 266,
+    /// Token gate is currently inactive
+    TokenGateInactive = 267,
+    /// User does not hold the required token balance
+    InsufficientTokenBalance = 268,
+    /// User is not eligible to purchase this token-gated merchandise
+    TokenGateEligibilityFailed = 269,
+    /// Token gate configuration is invalid
+    InvalidTokenGateConfig = 270,
 }
