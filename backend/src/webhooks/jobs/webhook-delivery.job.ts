@@ -65,8 +65,22 @@ export class WebhookDeliveryJob {
       return;
     }
 
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      this.logger.error(
+        `WebhookDeliveryJob: WEBHOOK_SECRET is not set for event ${eventId}`,
+      );
+      await this.moveToDeadLetter(
+        { eventId, paymentId, payload },
+        null,
+        'WEBHOOK_SECRET is not configured',
+        attempt,
+      );
+      return;
+    }
+
     const signature = crypto
-      .createHmac('sha256', process.env.WEBHOOK_SECRET)
+      .createHmac('sha256', webhookSecret)
       .update(JSON.stringify(payload))
       .digest('hex');
 

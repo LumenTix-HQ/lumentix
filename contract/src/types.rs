@@ -1147,3 +1147,80 @@ pub struct OfflineScanResult {
     /// Error discriminant explaining a rejection; zero when accepted.
     pub reason_code: u32,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Real-Time Health & Telemetry (Issue #1192)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Health status of a single system service.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ServiceHealthStatus {
+    Up,
+    Degraded,
+    Down,
+    Unknown,
+}
+
+/// Aggregated platform health snapshot.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SystemHealthStatus {
+    pub api: ServiceHealthStatus,
+    pub cache: ServiceHealthStatus,
+    pub stellar_rpc: ServiceHealthStatus,
+    pub database_primary: ServiceHealthStatus,
+    pub database_replica: ServiceHealthStatus,
+    pub prisma: ServiceHealthStatus,
+    pub jobs: ServiceHealthStatus,
+    pub indexer: ServiceHealthStatus,
+}
+
+/// A single telemetry datapoint recorded on-chain.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetricDatapoint {
+    pub metric_name: String,
+    pub value: i128,
+    pub recorded_at: u64,
+    pub source: String,
+}
+
+/// Aggregated telemetry status for dashboard consumption.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TelemetryStatus {
+    pub api_latency_ms: i128,
+    pub node_status: ServiceHealthStatus,
+    pub response_latency_ms: i128,
+    pub last_updated: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token-Gated Merchandise (Issue #1193)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Configuration for a token-gated merchandise restriction.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenGateConfig {
+    pub merchandise_id: u64,
+    /// Token contract address (e.g. VIP badge NFT or ticket NFT).
+    pub token_address: Address,
+    /// Minimum token balance required to purchase.
+    pub min_token_balance: i128,
+    /// Optional: restrict to holders of a specific token class / collection.
+    pub token_class: Option<String>,
+    /// Whether the gate is currently active.
+    pub active: bool,
+}
+
+/// Result of a token-gate eligibility check.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenGateEligibility {
+    pub eligible: bool,
+    pub reason: String,
+    pub user_balance: i128,
+    pub required_balance: i128,
+}

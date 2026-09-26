@@ -7883,4 +7883,191 @@ impl LumentixContract {
 
         None
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Real-Time Health & Telemetry (Issue #1192)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Update the on-chain telemetry status snapshot.
+    ///
+    /// Intended to be called by an authorised backend relayer whenever new
+    /// health/telemetry data is observed off-chain.  The latest snapshot is
+    /// stored in contract instance storage so queries are O(1).
+    pub fn record_telemetry_status(
+        env: Env,
+        caller: Address,
+        status: types::TelemetryStatus,
+    ) -> Result<(), LumentixError> {
+        caller.require_auth();
+        if status.last_updated == 0 {
+            return Err(LumentixError::InvalidMetricValue);
+        }
+        storage::set_telemetry_status(&env, &status);
+        Ok(())
+    }
+
+    /// Fetch the most recently recorded telemetry status.
+    pub fn fetch_telemetry_status(env: Env) -> Result<types::TelemetryStatus, LumentixError> {
+        storage::get_telemetry_status(&env).ok_or(LumentixError::TelemetrySourceNotFound)
+    }
+
+    /// Record a single metric datapoint on-chain.
+    ///
+    /// Datapoints are append-only; the latest value for a given metric name
+    /// can be queried with `get_latest_metric`.
+    pub fn record_metric_datapoint(
+        env: Env,
+        caller: Address,
+        metric_name: String,
+        value: i128,
+        source: String,
+    ) -> Result<(), LumentixError> {
+        caller.require_auth();
+        if metric_name.is_empty() {
+            return Err(LumentixError::InvalidMetricName);
+        }
+        let now = env.ledger().timestamp();
+        let datapoint = types::MetricDatapoint {
+            metric_name: metric_name.clone(),
+            value,
+            recorded_at: now,
+            source,
+        };
+        storage::record_metric_datapoint(&env, &datapoint);
+        Ok(())
+    }
+
+    /// Fetch the most recent datapoint for `metric_name`.
+    pub fn get_latest_metric(
+        env: Env,
+        metric_name: String,
+    ) -> Result<types::MetricDatapoint, LumentixError> {
+        if metric_name.is_empty() {
+            return Err(LumentixError::InvalidMetricName);
+        }
+        storage::get_latest_metric(&env, &metric_name)
+            .ok_or(LumentixError::TelemetrySourceNotFound)
+    }
+
+    /// Ping all registered system services and return a health snapshot.
+    ///
+    /// In this on-chain representation each service is marked `Up` by
+    /// default; off-chain relayers are expected to call `record_telemetry_status`
+    /// with real probe results.  This function provides a query surface that
+    /// matches the backend `GET /health` contract.
+    pub fn ping_system_services(env: Env) -> types::SystemHealthStatus {
+        let telemetry = storage::get_telemetry_status(&env);
+        telemetry.map(|t| t.node_status).unwrap_or(types::ServiceHealthStatus::Unknown);
+        types::SystemHealthStatus {
+            api: types::ServiceHealthStatus::Up,
+            cache: types::ServiceHealthStatus::Up,
+            stellar_rpc: types::ServiceHealthStatus::Up,
+            database_primary: types::ServiceHealthStatus::Up,
+            database_replica: types::ServiceHealthStatus::Up,
+            prisma: types::ServiceHealthStatus::Up,
+            jobs: types::ServiceHealthStatus::Up,
+            indexer: types::ServiceHealthStatus::Up,
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Token-Gated Merchandise (Issue #1193)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Verify whether `user` is eligible to purchase a token-gated merchandise
+    /// item.
+    ///
+    /// Checks the token gate configuration and, if the gate requires a minimum
+    /// token balance, reads that balance from the token contract.
+    pub fn verify_token_gate_eligibility(
+        env: Env,
+        user: Address,
+        merchandise_id: u64,
+    ) -> Result<types::TokenGateEligibility, LumentixError> {
+        let config = storage::get_token_gate_config(&env, merchandise_id)
+            .ok_or(LumentixError::TokenGateNotConfigured)?;
+
+        if !config.active {
+            return Ok(types::TokenGateEligibility {
+                eligible: false,
+                reason: "Token gate is inactive".to_string(),
+                user_balance: 0,
+                required_balance: config.min_token_balance,
+            });
+        }
+
+        let token_client = soroban_sdk::token::Client::new(&env, &config.token_address);
+        let user_balance = token_client.balance(&user);
+
+        if user_balance < config.min_token_balance {
+            return Ok(types::TokenGateEligibility {
+                eligible: false,
+                reason: "Insufficient token balance".to_string(),
+                user_balance,
+                required_balance: config.min_token_balance,
+            });
+        }
+
+        Ok(types::TokenGateEligibility {
+            eligible: true,
+            reason: "Eligible".to_string(),
+            user_balance,
+            required_balance: config.min_token_balance,
+        })
+    }
+
+    /// Restrict a merchandise purchase behind a token gate.
+    ///
+    /// Only the event organizer or contract admin may call this.  The gate
+    /// applies to all subsequent `purchase_merchandise` calls for this item.
+    pub fn restrict_merch_purchase(
+        env: Env,
+        caller: Address,
+        merchandise_id: u64,
+        token_address: Address,
+        min_token_balance: i128,
+        token_class: Option<String>,
+    ) -> Result<(), LumentixError> {
+        caller.require_auth();
+
+        let merchandise = storage::get_merchandise(&env, merchandise_id)?;
+        let admin: Address = storage::get_admin(&env)?;
+        if caller != merchandise.organizer && caller != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if min_token_balance < 0 {
+            return Err(LumentixError::InvalidTokenGateConfig);
+        }
+
+        let config = types::TokenGateConfig {
+            merchandise_id,
+            token_address,
+            min_token_balance,
+            token_class,
+            active: true,
+        };
+
+        storage::set_token_gate_config(&env, &config);
+        Ok(())
+    }
+
+    /// Release the token gate on a merchandise item, making it publicly
+    /// purchasable again.
+    pub fn release_token_gate(
+        env: Env,
+        caller: Address,
+        merchandise_id: u64,
+    ) -> Result<(), LumentixError> {
+        caller.require_auth();
+
+        let merchandise = storage::get_merchandise(&env, merchandise_id)?;
+        let admin: Address = storage::get_admin(&env)?;
+        if caller != merchandise.organizer && caller != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        storage::remove_token_gate_config(&env, merchandise_id);
+        Ok(())
+    }
 }

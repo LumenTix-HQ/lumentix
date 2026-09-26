@@ -57,4 +57,18 @@ export const envValidationSchema = Joi.object({
 
   // Multi-signature payout
   MULTISIG_REQUIRED_SIGNATURES: Joi.number().default(2).min(1).max(10),
+
+  // Webhook delivery
+  WEBHOOK_SECRET: Joi.string().required(),
+
+  // Internal service-to-service
+  INTERNAL_SECRET: Joi.string().required(),
+
+  // Google OAuth
+  GOOGLE_CLIENT_ID: Joi.string().required(),
+  GOOGLE_CLIENT_SECRET: Joi.string().required(),
+  GOOGLE_CALLBACK_URL: Joi.string().uri().required(),
+
+  // Escrow encryption
+  ESCROW_ENCRYPTION_SECRET: Joi.string().required(),
 });

@@ -85,6 +85,9 @@ const PROMO_CODE_PREFIX: &str = "PROMO_";
 const PROMO_USER_USAGE_PREFIX: &str = "PROMOUSR_";
 const AGE_PROOF_PREFIX: &str = "AGEPF_";
 const EVENT_MIN_AGE_PREFIX: &str = "MINAGE_";
+const TELEMETRY_STATUS: &str = "TELEMETRY_STATUS";
+const METRIC_DATAPOINT_PREFIX: &str = "METRIC_";
+const TOKEN_GATE_PREFIX: &str = "TGATE_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -2539,4 +2542,95 @@ pub fn consume_idempotency_key(env: &Env, key: &BytesN<32>) {
     env.storage()
         .persistent()
         .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Real-Time Health & Telemetry (Issue #1192)
+// ═══════════════════════════════════════════════════════════════════════════
+
+use crate::types::{MetricDatapoint, SystemHealthStatus, TelemetryStatus};
+
+/// Persist the latest telemetry status snapshot.
+pub fn set_telemetry_status(env: &Env, status: &TelemetryStatus) {
+    env.storage().instance().set(&TELEMETRY_STATUS, status);
+    env.storage()
+        .instance()
+        .extend_ttl(&TELEMETRY_STATUS, INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Fetch the latest telemetry status snapshot, if any.
+pub fn get_telemetry_status(env: &Env) -> Option<TelemetryStatus> {
+    env.storage().instance().get(&TELEMETRY_STATUS)
+}
+
+/// Record a metric datapoint (append-only log).
+pub fn record_metric_datapoint(env: &Env, datapoint: &MetricDatapoint) {
+    let key = (METRIC_DATAPOINT_PREFIX, datapoint.metric_name.clone(), datapoint.recorded_at);
+    env.storage().persistent().set(&key, datapoint);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the most recent metric datapoint for a given metric name.
+pub fn get_latest_metric(env: &Env, metric_name: &String) -> Option<MetricDatapoint> {
+    let prefix = (METRIC_DATAPOINT_PREFIX, metric_name.clone());
+    let mut latest: Option<MetricDatapoint> = None;
+    let mut latest_ts: u64 = 0;
+
+    // Scan all datapoints for this metric name and keep the newest one.
+    // In production this would be replaced by an index, but Soroban does not
+    // support range scans, so we iterate the entire keyspace.
+    let keys = env.storage().persistent().keys();
+    for key in keys.iter() {
+        if let soroban_sdk::Val::Tuple(tuple) = key {
+            let elems = tuple.get_elements();
+            if elems.len() >= 3 {
+                if let soroban_sdk::Val::Symbol(sym) = &elems[0] {
+                    if sym.to_string() == METRIC_DATAPOINT_PREFIX {
+                        if let soroban_sdk::Val::String(name) = &elems[1] {
+                            if name == metric_name {
+                                if let soroban_sdk::Val::U64(ts) = &elems[2] {
+                                    if *ts > latest_ts {
+                                        if let Some(dp) = env.storage().persistent().get::<_, MetricDatapoint>(&key) {
+                                            latest = Some(dp);
+                                            latest_ts = *ts;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    latest
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token-Gated Merchandise (Issue #1193)
+// ═══════════════════════════════════════════════════════════════════════════
+
+use crate::types::TokenGateConfig;
+
+/// Persist a token-gate configuration for a merchandise item.
+pub fn set_token_gate_config(env: &Env, config: &TokenGateConfig) {
+    let key = (TOKEN_GATE_PREFIX, config.merchandise_id);
+    env.storage().persistent().set(&key, config);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the token-gate configuration for a merchandise item, if any.
+pub fn get_token_gate_config(env: &Env, merchandise_id: u64) -> Option<TokenGateConfig> {
+    let key = (TOKEN_GATE_PREFIX, merchandise_id);
+    env.storage().persistent().get(&key)
+}
+
+/// Remove the token-gate configuration for a merchandise item.
+pub fn remove_token_gate_config(env: &Env, merchandise_id: u64) {
+    let key = (TOKEN_GATE_PREFIX, merchandise_id);
+    env.storage().persistent().remove(&key);
 }
