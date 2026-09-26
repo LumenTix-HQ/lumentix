@@ -1,3 +1,4 @@
+import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
@@ -9,7 +10,7 @@ import { Event } from '../events/entities/event.entity';
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([StreamingConfig, Event]),
+    TypeOrmModule.forFeature([StreamingConfig, Event, TicketEntity]),
   ],
   controllers: [StreamingController],
   providers: [StreamingService],

@@ -734,12 +734,17 @@ export class TicketsService {
     return this.ticketRepo.save(ticket);
   }
 
-  async verifyQrCheckIn(qrData: string): Promise<{
+  async verifyQrCheckIn(
+    qrData: string,
+    actor: { id: string; role: string },
+    expectedEventId?: string,
+  ): Promise<{
     ticketId: string;
     status: string;
     eventId: string;
     attendeeName: string;
     attendeeEmail: string;
+    attendeePhotoUrl: string | null;
     ticketType: string;
   }> {
     let parsed: { ticketId: string; signature: string };
@@ -749,7 +754,11 @@ export class TicketsService {
       throw new BadRequestException('Invalid QR code data');
     }
 
-    if (!parsed.ticketId || !parsed.signature) {
+    if (
+      !parsed ||
+      typeof parsed.ticketId !== 'string' ||
+      typeof parsed.signature !== 'string'
+    ) {
       throw new BadRequestException('QR code missing ticketId or signature');
     }
 
@@ -760,6 +769,15 @@ export class TicketsService {
     const ticket = await this.ticketRepo.findOne({ where: { id: parsed.ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
+    if (expectedEventId && ticket.eventId !== expectedEventId) {
+      throw new BadRequestException('Ticket belongs to a different event');
+    }
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (actor.role !== 'admin' && event.organizerId !== actor.id) {
+      throw new ForbiddenException('You cannot check in attendees for this event');
+    }
+
     if (ticket.status === 'used') {
       throw new BadRequestException('Ticket has already been checked in');
     }
@@ -767,12 +785,17 @@ export class TicketsService {
       throw new BadRequestException('Ticket is no longer valid');
     }
 
-    ticket.status = 'used';
-    await this.ticketRepo.save(ticket);
+    const updated = await this.ticketRepo.update(
+      { id: ticket.id, ownerId: ticket.ownerId, status: 'valid' },
+      { status: 'used' },
+    );
+    if (updated.affected !== 1) {
+      throw new BadRequestException('Ticket has already been checked in or transferred');
+    }
 
     await this.auditService.log({
       action: 'TICKET_CHECKED_IN' as any,
-      userId: ticket.ownerId,
+      userId: actor.id,
       resourceId: ticket.id,
       meta: { eventId: ticket.eventId, method: 'qr_scan' },
     });
@@ -783,8 +806,9 @@ export class TicketsService {
       ticketId: ticket.id,
       status: 'checked_in',
       eventId: ticket.eventId,
-      attendeeName: (user as any)?.displayName ?? 'Unknown',
-      attendeeEmail: (user as any)?.email ?? '',
+      attendeeName: user?.displayName ?? 'Unknown',
+      attendeeEmail: user?.email ?? '',
+      attendeePhotoUrl: user?.logoUrl ?? null,
       ticketType: ticket.assetCode ?? 'general',
     };
   }

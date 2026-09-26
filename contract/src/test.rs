@@ -4212,9 +4212,10 @@ fn test_validate_idempotency_key_true_when_unused() {
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
     let key = BytesN::from_array(&env, &[7u8; 32]);
 
-    assert!(client.validate_idempotency_key(&key));
+    assert!(client.validate_idempotency_key(&account, &key));
 }
 
 #[test]
@@ -4223,11 +4224,12 @@ fn test_validate_idempotency_key_false_after_reject_replay_attempt() {
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
     let key = BytesN::from_array(&env, &[7u8; 32]);
 
-    client.reject_replay_attempt(&key);
+    client.reject_replay_attempt(&account, &key);
 
-    assert!(!client.validate_idempotency_key(&key));
+    assert!(!client.validate_idempotency_key(&account, &key));
 }
 
 #[test]
@@ -4236,11 +4238,12 @@ fn test_reject_replay_attempt_succeeds_once_then_rejects_replay() {
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
     let key = BytesN::from_array(&env, &[9u8; 32]);
 
-    client.reject_replay_attempt(&key);
+    client.reject_replay_attempt(&account, &key);
 
-    let result = client.try_reject_replay_attempt(&key);
+    let result = client.try_reject_replay_attempt(&account, &key);
     assert_eq!(result, Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
 }
 
@@ -4284,10 +4287,10 @@ fn test_transfer_ticket_idempotent_rejects_replayed_key() {
     // A network retry (or a replay attack) resubmitting the exact same call,
     // including the same idempotency key, must not transfer the ticket
     // again — even to a different `to` address than the first successful
-    // call, since the key alone is what's being replay-checked here.
+    // call, since the authenticated sender has already consumed this key.
     let result = client.try_transfer_ticket_idempotent(
         &ticket_id,
-        &second_owner,
+        &first_owner,
         &third_owner,
         &key,
     );
@@ -7658,4 +7661,58 @@ fn test_royalty_ledger_empty_before_any_distribution() {
     let event_id = create_and_publish_event(&env, &client, &organizer);
 
     assert_eq!(client.query_royalty_ledger(&event_id).len(), 0);
+}
+
+#[test]
+fn test_purchase_idempotent_retries_and_account_isolation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let other = Address::generate(&env);
+    let event = create_and_publish_event(&env, &client, &organizer);
+    let key = BytesN::from_array(&env, &[42; 32]);
+    let first = client.purchase_ticket_idempotent(&buyer, &event, &100, &key);
+    assert_eq!(client.try_purchase_ticket_idempotent(&buyer, &event, &100, &key),
+        Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
+    assert!(client.validate_idempotency_key(&other, &key));
+    let second = client.purchase_ticket_idempotent(&other, &event, &100, &key);
+    assert_ne!(first, second);
+}
+
+#[test]
+fn test_failed_idempotent_purchase_does_not_burn_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, client) = create_test_contract(&env);
+    let buyer = Address::generate(&env);
+    let key = BytesN::from_array(&env, &[43; 32]);
+    assert!(client.try_purchase_ticket_idempotent(&buyer, &999, &100, &key).is_err());
+    assert!(client.validate_idempotency_key(&buyer, &key));
+}
+
+#[test]
+fn test_replay_primitives_require_account_authorization() {
+    let env = Env::default();
+    let (_, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+    let key = BytesN::from_array(&env, &[44; 32]);
+    assert!(client.try_generate_transaction_nonce(&account).is_err());
+    assert!(client.try_reject_replay_attempt(&account, &key).is_err());
+    assert!(client.validate_idempotency_key(&account, &key));
+}
+
+#[test]
+fn test_batch_purchase_idempotent_rejects_retry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let event = create_and_publish_event(&env, &client, &organizer);
+    let key = BytesN::from_array(&env, &[45; 32]);
+    assert_eq!(client.batch_purchase_idempotent(&event, &2, &buyer, &key).len(), 2);
+    assert_eq!(client.try_batch_purchase_idempotent(&event, &2, &buyer, &key),
+        Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
 }
