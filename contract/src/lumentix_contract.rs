@@ -7831,6 +7831,117 @@ impl LumentixContract {
         env.crypto().sha256(&buf).to_bytes()
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CROSS-EVENT PASS PACKAGES (Issue #1198)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Create a new cross-event pass package granting the `owner` entry into
+    /// any `total_allowance` of the listed `eligible_event_ids`.
+    ///
+    /// Only the organizer can create packages, and every listed event must
+    /// belong to that organizer. The package is active from creation until
+    /// `expires_at` (a ledger timestamp).
+    ///
+    /// Returns the new `package_id`.
+    pub fn create_pass_package(
+        env: Env,
+        organizer: Address,
+        owner: Address,
+        eligible_event_ids: Vec<u64>,
+        total_allowance: u32,
+        expires_at: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        if eligible_event_ids.len() == 0 || total_allowance == 0 {
+            return Err(LumentixError::InvalidPassPackageConfig);
+        }
+
+        // Verify all events belong to this organizer.
+        for event_id in eligible_event_ids.iter() {
+            let event = storage::get_event(&env, event_id)?;
+            if event.organizer != organizer {
+                return Err(LumentixError::Unauthorized);
+            }
+        }
+
+        let package_id = storage::get_next_pass_package_id(&env);
+        storage::increment_pass_package_id(&env);
+
+        let now = env.ledger().timestamp();
+        let package = PassPackage {
+            package_id,
+            owner: owner.clone(),
+            organizer,
+            eligible_events: eligible_event_ids,
+            total_allowance,
+            remaining_allowance: total_allowance,
+            created_at: now,
+            expires_at,
+            active: true,
+        };
+
+        storage::set_pass_package(&env, package_id, &package);
+        PassPackageCreated::emit(&env, package_id, owner, total_allowance);
+
+        Ok(package_id)
+    }
+
+    /// Deduct one allowance from `package_id` to grant `owner` entry into
+    /// `event_id`. Enforces: ownership, expiry, eligibility, and exhaustion
+    /// checks. Returns the updated `remaining_allowance`.
+    pub fn deduct_pass_allowance(
+        env: Env,
+        owner: Address,
+        package_id: u64,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        owner.require_auth();
+
+        let mut package = storage::get_pass_package(&env, package_id)?;
+
+        if package.owner != owner {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        if !package.active || now > package.expires_at {
+            return Err(LumentixError::PassPackageExpired);
+        }
+
+        if package.remaining_allowance == 0 {
+            return Err(LumentixError::PassPackageExhausted);
+        }
+
+        // Verify the event is part of this package.
+        let mut eligible = false;
+        for eid in package.eligible_events.iter() {
+            if eid == event_id {
+                eligible = true;
+                break;
+            }
+        }
+        if !eligible {
+            return Err(LumentixError::PassPackageEventNotEligible);
+        }
+
+        package.remaining_allowance = package.remaining_allowance.saturating_sub(1);
+        storage::set_pass_package(&env, package_id, &package);
+
+        PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
+
+        Ok(package.remaining_allowance)
+    }
+
+    /// Return `(remaining_allowance, eligible_events)` for `package_id`.
+    pub fn check_pass_balance(
+        env: Env,
+        package_id: u64,
+    ) -> Result<(u32, Vec<u64>), LumentixError> {
+        let package = storage::get_pass_package(&env, package_id)?;
+        Ok((package.remaining_allowance, package.eligible_events))
+    }
+
     /// Validate and apply one offline scan.
     ///
     /// Returns `None` on success, or `Some(reason_code)` carrying the
