@@ -123,4 +123,20 @@ describe('useKioskScanner', () => {
     });
     expect(result.current.result).toBeNull();
   });
+  it('scopes kiosk scans to the event and waits for staff acknowledgement', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ attendeePhotoUrl: 'https://example.com/photo.png' }) } as Response);
+    const { result } = renderHook(() => useKioskScanner('event-1'));
+    await act(async () => { await result.current.submitScan('qr'); });
+    expect(fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ body: JSON.stringify({ qrData: 'qr', eventId: 'event-1' }) }));
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(result.current.result?.attendeePhotoUrl).toBe('https://example.com/photo.png');
+  });
+
+  it('blocks duplicate scans within the same render', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+    const { result } = renderHook(() => useKioskScanner('event-1'));
+    await act(async () => { await Promise.all([result.current.submitScan('qr'), result.current.submitScan('qr')]); });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
 });

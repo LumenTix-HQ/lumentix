@@ -4212,9 +4212,10 @@ fn test_validate_idempotency_key_true_when_unused() {
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
     let key = BytesN::from_array(&env, &[7u8; 32]);
 
-    assert!(client.validate_idempotency_key(&key));
+    assert!(client.validate_idempotency_key(&account, &key));
 }
 
 #[test]
@@ -4223,11 +4224,12 @@ fn test_validate_idempotency_key_false_after_reject_replay_attempt() {
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
     let key = BytesN::from_array(&env, &[7u8; 32]);
 
-    client.reject_replay_attempt(&key);
+    client.reject_replay_attempt(&account, &key);
 
-    assert!(!client.validate_idempotency_key(&key));
+    assert!(!client.validate_idempotency_key(&account, &key));
 }
 
 #[test]
@@ -4236,11 +4238,12 @@ fn test_reject_replay_attempt_succeeds_once_then_rejects_replay() {
     env.mock_all_auths();
 
     let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
     let key = BytesN::from_array(&env, &[9u8; 32]);
 
-    client.reject_replay_attempt(&key);
+    client.reject_replay_attempt(&account, &key);
 
-    let result = client.try_reject_replay_attempt(&key);
+    let result = client.try_reject_replay_attempt(&account, &key);
     assert_eq!(result, Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
 }
 
@@ -4284,10 +4287,10 @@ fn test_transfer_ticket_idempotent_rejects_replayed_key() {
     // A network retry (or a replay attack) resubmitting the exact same call,
     // including the same idempotency key, must not transfer the ticket
     // again — even to a different `to` address than the first successful
-    // call, since the key alone is what's being replay-checked here.
+    // call, since the authenticated sender has already consumed this key.
     let result = client.try_transfer_ticket_idempotent(
         &ticket_id,
-        &second_owner,
+        &first_owner,
         &third_owner,
         &key,
     );

@@ -34,6 +34,7 @@ export function ScanTarget({ inputRef, isSubmitting, onSubmit }: ScanTargetProps
       <input
         ref={inputRef}
         type="text"
+        autoFocus
         inputMode="none"
         autoComplete="off"
         aria-label="Scanner input"

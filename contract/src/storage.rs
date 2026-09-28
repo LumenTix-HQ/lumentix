@@ -2526,15 +2526,17 @@ pub fn consume_transaction_nonce(env: &Env, account: &Address) -> u64 {
 
 /// Whether `key` has already been consumed by a prior `consume_idempotency_key`
 /// call, i.e. whether accepting this call again would be a replay.
-pub fn is_idempotency_key_used(env: &Env, key: &BytesN<32>) -> bool {
-    let storage_key = (IDEMPOTENCY_KEY_PREFIX, key.clone());
+pub fn is_idempotency_key_used(env: &Env, account: &Address, key: &BytesN<32>) -> bool {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, account.clone(), key.clone());
+    // Preserve replay records created before account scoping was introduced.
     env.storage().persistent().has(&storage_key)
+        || env.storage().persistent().has(&(IDEMPOTENCY_KEY_PREFIX, key.clone()))
 }
 
 /// Marks `key` as used so a later call with the same key can be rejected as
 /// a replay. Callers should check `is_idempotency_key_used` first.
-pub fn consume_idempotency_key(env: &Env, key: &BytesN<32>) {
-    let storage_key = (IDEMPOTENCY_KEY_PREFIX, key.clone());
+pub fn consume_idempotency_key(env: &Env, account: &Address, key: &BytesN<32>) {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, account.clone(), key.clone());
     env.storage().persistent().set(&storage_key, &true);
     env.storage()
         .persistent()
