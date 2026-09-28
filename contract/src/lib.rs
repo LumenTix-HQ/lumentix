@@ -310,4 +310,6 @@ pub use types::{
     UserPreferences, CertificationStandard, EventCertificate,
     BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
     AgeProof,
+    ServiceHealthStatus, SystemHealthStatus, MetricDatapoint, TelemetryStatus,
+    TokenGateConfig, TokenGateEligibility,
 };
