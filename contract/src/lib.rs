@@ -222,6 +222,7 @@ mod sponsor_tests {
 
 pub mod contract;
 pub mod error;
+pub mod escrow_split;
 pub mod events;
 pub mod lumentix_contract;
 pub mod models;
@@ -229,6 +230,7 @@ pub mod royalty;
 pub mod storage;
 pub mod types;
 pub mod validation;
+pub mod venue_capacity;
 pub mod achievement_badge;
 
 #[cfg(test)]
@@ -288,6 +290,8 @@ pub use events::{
     PassPackageCreated, PassAllowanceDeducted,
     AgeProofIssued, AgeProofVerified, UnderagePurchaseRejected,
     AchievementBadgeMinted, AchievementBadgeRevoked,
+    VenueCapacitySet, AttendanceCounterIncremented, OverCapacityMintRejected,
+    EscrowSplitCreated, EscrowSplitReleased, EscrowSplitDisputed,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};

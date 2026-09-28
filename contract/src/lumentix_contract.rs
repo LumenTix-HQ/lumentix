@@ -464,6 +464,10 @@ impl LumentixContract {
             return Err(LumentixError::EventSoldOut);
         }
 
+        // Enforce the on-chain venue capacity (Issue #1245). No-op for events
+        // with no configured capacity.
+        crate::venue_capacity::guard_mint_against_capacity(&env, event_id, 1)?;
+
         // Validate payment amount against time-based dynamic pricing
         let required_price =
             Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
@@ -493,6 +497,10 @@ impl LumentixContract {
         // Increment tickets_sold counter
         event.tickets_sold += 1;
         storage::set_event(&env, event_id, &event);
+
+        // Record the seat against the on-chain venue capacity (Issue #1245).
+        // No-ops for events that never had a capacity configured.
+        crate::venue_capacity::increment_attendance_counter_if_configured(&env, event_id, 1)?;
 
         // Create ticket
         let ticket_id = storage::get_next_ticket_id(&env);
@@ -587,6 +595,10 @@ impl LumentixContract {
             return Err(LumentixError::EventSoldOut);
         }
 
+        // Enforce the on-chain venue capacity for the whole batch at once
+        // (Issue #1245). No-op for events with no configured capacity.
+        crate::venue_capacity::guard_mint_against_capacity(&env, event_id, quantity)?;
+
         // Calculate total amount using dynamic per-ticket pricing
         let unit_price = Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
         let total_amount = unit_price * quantity as i128;
@@ -613,6 +625,10 @@ impl LumentixContract {
         // Update tickets_sold counter
         event.tickets_sold += quantity;
         storage::set_event(&env, event_id, &event);
+
+        // Record the seats against the on-chain venue capacity (Issue #1245).
+        // No-ops for events that never had a capacity configured.
+        crate::venue_capacity::increment_attendance_counter_if_configured(&env, event_id, quantity)?;
 
         // Create tickets and collect IDs
         let mut ticket_ids = Vec::new(&env);
@@ -863,15 +879,10 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Transaction replay protection (Issue #1007)
-    //
-    // These are additive primitives, kept separate from the existing
-    // `purchase_ticket`/`transfer_ticket` entry points so existing callers
-    // and tests keep working unchanged. A caller that wants replay
-    // protection for a transfer fetches a nonce, derives an idempotency key
-    // from it (e.g. hashing the nonce together with the call's arguments),
-    // and calls `transfer_ticket_idempotent` instead of
-    // `transfer_ticket` directly.
+    // Transaction replay protection: keys are scoped to an authenticated
+    // account. Reuse the SAME key when retrying an operation; generate a new
+    // nonce only for a new logical operation. Persistent records survive TTL
+    // archival and must be restored, never treated as unused.
     // ═══════════════════════════════════════════════════════════════════════
 
     /// Returns the caller's next transaction nonce and advances their
@@ -880,25 +891,41 @@ impl LumentixContract {
     /// subsequent sensitive call, so a network-retried or replayed
     /// transaction carrying the same key can be rejected.
     pub fn generate_transaction_nonce(env: Env, account: Address) -> u64 {
+        account.require_auth();
         storage::consume_transaction_nonce(&env, &account)
     }
 
     /// Returns whether `key` is still unused (`true`) or has already been
     /// consumed by a prior `reject_replay_attempt` call (`false`). Read-only
     /// — does not itself consume the key.
-    pub fn validate_idempotency_key(env: Env, key: BytesN<32>) -> bool {
-        !storage::is_idempotency_key_used(&env, &key)
+    pub fn validate_idempotency_key(env: Env, account: Address, key: BytesN<32>) -> bool {
+        !storage::is_idempotency_key_used(&env, &account, &key)
     }
 
     /// Consumes `key`, erroring with `IdempotencyKeyAlreadyUsed` if it has
     /// already been used. Call this once, before any state changes, at the
     /// start of an operation that must not be double-applied by a network
     /// retry or a replayed transaction.
-    pub fn reject_replay_attempt(env: Env, key: BytesN<32>) -> Result<(), LumentixError> {
-        if storage::is_idempotency_key_used(&env, &key) {
+    pub fn reject_replay_attempt(
+        env: Env,
+        account: Address,
+        key: BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        account.require_auth();
+        Self::consume_replay_key(&env, &account, &key)
+    }
+
+    // Internal operations authorize the account once in their purchase/transfer
+    // path. Requiring auth twice in one Soroban frame is an error.
+    fn consume_replay_key(
+        env: &Env,
+        account: &Address,
+        key: &BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        if storage::is_idempotency_key_used(env, account, key) {
             return Err(LumentixError::IdempotencyKeyAlreadyUsed);
         }
-        storage::consume_idempotency_key(&env, &key);
+        storage::consume_idempotency_key(env, account, key);
         Ok(())
     }
 
@@ -977,6 +1004,31 @@ impl LumentixContract {
         achievement_badge::get_owner_badges(&env, &owner)
     }
 
+    /// Atomically consume a buyer-scoped key and purchase one ticket.
+    /// A failed purchase rolls back the key along with all contract writes.
+    pub fn purchase_ticket_idempotent(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        amount: i128,
+        idempotency_key: BytesN<32>,
+    ) -> Result<u64, LumentixError> {
+        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
+        Self::purchase_ticket(env, buyer, event_id, amount)
+    }
+
+    /// Replay-protected group purchase; retries cannot mint another batch.
+    pub fn batch_purchase_idempotent(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        buyer: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<Vec<u64>, LumentixError> {
+        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
+        Self::batch_purchase_tickets(env, event_id, quantity, buyer)
+    }
+
     /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
     /// network-retried or replayed call carrying the same `idempotency_key`
     /// is rejected instead of transferring the ticket a second time.
@@ -988,7 +1040,7 @@ impl LumentixContract {
         idempotency_key: BytesN<32>,
     ) -> Result<(), LumentixError> {
         from.require_auth();
-        Self::reject_replay_attempt(env.clone(), idempotency_key)?;
+        Self::consume_replay_key(&env, &from, &idempotency_key)?;
 
         let mut ticket = storage::get_ticket(&env, ticket_id)?;
         Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
@@ -1272,6 +1324,9 @@ impl LumentixContract {
         // Decrement tickets_sold to free up capacity
         event.tickets_sold = event.tickets_sold.saturating_sub(1);
         storage::set_event(&env, ticket.event_id, &event);
+
+        // Return the seat to the on-chain venue capacity (Issue #1245).
+        crate::venue_capacity::decrement_attendance_counter(&env, ticket.event_id, 1);
 
         if event.status == EventStatus::Cancelled {
             // Cancelled events do not issue waitlist offers.
@@ -7831,6 +7886,117 @@ impl LumentixContract {
         env.crypto().sha256(&buf).to_bytes()
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CROSS-EVENT PASS PACKAGES (Issue #1198)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Create a new cross-event pass package granting the `owner` entry into
+    /// any `total_allowance` of the listed `eligible_event_ids`.
+    ///
+    /// Only the organizer can create packages, and every listed event must
+    /// belong to that organizer. The package is active from creation until
+    /// `expires_at` (a ledger timestamp).
+    ///
+    /// Returns the new `package_id`.
+    pub fn create_pass_package(
+        env: Env,
+        organizer: Address,
+        owner: Address,
+        eligible_event_ids: Vec<u64>,
+        total_allowance: u32,
+        expires_at: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        if eligible_event_ids.len() == 0 || total_allowance == 0 {
+            return Err(LumentixError::InvalidPassPackageConfig);
+        }
+
+        // Verify all events belong to this organizer.
+        for event_id in eligible_event_ids.iter() {
+            let event = storage::get_event(&env, event_id)?;
+            if event.organizer != organizer {
+                return Err(LumentixError::Unauthorized);
+            }
+        }
+
+        let package_id = storage::get_next_pass_package_id(&env);
+        storage::increment_pass_package_id(&env);
+
+        let now = env.ledger().timestamp();
+        let package = PassPackage {
+            package_id,
+            owner: owner.clone(),
+            organizer,
+            eligible_events: eligible_event_ids,
+            total_allowance,
+            remaining_allowance: total_allowance,
+            created_at: now,
+            expires_at,
+            active: true,
+        };
+
+        storage::set_pass_package(&env, package_id, &package);
+        PassPackageCreated::emit(&env, package_id, owner, total_allowance);
+
+        Ok(package_id)
+    }
+
+    /// Deduct one allowance from `package_id` to grant `owner` entry into
+    /// `event_id`. Enforces: ownership, expiry, eligibility, and exhaustion
+    /// checks. Returns the updated `remaining_allowance`.
+    pub fn deduct_pass_allowance(
+        env: Env,
+        owner: Address,
+        package_id: u64,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        owner.require_auth();
+
+        let mut package = storage::get_pass_package(&env, package_id)?;
+
+        if package.owner != owner {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let now = env.ledger().timestamp();
+        if !package.active || now > package.expires_at {
+            return Err(LumentixError::PassPackageExpired);
+        }
+
+        if package.remaining_allowance == 0 {
+            return Err(LumentixError::PassPackageExhausted);
+        }
+
+        // Verify the event is part of this package.
+        let mut eligible = false;
+        for eid in package.eligible_events.iter() {
+            if eid == event_id {
+                eligible = true;
+                break;
+            }
+        }
+        if !eligible {
+            return Err(LumentixError::PassPackageEventNotEligible);
+        }
+
+        package.remaining_allowance = package.remaining_allowance.saturating_sub(1);
+        storage::set_pass_package(&env, package_id, &package);
+
+        PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
+
+        Ok(package.remaining_allowance)
+    }
+
+    /// Return `(remaining_allowance, eligible_events)` for `package_id`.
+    pub fn check_pass_balance(
+        env: Env,
+        package_id: u64,
+    ) -> Result<(u32, Vec<u64>), LumentixError> {
+        let package = storage::get_pass_package(&env, package_id)?;
+        Ok((package.remaining_allowance, package.eligible_events))
+    }
+
     /// Validate and apply one offline scan.
     ///
     /// Returns `None` on success, or `Some(reason_code)` carrying the
@@ -7885,189 +8051,178 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Real-Time Health & Telemetry (Issue #1192)
+    // VENUE CAPACITY (Issue #1245)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// Update the on-chain telemetry status snapshot.
+    /// Configure the maximum venue capacity for an event.
     ///
-    /// Intended to be called by an authorised backend relayer whenever new
-    /// health/telemetry data is observed off-chain.  The latest snapshot is
-    /// stored in contract instance storage so queries are O(1).
-    pub fn record_telemetry_status(
+    /// Only the event's organizer or the contract admin may set it. The first
+    /// configuration seeds the on-chain counter from the tickets already sold,
+    /// so setting a limit after sales have begun still counts them; later
+    /// changes keep the live counter and are rejected when the new limit is
+    /// below the number of tickets already minted.
+    pub fn set_venue_capacity(
         env: Env,
-        caller: Address,
-        status: types::TelemetryStatus,
-    ) -> Result<(), LumentixError> {
-        caller.require_auth();
-        if status.last_updated == 0 {
-            return Err(LumentixError::InvalidMetricValue);
-        }
-        storage::set_telemetry_status(&env, &status);
-        Ok(())
-    }
+        event_id: u64,
+        max_capacity: u32,
+        organizer: Address,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        organizer.require_auth();
 
-    /// Fetch the most recently recorded telemetry status.
-    pub fn fetch_telemetry_status(env: Env) -> Result<types::TelemetryStatus, LumentixError> {
-        storage::get_telemetry_status(&env).ok_or(LumentixError::TelemetrySourceNotFound)
-    }
-
-    /// Record a single metric datapoint on-chain.
-    ///
-    /// Datapoints are append-only; the latest value for a given metric name
-    /// can be queried with `get_latest_metric`.
-    pub fn record_metric_datapoint(
-        env: Env,
-        caller: Address,
-        metric_name: String,
-        value: i128,
-        source: String,
-    ) -> Result<(), LumentixError> {
-        caller.require_auth();
-        if metric_name.is_empty() {
-            return Err(LumentixError::InvalidMetricName);
-        }
-        let now = env.ledger().timestamp();
-        let datapoint = types::MetricDatapoint {
-            metric_name: metric_name.clone(),
-            value,
-            recorded_at: now,
-            source,
-        };
-        storage::record_metric_datapoint(&env, &datapoint);
-        Ok(())
-    }
-
-    /// Fetch the most recent datapoint for `metric_name`.
-    pub fn get_latest_metric(
-        env: Env,
-        metric_name: String,
-    ) -> Result<types::MetricDatapoint, LumentixError> {
-        if metric_name.is_empty() {
-            return Err(LumentixError::InvalidMetricName);
-        }
-        storage::get_latest_metric(&env, &metric_name)
-            .ok_or(LumentixError::TelemetrySourceNotFound)
-    }
-
-    /// Ping all registered system services and return a health snapshot.
-    ///
-    /// In this on-chain representation each service is marked `Up` by
-    /// default; off-chain relayers are expected to call `record_telemetry_status`
-    /// with real probe results.  This function provides a query surface that
-    /// matches the backend `GET /health` contract.
-    pub fn ping_system_services(env: Env) -> types::SystemHealthStatus {
-        let telemetry = storage::get_telemetry_status(&env);
-        telemetry.map(|t| t.node_status).unwrap_or(types::ServiceHealthStatus::Unknown);
-        types::SystemHealthStatus {
-            api: types::ServiceHealthStatus::Up,
-            cache: types::ServiceHealthStatus::Up,
-            stellar_rpc: types::ServiceHealthStatus::Up,
-            database_primary: types::ServiceHealthStatus::Up,
-            database_replica: types::ServiceHealthStatus::Up,
-            prisma: types::ServiceHealthStatus::Up,
-            jobs: types::ServiceHealthStatus::Up,
-            indexer: types::ServiceHealthStatus::Up,
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Token-Gated Merchandise (Issue #1193)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// Verify whether `user` is eligible to purchase a token-gated merchandise
-    /// item.
-    ///
-    /// Checks the token gate configuration and, if the gate requires a minimum
-    /// token balance, reads that balance from the token contract.
-    pub fn verify_token_gate_eligibility(
-        env: Env,
-        user: Address,
-        merchandise_id: u64,
-    ) -> Result<types::TokenGateEligibility, LumentixError> {
-        let config = storage::get_token_gate_config(&env, merchandise_id)
-            .ok_or(LumentixError::TokenGateNotConfigured)?;
-
-        if !config.active {
-            return Ok(types::TokenGateEligibility {
-                eligible: false,
-                reason: "Token gate is inactive".to_string(),
-                user_balance: 0,
-                required_balance: config.min_token_balance,
-            });
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
         }
 
-        let token_client = soroban_sdk::token::Client::new(&env, &config.token_address);
-        let user_balance = token_client.balance(&user);
-
-        if user_balance < config.min_token_balance {
-            return Ok(types::TokenGateEligibility {
-                eligible: false,
-                reason: "Insufficient token balance".to_string(),
-                user_balance,
-                required_balance: config.min_token_balance,
-            });
-        }
-
-        Ok(types::TokenGateEligibility {
-            eligible: true,
-            reason: "Eligible".to_string(),
-            user_balance,
-            required_balance: config.min_token_balance,
-        })
-    }
-
-    /// Restrict a merchandise purchase behind a token gate.
-    ///
-    /// Only the event organizer or contract admin may call this.  The gate
-    /// applies to all subsequent `purchase_merchandise` calls for this item.
-    pub fn restrict_merch_purchase(
-        env: Env,
-        caller: Address,
-        merchandise_id: u64,
-        token_address: Address,
-        min_token_balance: i128,
-        token_class: Option<String>,
-    ) -> Result<(), LumentixError> {
-        caller.require_auth();
-
-        let merchandise = storage::get_merchandise(&env, merchandise_id)?;
-        let admin: Address = storage::get_admin(&env)?;
-        if caller != merchandise.organizer && caller != admin {
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
             return Err(LumentixError::Unauthorized);
         }
 
-        if min_token_balance < 0 {
-            return Err(LumentixError::InvalidTokenGateConfig);
-        }
-
-        let config = types::TokenGateConfig {
-            merchandise_id,
-            token_address,
-            min_token_balance,
-            token_class,
-            active: true,
-        };
-
-        storage::set_token_gate_config(&env, &config);
-        Ok(())
+        crate::venue_capacity::set_venue_capacity(&env, event_id, max_capacity)
     }
 
-    /// Release the token gate on a merchandise item, making it publicly
-    /// purchasable again.
-    pub fn release_token_gate(
+    /// Read the venue capacity and live attendance counter for an event.
+    pub fn get_venue_capacity(
         env: Env,
-        caller: Address,
-        merchandise_id: u64,
-    ) -> Result<(), LumentixError> {
-        caller.require_auth();
+        event_id: u64,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::venue_capacity::get_venue_capacity(&env, event_id)
+    }
 
-        let merchandise = storage::get_merchandise(&env, merchandise_id)?;
-        let admin: Address = storage::get_admin(&env)?;
-        if caller != merchandise.organizer && caller != admin {
+    /// Seats still available under the configured venue capacity.
+    ///
+    /// Returns `None` when no capacity is configured, which reads as unlimited.
+    pub fn get_remaining_venue_capacity(env: Env, event_id: u64) -> Result<Option<u32>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::venue_capacity::remaining_capacity(&env, event_id))
+    }
+
+    /// Advance an event's on-chain attendance counter by `quantity`.
+    ///
+    /// Fails with `VenueCapacityExceeded` when the counter would pass the
+    /// configured maximum, leaving the counter untouched.
+    pub fn increment_attendance_counter(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        organizer: Address,
+    ) -> Result<u32, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
             return Err(LumentixError::Unauthorized);
         }
 
-        storage::remove_token_gate_config(&env, merchandise_id);
-        Ok(())
+        crate::venue_capacity::increment_attendance_counter(&env, event_id, quantity)
+    }
+
+    /// Check whether minting `quantity` more tickets would breach the venue
+    /// capacity, without touching the counter.
+    ///
+    /// Every ticket-minting path runs this guard internally; it is exposed so a
+    /// client can grey out a purchase button before the buyer signs anything.
+    pub fn reject_over_capacity_mint(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+    ) -> Result<(), LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::venue_capacity::reject_over_capacity_mint(&env, event_id, quantity)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ESCROW PAYMENT SPLITS (Issue #1247)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Register a pre-agreed basis-point split of an event's held escrow among
+    /// its co-organizers.
+    ///
+    /// `splits` maps each co-organizer wallet to their share in basis points and
+    /// must sum to 10 000. Only the event's organizer or the contract admin may
+    /// register a split. Registering a split replaces any previous one for the
+    /// event, so an agreement that was never acted on can still be corrected.
+    pub fn create_escrow_split(
+        env: Env,
+        event_id: u64,
+        splits: Map<Address, u32>,
+        organizer: Address,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::escrow_split::create_escrow_split(&env, event_id, splits)
+    }
+
+    /// Pay an event's held escrow out to every co-organizer in its split.
+    ///
+    /// The whole current pool is released in one call, each co-organizer taking
+    /// their basis-point share. Only the event's organizer or the contract admin
+    /// may release, the event must have concluded, and a split under dispute is
+    /// frozen until the disagreement is resolved. Returns each co-organizer and
+    /// the amount they received.
+    pub fn release_escrow_funds(
+        env: Env,
+        event_id: u64,
+        split_id: u64,
+        organizer: Address,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::escrow_split::release_escrow_funds(&env, event_id, split_id)
+    }
+
+    /// Freeze an event's escrow split pending a resolution between organizers.
+    ///
+    /// Any co-organizer named in the split may dispute it, which prevents the
+    /// pool from being released. A released split is too late to dispute.
+    pub fn dispute_escrow_split(
+        env: Env,
+        event_id: u64,
+        split_id: u64,
+        disputer: Address,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        disputer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        crate::escrow_split::dispute_escrow_split(&env, event_id, split_id, &disputer)
+    }
+
+    /// Read the escrow split currently registered for an event.
+    pub fn get_escrow_split(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        crate::escrow_split::get_event_escrow_split(&env, event_id)
+            .ok_or(LumentixError::EscrowSplitNotFound)
     }
 }

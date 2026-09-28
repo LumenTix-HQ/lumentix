@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ScanResult } from '@/hooks/useKioskScanner';
 
 function initials(name?: string): string {
@@ -9,33 +10,30 @@ function initials(name?: string): string {
     .join('');
 }
 
-/**
- * Analytics #1005 — a placeholder attendee "photo": there is no photo field
- * on the ticket/check-in API today, so this renders an initials avatar
- * instead. Swapping in a real photo just means passing a `photoUrl` prop
- * once one exists.
- */
-function AttendeePhoto({ name, photoUrl }: { name?: string; photoUrl?: string }) {
-  if (photoUrl) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return (
-      <img
-        src={photoUrl}
-        alt={name ? `Photo of ${name}` : 'Attendee photo'}
-        className="h-28 w-28 rounded-full object-cover ring-4 ring-white/20"
-      />
-    );
-  }
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Public function name specified by the issue.
+export function show_attendee_photo(photoUrl?: string): string | undefined {
+  if (!photoUrl) return undefined;
+  try { return new URL(photoUrl).protocol === 'https:' ? photoUrl : undefined; }
+  catch { return undefined; }
+}
 
-  return (
-    <div
-      className="flex h-28 w-28 items-center justify-center rounded-full bg-white/10 text-4xl font-bold text-white ring-4 ring-white/20"
-      aria-label={name ? `Photo of ${name}` : 'Attendee photo'}
-      role="img"
-    >
-      {initials(name)}
-    </div>
-  );
+function AttendeePhoto({ name, photoUrl }: { name?: string; photoUrl?: string }) {
+  const [failed, setFailed] = useState(false);
+  const source = show_attendee_photo(photoUrl);
+  if (source && !failed) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={source} alt={name ? `Photo of ${name}` : 'Attendee photo'}
+      onError={() => setFailed(true)} referrerPolicy="no-referrer"
+      className="h-40 w-40 rounded-2xl object-cover ring-4 ring-white/20" />;
+  }
+  return <div className="text-center"><div role="img" aria-label="No attendee photo available"
+    className="mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-white/10 text-4xl">{initials(name)}</div>
+    <p className="mt-2">No photo available — check attendee ID</p></div>;
+}
+
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Public function name specified by the issue.
+export function display_scan_result(result: ScanResult): string {
+  return result.outcome === 'success' ? 'Checked In' : 'Not Verified';
 }
 
 export interface ScanResultDisplayProps {
@@ -54,8 +52,7 @@ export function ScanResultDisplay({ result, onDismiss }: ScanResultDisplayProps)
     <div
       role="status"
       aria-live="assertive"
-      onClick={onDismiss}
-      className={`flex min-h-[70vh] cursor-pointer flex-col items-center justify-center gap-6 rounded-3xl p-10 text-center transition-colors ${
+      className={`flex min-h-[70vh] flex-col items-center justify-center gap-6 rounded-3xl p-10 text-center motion-safe:animate-[pulse_0.4s_ease-in-out_1] ${
         isSuccess ? 'bg-green-600/90' : 'bg-red-600/90'
       }`}
     >
@@ -69,12 +66,12 @@ export function ScanResultDisplay({ result, onDismiss }: ScanResultDisplayProps)
       </div>
 
       <h2 className="text-4xl font-extrabold text-white sm:text-5xl">
-        {isSuccess ? 'Checked In' : 'Not Verified'}
+        {display_scan_result(result)}
       </h2>
 
       {isSuccess ? (
         <div className="flex flex-col items-center gap-4">
-          <AttendeePhoto name={result.attendeeName} />
+          <AttendeePhoto key={result.ticketId} name={result.attendeeName} photoUrl={result.attendeePhotoUrl} />
           <div>
             <p className="text-2xl font-semibold text-white">{result.attendeeName ?? 'Attendee'}</p>
             <p className="text-white/80">{result.attendeeEmail}</p>
@@ -87,7 +84,7 @@ export function ScanResultDisplay({ result, onDismiss }: ScanResultDisplayProps)
         <p className="max-w-md text-lg text-white/90">{result.message}</p>
       )}
 
-      <p className="text-sm text-white/70">Tap anywhere to scan the next ticket</p>
+      <button type="button" autoFocus onClick={onDismiss} className="min-h-14 rounded-xl border-2 border-white px-8 py-3 text-lg font-semibold">{isSuccess ? "Photo checked — scan next ticket" : "Scan next ticket"}</button>
     </div>
   );
 }

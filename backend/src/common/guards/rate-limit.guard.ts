@@ -13,7 +13,8 @@ export class RateLimitGuard implements CanActivate {
 
     const apiKeyHeader = request.headers?.['x-api-key'];
     const apiKey = typeof apiKeyHeader === 'string' ? apiKeyHeader : undefined;
-    const result = await this.rateLimitService.enforce(ip, apiKey);
+    const route = request.route?.path ?? request.path ?? request.url;
+    const result = await this.rateLimitService.enforce(ip, apiKey, { route });
     if (!result.allowed) {
       throw new ThrottlerException(`Rate limit exceeded. Try again in ${result.retryAfterSeconds} seconds.`);
     }

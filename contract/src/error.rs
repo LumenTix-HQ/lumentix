@@ -535,28 +535,26 @@ pub enum LumentixError {
     BadgeAlreadyRevoked = 261,
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Real-Time Health & Telemetry errors (Issue #1192)
+    // Venue capacity errors (Issue #1245)
     // ═══════════════════════════════════════════════════════════════════════
-    /// System health check failed for a required service
-    HealthCheckFailed = 262,
-    /// Telemetry metric name is invalid or empty
-    InvalidMetricName = 263,
-    /// Metric value is out of acceptable range
-    InvalidMetricValue = 264,
-    /// Telemetry data source is not registered
-    TelemetrySourceNotFound = 265,
+    /// No venue capacity has been configured for the event
+    VenueCapacityNotConfigured = 262,
+    /// Requested venue capacity is zero
+    InvalidVenueCapacity = 263,
+    /// Minting this many more tickets would exceed the venue capacity
+    VenueCapacityExceeded = 264,
 
     // ═══════════════════════════════════════════════════════════════════════
-    // Token-Gated Merchandise errors (Issue #1193)
+    // Escrow payment split errors (Issue #1247)
     // ═══════════════════════════════════════════════════════════════════════
-    /// Token gate is not configured for this merchandise
-    TokenGateNotConfigured = 266,
-    /// Token gate is currently inactive
-    TokenGateInactive = 267,
-    /// User does not hold the required token balance
-    InsufficientTokenBalance = 268,
-    /// User is not eligible to purchase this token-gated merchandise
-    TokenGateEligibilityFailed = 269,
-    /// Token gate configuration is invalid
-    InvalidTokenGateConfig = 270,
+    /// No escrow split exists with the given ID
+    EscrowSplitNotFound = 265,
+    /// The proposed split is empty, names an organizer twice, or does not add up
+    InvalidEscrowSplit = 266,
+    /// The escrow split has already been released
+    EscrowSplitAlreadyReleased = 267,
+    /// The escrow split is already frozen by an open dispute
+    EscrowSplitAlreadyDisputed = 268,
+    /// The event has not finished yet, so held funds cannot be split out
+    EscrowSplitEventNotConcluded = 269,
 }

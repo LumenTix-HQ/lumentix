@@ -9,6 +9,7 @@ export interface ScanResult {
   eventId?: string;
   attendeeName?: string;
   attendeeEmail?: string;
+  attendeePhotoUrl?: string;
   ticketType?: string;
 }
 
@@ -23,9 +24,11 @@ const RESULT_DISPLAY_MS = 4_000;
  * whatever was typed once Enter arrives, so no camera or QR-decoding
  * library is needed on the kiosk itself.
  */
-export function useKioskScanner() {
+export function useKioskScanner(eventId?: string) {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -34,8 +37,10 @@ export function useKioskScanner() {
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     focusInput();
     return () => {
+      mounted.current = false;
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
     };
   }, [focusInput]);
@@ -51,7 +56,8 @@ export function useKioskScanner() {
   const submitScan = useCallback(
     async (qrData: string) => {
       const trimmed = qrData.trim();
-      if (!trimmed || isSubmitting) return;
+      if (!trimmed || inFlight.current) return;
+      inFlight.current = true;
 
       setIsSubmitting(true);
       try {
@@ -59,11 +65,12 @@ export function useKioskScanner() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ qrData: trimmed }),
+          body: JSON.stringify({ qrData: trimmed, ...(eventId ? { eventId } : {}) }),
         });
 
         const data = await response.json().catch(() => ({}));
 
+        if (!mounted.current) return;
         if (!response.ok) {
           setResult({
             outcome: 'error',
@@ -77,21 +84,29 @@ export function useKioskScanner() {
             eventId: data.eventId,
             attendeeName: data.attendeeName,
             attendeeEmail: data.attendeeEmail,
+            attendeePhotoUrl: data.attendeePhotoUrl,
             ticketType: data.ticketType,
           });
         }
       } catch {
+        if (!mounted.current) return;
         setResult({
           outcome: 'error',
           message: 'Network error — could not reach the server. Try again.',
         });
       } finally {
-        setIsSubmitting(false);
-        scheduleAutoClear();
+        inFlight.current = false;
+        if (mounted.current) setIsSubmitting(false);
+        // Event kiosks wait for staff photo verification before the next scan.
+        if (mounted.current && !eventId) scheduleAutoClear();
       }
     },
-    [isSubmitting, scheduleAutoClear],
+    [eventId, scheduleAutoClear],
   );
+
+  useEffect(() => {
+    if (!result && !isSubmitting) focusInput();
+  }, [result, isSubmitting, focusInput]);
 
   const dismissResult = useCallback(() => {
     if (clearTimerRef.current) clearTimeout(clearTimerRef.current);

@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { StreamingService } from './streaming.service';
 import {
+  BufferingEventDto,
   ManageContentDeliveryDto,
   OptimizeStreamQualityDto,
   StreamDeliveryResponseDto,
@@ -34,9 +35,33 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 export class StreamingController {
   constructor(private readonly streamingService: StreamingService) {}
 
+  @Get('events/:eventId/playback')
+  viewerPlayback(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.streamingService.viewerPlayback(eventId, req.user.id);
+  }
+
+  @Post('events/:eventId/buffering')
+  reportBuffering(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: BufferingEventDto,
+  ) {
+    return this.streamingService.report_buffering_event(
+      eventId,
+      req.user.id,
+      dto.durationMs,
+      dto.bandwidthKbps,
+    );
+  }
+
   @Put('events/:eventId/delivery')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Configure CDN and playback URLs for hybrid events' })
+  @ApiOperation({
+    summary: 'Configure CDN and playback URLs for hybrid events',
+  })
   @ApiResponse({ status: 200, type: StreamDeliveryResponseDto })
   manageContentDelivery(
     @Param('eventId', ParseUUIDPipe) eventId: string,
@@ -52,7 +77,9 @@ export class StreamingController {
 
   @Post('events/:eventId/optimize-quality')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Tune adaptive bitrate ladder for virtual attendees' })
+  @ApiOperation({
+    summary: 'Tune adaptive bitrate ladder for virtual attendees',
+  })
   @ApiResponse({ status: 200, type: StreamDeliveryResponseDto })
   optimizeStreamQuality(
     @Param('eventId', ParseUUIDPipe) eventId: string,

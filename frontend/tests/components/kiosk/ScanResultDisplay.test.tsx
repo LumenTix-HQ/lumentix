@@ -42,7 +42,16 @@ describe('ScanResultDisplay', () => {
       <ScanResultDisplay result={{ outcome: 'success', message: 'Checked in' }} onDismiss={onDismiss} />,
     );
 
-    fireEvent.click(screen.getByRole('status'));
+    fireEvent.click(screen.getByRole('button', { name: /scan next ticket/i }));
     expect(onDismiss).toHaveBeenCalled();
   });
+});
+
+it('shows an available attendee photo and a clear fallback if loading fails', () => {
+  render(<ScanResultDisplay result={{ outcome: 'success', message: 'Checked in', attendeeName: 'Ada',
+    attendeePhotoUrl: 'https://example.com/ada.jpg' }} onDismiss={vi.fn()} />);
+  const photo = screen.getByAltText('Photo of Ada');
+  expect(photo).toHaveAttribute('src', 'https://example.com/ada.jpg');
+  fireEvent.error(photo);
+  expect(screen.getByText(/No photo available/)).toBeInTheDocument();
 });

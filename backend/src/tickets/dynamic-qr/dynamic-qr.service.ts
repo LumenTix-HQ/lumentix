@@ -20,6 +20,8 @@ export class DynamicQrService {
   private readonly STEP_SECONDS = 30;
   private readonly OTP_DIGITS = 6;
   private readonly DRIFT_TOLERANCE_MS = 5000; // 5 seconds
+  private readonly OTP_EXPIRY_TTL_SECONDS = 180; // 3 minutes TTL for used OTP counter
+  private readonly MAX_FAILED_ATTEMPTS = 5;
 
   constructor(
     @InjectRepository(TicketEntity)
@@ -30,14 +32,14 @@ export class DynamicQrService {
   ) {}
 
   private getTicketSecret(ticketId: string): Buffer {
-    const signingSecret = this.configService.get<string>('TICKET_SIGNING_SECRET');
+    const signingSecret = this.configService.get<string>('TICKET_SIGNING_SECRET') || 'default_secret';
     return crypto
       .createHmac('sha256', signingSecret)
       .update(ticketId)
       .digest();
   }
 
-  private generateOtp(counter: number, secret: Buffer): string {
+  generateOtp(counter: number, secret: Buffer): string {
     const hmac = crypto.createHmac('sha1', secret);
     const buf = Buffer.alloc(8);
     buf.writeBigInt64BE(BigInt(counter));
@@ -55,7 +57,7 @@ export class DynamicQrService {
       .padStart(this.OTP_DIGITS, '0');
   }
 
-  private getCurrentCounter(timestampMs?: number): number {
+  getCurrentCounter(timestampMs?: number): number {
     const ts = timestampMs || Date.now();
     return Math.floor(ts / 1000 / this.STEP_SECONDS);
   }
@@ -111,41 +113,104 @@ export class DynamicQrService {
     ticketId: string,
     otp: string,
     validatorTimestampMs?: number,
+    validatorIp?: string,
   ): Promise<{
     valid: boolean;
     counter: number;
     message: string;
   }> {
+    const rateLimitKey = validatorIp
+      ? `rate-limit:otp-attempts:${validatorIp}:${ticketId}`
+      : `rate-limit:otp-attempts:${ticketId}`;
+
+    if (this.redis) {
+      const attemptsStr = await this.redis.get(rateLimitKey);
+      const attempts = attemptsStr ? parseInt(attemptsStr, 10) : 0;
+      if (attempts >= this.MAX_FAILED_ATTEMPTS) {
+        throw new BadRequestException('Too many failed OTP attempts. Please wait before retrying.');
+      }
+    }
+
     const ticket = await this.ticketRepository.findOne({ where: { id: ticketId } });
 
     if (!ticket) {
       throw new NotFoundException(`Ticket with id "${ticketId}" not found`);
     }
 
+    if (ticket.status === 'used') {
+      return {
+        valid: false,
+        counter: this.getCurrentCounter(validatorTimestampMs),
+        message: 'Ticket has already been used',
+      };
+    }
+
+    if (ticket.status !== 'valid') {
+      return {
+        valid: false,
+        counter: this.getCurrentCounter(validatorTimestampMs),
+        message: `Ticket is no longer valid (status: ${ticket.status})`,
+      };
+    }
+
     const secret = this.getTicketSecret(ticketId);
     const timestampMs = validatorTimestampMs || Date.now();
     const counter = this.getCurrentCounter(timestampMs);
 
-    const validOtps: number[] = [
-      this.generateOtp(counter - 1, secret),
-      this.generateOtp(counter, secret),
-      this.generateOtp(counter + 1, secret),
-    ].map(o => parseInt(o, 10));
+    const candidates = [
+      { step: counter - 1, otpVal: parseInt(this.generateOtp(counter - 1, secret), 10) },
+      { step: counter, otpVal: parseInt(this.generateOtp(counter, secret), 10) },
+      { step: counter + 1, otpVal: parseInt(this.generateOtp(counter + 1, secret), 10) },
+    ];
 
     const inputOtp = parseInt(otp, 10);
-    const isValid = validOtps.includes(inputOtp);
+    const matched = candidates.find((c) => c.otpVal === inputOtp);
 
-    const result = {
-      valid: isValid,
-      counter,
-      message: isValid ? 'OTP is valid' : 'Invalid or expired OTP',
-    };
+    if (!matched) {
+      if (this.redis) {
+        await this.redis.incr(rateLimitKey);
+        await this.redis.expire(rateLimitKey, 60);
+      }
+      this.logger.debug(
+        `OTP validation failed for ticket ${ticketId}: Invalid or expired OTP (counter: ${counter})`,
+      );
+      return {
+        valid: false,
+        counter,
+        message: 'Invalid or expired OTP',
+      };
+    }
+
+    // Atomically mark (ticketId, counter) as consumed via SETNX with TTL
+    const otpUsedKey = `ticket:otp-used:${ticketId}:${matched.step}`;
+    const setNxResult = await this.redis.set(otpUsedKey, '1', 'EX', this.OTP_EXPIRY_TTL_SECONDS, 'NX');
+    if (setNxResult !== 'OK') {
+      this.logger.warn(`OTP replay attempt detected for ticket ${ticketId} at counter ${matched.step}`);
+      return {
+        valid: false,
+        counter: matched.step,
+        message: 'OTP has already been used',
+      };
+    }
+
+    // Transition ticket check-in status to 'used', ensuring consistency with verifyTicket()
+    ticket.status = 'used';
+    await this.ticketRepository.save(ticket);
+
+    // Reset rate-limit counter upon successful check-in
+    if (this.redis) {
+      await this.redis.del(rateLimitKey);
+    }
 
     this.logger.debug(
-      `OTP validation for ticket ${ticketId}: ${result.message} (counter: ${counter})`,
+      `OTP validated and ticket checked in for ticket ${ticketId} (counter: ${matched.step})`,
     );
 
-    return result;
+    return {
+      valid: true,
+      counter: matched.step,
+      message: 'OTP is valid',
+    };
   }
 
   async syncValidatorClock(validatorIp: string, validatorTimestampMs: number): Promise<{

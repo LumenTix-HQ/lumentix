@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Repository } from 'typeorm';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { In, Repository } from 'typeorm';
 import { Event } from '../events/entities/event.entity';
 import { StreamingConfig } from './entities/streaming-config.entity';
 import {
@@ -26,7 +27,42 @@ export class StreamingService {
     @InjectRepository(Event)
     private readonly eventRepo: Repository<Event>,
     private readonly configService: ConfigService,
+    @InjectRepository(TicketEntity)
+    private readonly ticketRepo: Repository<TicketEntity>,
   ) {}
+
+  async viewerPlayback(eventId: string, viewerId: string) {
+    const event = await this.eventRepo.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (
+      event.organizerId !== viewerId &&
+      !(await this.ticketRepo.exists({
+        where: { eventId, ownerId: viewerId, status: In(['valid', 'used']) },
+      }))
+    )
+      throw new ForbiddenException('A ticket is required to watch this event');
+    const config = await this.streamingRepo.findOne({ where: { eventId } });
+    if (!config?.streamUrl)
+      throw new NotFoundException('The event stream is not available yet');
+    return this.toDeliveryResponse(config);
+  }
+
+  async report_buffering_event(
+    eventId: string,
+    viewerId: string,
+    durationMs: number,
+    bandwidthKbps: number,
+  ) {
+    await this.viewerPlayback(eventId, viewerId);
+    // Structured telemetry for the deployment's log/metrics collector.
+    this.logger.log({
+      metric: 'stream_buffering',
+      eventId,
+      durationMs,
+      bandwidthKbps,
+    });
+    return { accepted: true };
+  }
 
   async manageContentDelivery(
     eventId: string,
@@ -63,7 +99,7 @@ export class StreamingService {
     dto: OptimizeStreamQualityDto,
   ): Promise<StreamDeliveryResponseDto> {
     const event = await this.requireOrganizerEvent(eventId, organizerId);
-    let config = await this.streamingRepo.findOne({ where: { eventId } });
+    const config = await this.streamingRepo.findOne({ where: { eventId } });
 
     if (!config || !config.streamUrl) {
       throw new NotFoundException(
@@ -97,7 +133,9 @@ export class StreamingService {
 
     const config = await this.streamingRepo.findOne({ where: { eventId } });
     if (!config) {
-      throw new NotFoundException('No streaming configuration found for this event');
+      throw new NotFoundException(
+        'No streaming configuration found for this event',
+      );
     }
 
     const stored = config.performanceMetrics ?? {};
@@ -175,7 +213,9 @@ export class StreamingService {
     return 'poor';
   }
 
-  private toDeliveryResponse(config: StreamingConfig): StreamDeliveryResponseDto {
+  private toDeliveryResponse(
+    config: StreamingConfig,
+  ): StreamDeliveryResponseDto {
     const cdn =
       config.cdnBaseUrl ??
       this.configService.get<string>('CDN_BASE_URL') ??
