@@ -144,6 +144,12 @@ what each router covers so you know where to look.
 | `/transactions` | `transactions` | Cross-cutting transaction ledger |
 | `/admin`, `/admin/audit` | `admin`, `audit` | Admin console + audit log |
 | `/age-verification` | `age-verification` | Server-signed age proofs + age-gated event compliance |
+| `/events/:eventId/terms-of-service` | `terms-of-service` | Organizer ToS templates, custom waivers, checkout ToS agreement validation |
+| `/telemetry` | `telemetry` | Real-time system health, API latency metrics, error telemetry |
+| `/scan-analytics` | `scan-analytics` | Ticket scanning rates and entrance velocity analytics |
+| `/pass-packages` | `pass-packages` | Cross-event multi-pass packages and bundles |
+| `/merch-preorder` | `merch-preorder` | Ticket checkout merchandise pre-ordering |
+| `/privacy` | `privacy` | GDPR data export requests and account deletion compliance |
 | `/health` | `health` | Liveness/readiness probes |
 | `/internal/*` | `internal` | Service-to-service only — see `docs/internal-api.md` |
 | `/webhooks` | `webhooks` | Inbound webhook receivers (payment providers, etc.) |
@@ -424,5 +430,33 @@ async function purchaseTicket(eventId: bigint, price: bigint) {
 }
 ```
 
-Both sandboxes assume a locally running backend (`backend/README.md`) and/or
+### Sandbox 3 — Organizer ToS Configuration & Checkout Validation
+
+```typescript
+// checkout-tos.ts
+import axios from 'axios';
+
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
+
+async function verifyCheckoutTos(eventId: string, agreedVersion: number) {
+  // 1. Fetch active terms to render for user agreement
+  const { data: tos } = await axios.get(`${API_BASE}/events/${eventId}/terms-of-service`);
+  console.log(`Active ToS Version: ${tos.version}`);
+  console.log(`Terms: ${tos.termsContent}`);
+
+  // 2. Validate agreement version prior to payment execution
+  const { data: isValid } = await axios.post(
+    `${API_BASE}/events/${eventId}/terms-of-service/validate/${agreedVersion}`
+  );
+
+  if (!isValid) {
+    throw new Error('The agreed Terms of Service version is no longer active.');
+  }
+
+  console.log('Terms of Service validated successfully.');
+  return true;
+}
+```
+
+All three sandboxes assume a locally running backend (`backend/README.md`) and/or
 a deployed testnet contract (`contract/SETUP.md`).
