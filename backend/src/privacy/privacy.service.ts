@@ -275,6 +275,27 @@ export class PrivacyService {
     };
   }
 
+  // Alias for snake_case function requirement in issue #1452
+  async export_user_data(userId: string): Promise<UserDataExport> {
+    return this.exportUserData(userId);
+  }
+
+  // Alias for snake_case function requirement in issue #1452
+  async request_data_deletion(
+    userId: string,
+    requesterId: string,
+  ): Promise<DataDeletionRequest> {
+    return this.requestDataDeletion(userId, requesterId);
+  }
+
+  // Alias for snake_case function requirement in issue #1452
+  async anonymize_historical_records(
+    userId: string,
+    requesterId: string,
+  ): Promise<AnonymizationResult> {
+    return this.anonymizeHistoricalRecords(userId, requesterId);
+  }
+
   private async getUserOrThrow(userId: string): Promise<User> {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException(`User "${userId}" not found`);
