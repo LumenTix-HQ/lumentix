@@ -12,6 +12,10 @@ export enum InsurancePolicyStatus {
   CLAIMED = 'claimed',
   EXPIRED = 'expired',
   CANCELLED = 'cancelled',
+  /** Claim escalated by auto-adjudication; awaiting a human reviewer. */
+  UNDER_REVIEW = 'under_review',
+  /** Claim rejected by a human reviewer; the policy pays out nothing. */
+  CLAIM_REJECTED = 'claim_rejected',
 }
 
 /**
@@ -64,6 +68,23 @@ export class InsurancePolicyEntity {
   /** Cancellation reason provided when a claim was filed */
   @Column({ type: 'varchar', nullable: true })
   claimReason: string | null;
+
+  /** Why auto-adjudication sent the claim to a human reviewer */
+  @Column({ type: 'varchar', nullable: true })
+  escalationReason: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  escalatedAt: Date | null;
+
+  /** Admin who approved or rejected an escalated claim */
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  reviewedBy: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reviewedAt: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  reviewNote: string | null;
 
   /** Stellar transaction hash of the premium payment */
   @Column({ type: 'varchar', nullable: true })
