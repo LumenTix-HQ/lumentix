@@ -1,22 +1,33 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Theme, toggleColorTheme, persistThemePreference, applyDarkThemeStyles, getSavedTheme } from '../lib/theme';
+import { Theme, toggleColorTheme, persistThemePreference, applyThemeTokens, getSavedTheme } from '../lib/theme';
+import { useThemeContext } from '../contexts/ThemeContext';
 
-export function useTheme() {
-  const [theme, setTheme] = useState<Theme>('light');
+/**
+ * Active theme and a toggle. Inside <ThemeProvider> (the app root) this reads
+ * the shared state; outside it (isolated component tests) it manages its own.
+ */
+export function useTheme(): { theme: Theme; toggleTheme: () => void } {
+  const context = useThemeContext();
+  const [localTheme, setLocalTheme] = useState<Theme>(() => getSavedTheme());
 
   useEffect(() => {
+    if (context) return;
     const saved = getSavedTheme();
-    setTheme(saved);
-    applyDarkThemeStyles(saved);
-  }, []);
+    setLocalTheme(saved);
+    applyThemeTokens(saved);
+  }, [context]);
+
+  if (context) {
+    return { theme: context.theme, toggleTheme: context.toggleTheme };
+  }
 
   const toggleTheme = () => {
-    const next = toggleColorTheme(theme);
-    setTheme(next);
+    const next = toggleColorTheme(localTheme);
+    setLocalTheme(next);
     persistThemePreference(next);
-    applyDarkThemeStyles(next);
+    applyThemeTokens(next);
   };
 
-  return { theme, toggleTheme };
+  return { theme: localTheme, toggleTheme };
 }

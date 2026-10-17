@@ -5,29 +5,30 @@ const mocks = {
   getSavedTheme: vi.fn(() => 'light' as 'light' | 'dark'),
   toggleColorTheme: vi.fn((t: 'light' | 'dark') => (t === 'light' ? 'dark' : 'light')),
   persistThemePreference: vi.fn(),
-  applyDarkThemeStyles: vi.fn(),
+  applyThemeTokens: vi.fn(),
 };
 
-vi.mock('@/lib/theme', () => ({
+vi.mock('@/lib/theme', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/theme')>()),
   getSavedTheme: () => mocks.getSavedTheme(),
   toggleColorTheme: (t: 'light' | 'dark') => mocks.toggleColorTheme(t),
   persistThemePreference: (t: 'light' | 'dark') => mocks.persistThemePreference(t),
-  applyDarkThemeStyles: (t: 'light' | 'dark') => mocks.applyDarkThemeStyles(t),
+  applyThemeTokens: (t: 'light' | 'dark') => mocks.applyThemeTokens(t),
 }));
 
 import { useTheme } from '@/hooks/useTheme';
 
-describe('useTheme', () => {
+describe('useTheme (outside ThemeProvider)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSavedTheme.mockReturnValue('light');
   });
 
-  it('initializes from the saved theme and applies styles', () => {
+  it('initializes from the saved theme and applies its tokens', () => {
     mocks.getSavedTheme.mockReturnValue('dark');
     const { result } = renderHook(() => useTheme());
     expect(result.current.theme).toBe('dark');
-    expect(mocks.applyDarkThemeStyles).toHaveBeenCalledWith('dark');
+    expect(mocks.applyThemeTokens).toHaveBeenCalledWith('dark');
   });
 
   it('toggles the theme and persists the new value', () => {
@@ -36,6 +37,6 @@ describe('useTheme', () => {
     act(() => result.current.toggleTheme());
     expect(result.current.theme).toBe('dark');
     expect(mocks.persistThemePreference).toHaveBeenCalledWith('dark');
-    expect(mocks.applyDarkThemeStyles).toHaveBeenCalledWith('dark');
+    expect(mocks.applyThemeTokens).toHaveBeenCalledWith('dark');
   });
 });
