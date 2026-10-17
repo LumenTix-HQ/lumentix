@@ -57,6 +57,27 @@ export class InsurancePolicyDto {
   })
   claimReason: string | null;
 
+  @ApiProperty({
+    description: 'Why the claim was escalated for review',
+    nullable: true,
+  })
+  escalationReason: string | null;
+
+  @ApiProperty({ nullable: true })
+  escalatedAt: Date | null;
+
+  @ApiProperty({
+    description: 'Reviewer who decided an escalated claim',
+    nullable: true,
+  })
+  reviewedBy: string | null;
+
+  @ApiProperty({ nullable: true })
+  reviewedAt: Date | null;
+
+  @ApiProperty({ nullable: true })
+  reviewNote: string | null;
+
   @ApiPropertyOptional({
     description: 'Stellar transaction hash of the premium payment',
   })
@@ -115,4 +136,51 @@ export class InsuranceClaimResultDto {
 
   @ApiPropertyOptional({ description: 'Stellar transaction hash of the refund payout' })
   transactionHash?: string;
+}
+
+export type ClaimRuleDecision = 'approve' | 'review' | 'reject';
+
+/** One automatic adjudication rule and how the claim fared against it. */
+export class ClaimRuleCheckDto {
+  @ApiProperty({ example: 'event_cancelled' })
+  rule: string;
+
+  @ApiProperty()
+  passed: boolean;
+
+  @ApiProperty({ example: 'Event is cancelled' })
+  detail: string;
+}
+
+/** Outcome of apply_claim_rules. */
+export class ClaimRuleResultDto {
+  @ApiProperty({ enum: ['approve', 'review', 'reject'] })
+  decision: ClaimRuleDecision;
+
+  @ApiProperty({
+    description: 'Why the claim was not auto-approved',
+    nullable: true,
+  })
+  reason: string | null;
+
+  @ApiProperty({ type: [ClaimRuleCheckDto] })
+  checks: ClaimRuleCheckDto[];
+}
+
+/** Returned when a claim is escalated to a human reviewer. */
+export class InsuranceClaimEscalationDto {
+  @ApiProperty({ example: true })
+  escalated: true;
+
+  @ApiProperty()
+  policyId: string;
+
+  @ApiProperty()
+  reason: string;
+
+  @ApiProperty({ type: () => InsurancePolicyDto })
+  policy: InsurancePolicyDto;
+
+  @ApiProperty({ type: [ClaimRuleCheckDto] })
+  checks: ClaimRuleCheckDto[];
 }

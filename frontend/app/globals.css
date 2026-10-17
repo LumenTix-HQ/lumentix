@@ -4,9 +4,46 @@
 
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap");
 
-:root {
+/* ── Theme tokens ────────────────────────────────────────────────────────────
+ * One set per theme, selected by data-theme on <html> (set before first paint
+ * by THEME_INIT_SCRIPT in lib/theme.ts). Dark is the default design.
+ * New UI should use these tokens (e.g. bg-[color:var(--surface)]) rather than
+ * hard-coded colours so it follows the theme automatically.
+ */
+:root,
+html[data-theme='dark'] {
+	color-scheme: dark;
 	--background: #060609;
 	--foreground: #ededed;
+	--surface: #0d0d14;
+	--surface-raised: #14141d;
+	--surface-muted: rgba(255, 255, 255, 0.05);
+	--border: rgba(255, 255, 255, 0.1);
+	--border-strong: rgba(255, 255, 255, 0.2);
+	--text-muted: #9ca3af;
+	--text-subtle: #6b7280;
+	--scrollbar-thumb: rgba(255, 255, 255, 0.08);
+	--scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
+	/* legacy aliases used by older components */
+	--bg-primary: var(--background);
+	--text-primary: var(--foreground);
+	--border-color: var(--border);
+	--card-bg: var(--surface);
+}
+
+html[data-theme='light'] {
+	color-scheme: light;
+	--background: #f6f7fb;
+	--foreground: #111827;
+	--surface: #ffffff;
+	--surface-raised: #ffffff;
+	--surface-muted: rgba(17, 24, 39, 0.05);
+	--border: rgba(17, 24, 39, 0.12);
+	--border-strong: rgba(17, 24, 39, 0.22);
+	--text-muted: #4b5563;
+	--text-subtle: #6b7280;
+	--scrollbar-thumb: rgba(17, 24, 39, 0.15);
+	--scrollbar-thumb-hover: rgba(17, 24, 39, 0.28);
 }
 
 body {
@@ -33,12 +70,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-	background: rgba(255, 255, 255, 0.08);
+	background: var(--scrollbar-thumb);
 	border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-	background: rgba(255, 255, 255, 0.15);
+	background: var(--scrollbar-thumb-hover);
 }
 
 @layer utilities {
@@ -66,15 +103,70 @@ body {
 	opacity: 0.5;
 }
 
-:root {
-  --bg-primary: #ffffff;
-  --text-primary: #111827;
-  --border-color: #e5e7eb;
+/* ── Light theme compatibility layer ──────────────────────────────────────────
+ * Most pages were built for the dark design with hard-coded utilities
+ * (bg-[#060609], text-white, text-gray-400, border-white/10…). In light mode
+ * these are mapped onto the light tokens so every page follows the theme
+ * without rewriting each component. White text is only remapped when it is
+ * not sitting on a coloured/brand background, so buttons and badges keep
+ * their contrast. Pages already designed light (bg-white, text-gray-900) are
+ * unaffected.
+ */
+html[data-theme='light'] :is(.bg-\[\#060609\], .bg-black, .bg-gray-950, .bg-slate-950) {
+	background-color: var(--background);
 }
-
-[data-theme='dark'],
-.dark {
-  --bg-primary: #111827;
-  --text-primary: #f9fafb;
-  --border-color: #374151;
+html[data-theme='light'] :is(.bg-gray-900, .bg-gray-800, .bg-slate-900, .bg-zinc-900) {
+	background-color: var(--surface);
+}
+html[data-theme='light'] :is(.bg-gray-700, .bg-slate-800) {
+	background-color: #e5e7eb;
+}
+html[data-theme='light'] :is(.bg-white\/5, .bg-white\/10, .bg-white\/\[0\.03\], .bg-white\/\[0\.02\]) {
+	background-color: var(--surface-muted);
+}
+html[data-theme='light'] :is(.bg-slate-900\/50, .bg-slate-900\/70, .bg-slate-950\/70) {
+	background-color: rgba(255, 255, 255, 0.8);
+}
+html[data-theme='light'] :is(.border-white\/5, .border-white\/10, .border-white\/15, .border-gray-800, .border-slate-800) {
+	border-color: var(--border);
+}
+html[data-theme='light'] :is(.border-white\/20, .border-gray-700, .border-gray-600) {
+	border-color: var(--border-strong);
+}
+html[data-theme='light'] .divide-white\/10 > :not([hidden]) ~ :not([hidden]) {
+	border-color: var(--border);
+}
+html[data-theme='light']
+	.text-white:not([class*='bg-']):not(
+		:is(
+				[class*='bg-blue-'],
+				[class*='bg-indigo-'],
+				[class*='bg-purple-'],
+				[class*='bg-violet-'],
+				[class*='bg-green-'],
+				[class*='bg-emerald-'],
+				[class*='bg-red-'],
+				[class*='bg-rose-'],
+				[class*='bg-orange-'],
+				[class*='bg-amber-'],
+				[class*='bg-yellow-'],
+				[class*='bg-pink-'],
+				[class*='bg-teal-'],
+				[class*='bg-cyan-'],
+				[class*='bg-sky-'],
+				[class*='bg-black\/'],
+				[class*='from-']
+			)
+			*
+	) {
+	color: var(--foreground);
+}
+html[data-theme='light'] :is(.text-gray-100, .text-gray-200, .text-gray-300, .text-slate-300) {
+	color: #374151;
+}
+html[data-theme='light'] :is(.text-gray-400, .text-slate-400) {
+	color: var(--text-muted);
+}
+html[data-theme='light'] .placeholder-gray-600::placeholder {
+	color: #9ca3af;
 }

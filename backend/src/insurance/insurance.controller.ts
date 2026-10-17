@@ -18,6 +18,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles, Role } from '../common/decorators/roles.decorator';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { InsuranceService } from './insurance.service';
 import { PurchaseInsuranceDto } from './dto/purchase-insurance.dto';
@@ -26,7 +28,9 @@ import {
   InsurancePolicyDto,
   InsurancePoolDto,
   InsuranceClaimResultDto,
+  InsuranceClaimEscalationDto,
 } from './dto/insurance-policy.dto';
+import { ReviewInsuranceClaimDto } from './dto/review-insurance-claim.dto';
 
 @ApiTags('Insurance')
 @ApiBearerAuth()
@@ -94,11 +98,75 @@ export class InsuranceController {
     description:
       'Automatically process straightforward event cancellation insurance claims using rule-based criteria before escalating edge cases to human reviewers.',
   })
+  @ApiResponse({
+    status: 201,
+    description: 'Claim auto-approved and paid',
+    type: InsuranceClaimResultDto,
+  })
+  @ApiResponse({
+    status: 202,
+    description: 'Claim escalated to a human reviewer',
+    type: InsuranceClaimEscalationDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Claim rejected — fails a required rule (inactive policy, event not cancelled, …)',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden — policy not owned by caller',
+  })
   autoAdjudicateClaim(
     @Req() req: AuthenticatedRequest,
     @Body() dto: ProcessInsuranceClaimDto,
   ) {
     return this.insuranceService.auto_adjudicate_claim(req.user.id, dto);
+  }
+
+  // ── Human review of escalated claims (admin) ──────────────────────────────
+
+  @Get('claims/review-queue')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'List insurance claims awaiting human review',
+    description:
+      'Admin-only. Claims escalated by auto-adjudication, oldest first.',
+  })
+  @ApiResponse({ status: 200, type: [InsurancePolicyDto] })
+  @ApiResponse({ status: 403, description: 'Forbidden — admin only' })
+  listClaimsUnderReview() {
+    return this.insuranceService.listClaimsUnderReview();
+  }
+
+  @Post('claims/:policyId/review')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Approve or reject an escalated insurance claim',
+    description:
+      'Admin-only. Approving pays the coverage to the policy holder from the event escrow; rejecting closes the claim without payout.',
+  })
+  @ApiParam({
+    name: 'policyId',
+    description: 'UUID of the insurance policy under review',
+  })
+  @ApiResponse({ status: 201, description: 'Decision recorded' })
+  @ApiResponse({ status: 400, description: 'Policy is not under review' })
+  @ApiResponse({ status: 403, description: 'Forbidden — admin only' })
+  @ApiResponse({ status: 404, description: 'Policy not found' })
+  reviewEscalatedClaim(
+    @Req() req: AuthenticatedRequest,
+    @Param('policyId', ParseUUIDPipe) policyId: string,
+    @Body() dto: ReviewInsuranceClaimDto,
+  ) {
+    return this.insuranceService.reviewEscalatedClaim(
+      policyId,
+      req.user.id,
+      dto.decision,
+      dto.note,
+    );
   }
 
   // ── validate_cancellation_reason ──────────────────────────────────────────

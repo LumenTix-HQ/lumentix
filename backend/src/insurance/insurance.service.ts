@@ -23,6 +23,9 @@ import {
   InsurancePolicyDto,
   InsurancePoolDto,
   InsuranceClaimResultDto,
+  InsuranceClaimEscalationDto,
+  ClaimRuleCheckDto,
+  ClaimRuleResultDto,
 } from './dto/insurance-policy.dto';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Event, EventStatus } from '../events/entities/event.entity';
@@ -42,6 +45,20 @@ const VALID_CLAIM_REASONS = new Set<CancellationReason>([
   CancellationReason.GOVERNMENT_RESTRICTION,
   CancellationReason.OTHER,
 ]);
+
+/**
+ * Reasons that, once the event is confirmed cancelled, are paid without human
+ * review. Discretionary reasons (force majeure, health & safety, government
+ * restriction, other) always go to a reviewer.
+ */
+export const AUTO_APPROVABLE_REASONS = new Set<CancellationReason>([
+  CancellationReason.EVENT_CANCELLED_BY_ORGANIZER,
+  CancellationReason.VENUE_UNAVAILABLE,
+  CancellationReason.ARTIST_PERFORMER_UNAVAILABLE,
+]);
+
+/** Default coverage cap for automatic approval (override with INSURANCE_AUTO_APPROVE_MAX_COVERAGE). */
+export const DEFAULT_AUTO_APPROVE_MAX_COVERAGE = 500;
 
 @Injectable()
 export class InsuranceService {
@@ -195,75 +212,272 @@ export class InsuranceService {
   // auto_adjudicate_claim & claim rules
   // ─────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Apply rule-based criteria to determine if an insurance claim can be auto-adjudicated.
-   * Straightforward event cancellations are auto-approved, while edge cases require human reviewer.
-   */
-  async apply_claim_rules(
-    ticketId: string,
-    cancellationReason: CancellationReason,
-  ): Promise<{ autoApprove: boolean; reason?: string; requiresReview: boolean }> {
-    const isValid = await this.validateCancellationReason(ticketId, cancellationReason);
-    if (!isValid) {
-      return {
-        autoApprove: false,
-        reason: `Invalid cancellation reason "${cancellationReason}" or inactive policy/event.`,
-        requiresReview: true,
-      };
-    }
-
-    const AUTO_APPROVED_REASONS = new Set<CancellationReason>([
-      CancellationReason.EVENT_CANCELLED,
-      CancellationReason.ORGANIZER_CANCELLATION,
-      CancellationReason.WEATHER,
-    ]);
-
-    if (AUTO_APPROVED_REASONS.has(cancellationReason)) {
-      return { autoApprove: true, requiresReview: false };
-    }
-
-    return {
-      autoApprove: false,
-      reason: `Cancellation reason "${cancellationReason}" requires human reviewer evaluation.`,
-      requiresReview: true,
-    };
+  /** Coverage above this is always sent to a human (INSURANCE_AUTO_APPROVE_MAX_COVERAGE). */
+  private get autoApproveMaxCoverage(): number {
+    const configured = Number(
+      this.configService.get<number>('INSURANCE_AUTO_APPROVE_MAX_COVERAGE'),
+    );
+    return Number.isFinite(configured) && configured >= 0
+      ? configured
+      : DEFAULT_AUTO_APPROVE_MAX_COVERAGE;
   }
 
   /**
-   * Escalate an edge-case insurance claim to a human reviewer.
+   * Evaluate a claim against the rule-based criteria. Rules are evaluated in
+   * order and every check is reported:
+   *  - `reject`  — the claim is invalid (no active policy, event not cancelled,
+   *                unknown reason); nothing to review.
+   *  - `review`  — a valid claim that needs judgement (a discretionary reason
+   *                such as force majeure or "other", or coverage above the
+   *                auto-approve cap).
+   *  - `approve` — a straightforward cancellation that can be paid automatically.
+   * Throws ForbiddenException if the caller does not hold the policy.
+   */
+  async apply_claim_rules(
+    userId: string,
+    dto: ProcessInsuranceClaimDto,
+  ): Promise<ClaimRuleResultDto & { policy: InsurancePolicyEntity | null }> {
+    const checks: ClaimRuleCheckDto[] = [];
+    const finish = (
+      decision: ClaimRuleResultDto['decision'],
+      reason: string | null,
+      policy: InsurancePolicyEntity | null,
+    ) => ({ decision, reason, checks, policy });
+
+    const policy = await this.policyRepo.findOne({
+      where: { ticketId: dto.ticketId },
+    });
+    checks.push({
+      rule: 'policy_exists',
+      passed: !!policy,
+      detail: policy
+        ? `Policy ${policy.id}`
+        : `No insurance policy for ticket ${dto.ticketId}`,
+    });
+    if (!policy)
+      return finish('reject', 'No insurance policy covers this ticket.', null);
+
+    if (policy.userId !== userId) {
+      throw new ForbiddenException(
+        'You are not the holder of this insurance policy.',
+      );
+    }
+
+    const policyActive = policy.status === InsurancePolicyStatus.ACTIVE;
+    checks.push({
+      rule: 'policy_active',
+      passed: policyActive,
+      detail: `Policy status is "${policy.status}"`,
+    });
+    if (!policyActive) {
+      return finish(
+        'reject',
+        `Policy is not active (status: "${policy.status}").`,
+        policy,
+      );
+    }
+
+    const knownReason = VALID_CLAIM_REASONS.has(dto.cancellationReason);
+    checks.push({
+      rule: 'reason_recognised',
+      passed: knownReason,
+      detail: `Cancellation reason "${dto.cancellationReason}"`,
+    });
+    if (!knownReason) {
+      return finish(
+        'reject',
+        `Unrecognised cancellation reason "${dto.cancellationReason}".`,
+        policy,
+      );
+    }
+
+    const event = await this.eventRepo.findOne({
+      where: { id: policy.eventId },
+      select: ['id', 'status'],
+    });
+    const cancelled = event?.status === EventStatus.CANCELLED;
+    checks.push({
+      rule: 'event_cancelled',
+      passed: cancelled,
+      detail: event
+        ? `Event status is "${event.status}"`
+        : `Event ${policy.eventId} not found`,
+    });
+    if (!cancelled) {
+      return finish(
+        'reject',
+        'Claims are only paid for cancelled events.',
+        policy,
+      );
+    }
+
+    const straightforward = AUTO_APPROVABLE_REASONS.has(dto.cancellationReason);
+    checks.push({
+      rule: 'reason_auto_approvable',
+      passed: straightforward,
+      detail: straightforward
+        ? `"${dto.cancellationReason}" is a straightforward cancellation`
+        : `"${dto.cancellationReason}" needs a reviewer's judgement`,
+    });
+
+    const cap = this.autoApproveMaxCoverage;
+    const coverage = Number(policy.coverageAmount);
+    const withinCap = coverage <= cap;
+    checks.push({
+      rule: 'coverage_within_auto_approve_cap',
+      passed: withinCap,
+      detail: `Coverage ${coverage} ${policy.currency} vs cap ${cap}`,
+    });
+
+    if (!straightforward) {
+      return finish(
+        'review',
+        `Cancellation reason "${dto.cancellationReason}" requires human review.`,
+        policy,
+      );
+    }
+    if (!withinCap) {
+      return finish(
+        'review',
+        `Coverage ${coverage} ${policy.currency} exceeds the auto-approve cap of ${cap}.`,
+        policy,
+      );
+    }
+    return finish('approve', null, policy);
+  }
+
+  /**
+   * Escalate a claim to a human reviewer: the policy moves to `under_review`
+   * with the reason recorded, so it appears in the review queue and can no
+   * longer be claimed automatically. Escalating an already-escalated policy
+   * is a no-op.
    */
   async escalate_to_reviewer(
     policyId: string,
     reason: string,
-  ): Promise<{ escalated: boolean; policyId: string; reason: string }> {
-    this.logger.warn(`Escalating insurance claim for policy ${policyId} to human reviewer: ${reason}`);
+    cancellationReason: CancellationReason,
+    actorId: string,
+  ): Promise<InsurancePolicyEntity> {
+    const policy = await this.policyRepo.findOne({ where: { id: policyId } });
+    if (!policy) {
+      throw new NotFoundException(`Insurance policy "${policyId}" not found.`);
+    }
+    if (policy.status === InsurancePolicyStatus.UNDER_REVIEW) {
+      return policy;
+    }
+    if (policy.status !== InsurancePolicyStatus.ACTIVE) {
+      throw new BadRequestException(
+        `Only active policies can be escalated (current status: "${policy.status}").`,
+      );
+    }
+
+    policy.status = InsurancePolicyStatus.UNDER_REVIEW;
+    policy.claimReason = cancellationReason;
+    policy.escalationReason = reason;
+    policy.escalatedAt = new Date();
+    const saved = await this.policyRepo.save(policy);
+
+    this.logger.warn(
+      `Escalating insurance claim for policy ${policyId} to human reviewer: ${reason}`,
+    );
     await this.auditService.log({
       action: 'INSURANCE_CLAIM_ESCALATED',
+      userId: actorId,
       resourceId: policyId,
-      meta: { reason },
+      meta: { reason, cancellationReason, ticketId: policy.ticketId },
     });
-    return { escalated: true, policyId, reason };
+    return saved;
   }
 
   /**
-   * Automatically process straightforward insurance claims using rule-based criteria before escalating edge cases.
+   * Automatically process a claim: straightforward cancellations are paid
+   * immediately, edge cases are escalated to a human reviewer, and invalid
+   * claims are rejected with the failing rule.
    */
   async auto_adjudicate_claim(
     userId: string,
     dto: ProcessInsuranceClaimDto,
-  ): Promise<InsuranceClaimResultDto | { escalated: boolean; policyId: string; reason: string }> {
-    const ruleResult = await this.apply_claim_rules(dto.ticketId, dto.cancellationReason);
+  ): Promise<InsuranceClaimResultDto | InsuranceClaimEscalationDto> {
+    const { decision, reason, checks, policy } = await this.apply_claim_rules(
+      userId,
+      dto,
+    );
 
-    if (ruleResult.autoApprove) {
+    if (decision === 'reject' || !policy) {
+      throw new BadRequestException(
+        reason ?? 'Claim does not meet the insurance criteria.',
+      );
+    }
+
+    if (decision === 'approve') {
       return this.processInsuranceClaim(userId, dto);
     }
 
-    const policy = await this.policyRepo.findOne({ where: { ticketId: dto.ticketId } });
-    const policyId = policy?.id ?? dto.ticketId;
+    const escalated = await this.escalate_to_reviewer(
+      policy.id,
+      reason ?? 'Claim flagged for human review.',
+      dto.cancellationReason,
+      userId,
+    );
+    return {
+      escalated: true,
+      policyId: escalated.id,
+      reason: escalated.escalationReason ?? reason ?? '',
+      policy: this.toDto(escalated),
+      checks,
+    };
+  }
 
-    return this.escalate_to_reviewer(
-      policyId,
-      ruleResult.reason ?? 'Claim criteria flagged for human reviewer evaluation',
+  /** Claims awaiting a human reviewer, oldest escalation first. */
+  async listClaimsUnderReview(): Promise<InsurancePolicyDto[]> {
+    const policies = await this.policyRepo.find({
+      where: { status: InsurancePolicyStatus.UNDER_REVIEW },
+      order: { escalatedAt: 'ASC' },
+    });
+    return policies.map((p) => this.toDto(p));
+  }
+
+  /**
+   * A reviewer's decision on an escalated claim. Approval pays the coverage
+   * to the policy holder exactly like an automatic approval; rejection closes
+   * the claim without payout.
+   */
+  async reviewEscalatedClaim(
+    policyId: string,
+    reviewerId: string,
+    decision: 'approve' | 'reject',
+    note?: string,
+  ): Promise<InsuranceClaimResultDto | InsurancePolicyDto> {
+    const policy = await this.policyRepo.findOne({ where: { id: policyId } });
+    if (!policy) {
+      throw new NotFoundException(`Insurance policy "${policyId}" not found.`);
+    }
+    if (policy.status !== InsurancePolicyStatus.UNDER_REVIEW) {
+      throw new BadRequestException(
+        `Only claims under review can be decided (current status: "${policy.status}").`,
+      );
+    }
+
+    policy.reviewedBy = reviewerId;
+    policy.reviewedAt = new Date();
+    policy.reviewNote = note ?? null;
+
+    if (decision === 'reject') {
+      policy.status = InsurancePolicyStatus.CLAIM_REJECTED;
+      const saved = await this.policyRepo.save(policy);
+      await this.auditService.log({
+        action: 'INSURANCE_CLAIM_REJECTED',
+        userId: reviewerId,
+        resourceId: policy.id,
+        meta: { ticketId: policy.ticketId, note: note ?? null },
+      });
+      return this.toDto(saved);
+    }
+
+    return this.payoutClaim(
+      policy,
+      (policy.claimReason as CancellationReason) ?? CancellationReason.OTHER,
+      reviewerId,
     );
   }
 
@@ -314,6 +528,22 @@ export class InsuranceService {
         `Insurance policy is not active (current status: "${policy.status}"). Cannot process claim.`,
       );
     }
+
+    return this.payoutClaim(policy, dto.cancellationReason, userId);
+  }
+
+  /**
+   * Pays a policy's coverage from the event escrow to the policy holder and
+   * marks it claimed. Shared by direct/automatic claims and reviewer approval;
+   * `actorId` is who triggered the payout (holder or reviewer).
+   */
+  private async payoutClaim(
+    policy: InsurancePolicyEntity,
+    cancellationReason: CancellationReason,
+    actorId: string,
+  ): Promise<InsuranceClaimResultDto> {
+    const userId = policy.userId;
+    const dto = { ticketId: policy.ticketId, cancellationReason };
 
     // 5. Verify the event is actually cancelled
     const event = await this.eventRepo
@@ -381,7 +611,7 @@ export class InsuranceService {
     // 10. Audit log
     await this.auditService.log({
       action: 'INSURANCE_CLAIM_PROCESSED',
-      userId,
+      userId: actorId,
       resourceId: policy.id,
       meta: {
         ticketId: dto.ticketId,
@@ -525,6 +755,11 @@ export class InsuranceService {
       currency: policy.currency,
       status: policy.status,
       claimReason: policy.claimReason,
+      escalationReason: policy.escalationReason ?? null,
+      escalatedAt: policy.escalatedAt ?? null,
+      reviewedBy: policy.reviewedBy ?? null,
+      reviewedAt: policy.reviewedAt ?? null,
+      reviewNote: policy.reviewNote ?? null,
       premiumTransactionHash: policy.premiumTransactionHash,
       claimTransactionHash: policy.claimTransactionHash,
       createdAt: policy.createdAt,

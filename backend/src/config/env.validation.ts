@@ -53,6 +53,12 @@ export const envValidationSchema = Joi.object({
   // Refund policy
   REFUND_CUTOFF_HOURS: Joi.number().default(24),
   FULL_REFUND_WINDOW_HOURS: Joi.number().default(48),
+
+  // Loyalty: balances expire after this many days without activity
+  LOYALTY_POINTS_INACTIVITY_DAYS: Joi.number().integer().min(1).default(365),
+
+  // Insurance: claims with coverage above this always go to a human reviewer
+  INSURANCE_AUTO_APPROVE_MAX_COVERAGE: Joi.number().min(0).default(500),
   PARTIAL_REFUND_RATE: Joi.number().default(0.5),
 
   // Audit retention
