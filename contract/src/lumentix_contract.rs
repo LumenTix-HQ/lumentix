@@ -933,49 +933,47 @@ impl LumentixContract {
     // Achievement badge NFTs (Issue #1208)
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// Returns whether `owner` meets any gamification milestone threshold
-    /// (attended 10 events or earned 1,000 loyalty points) and does not
-    /// already hold an active badge. Read-only view.
+    /// Returns whether `owner`, with stat `value` for `milestone` (events
+    /// attended, or loyalty points), meets that milestone's threshold (10
+    /// events or 1,000 points) and holds no active (non-revoked, non-expired)
+    /// badge for the same milestone. Read-only view.
     pub fn check_milestone_eligibility(
         env: Env,
         owner: Address,
-        events_attended: u32,
-        loyalty_points: u32,
+        milestone: crate::achievement_badge::Milestone,
+        value: u32,
     ) -> bool {
-        achievement_badge::check_milestone_eligibility(
-            &env,
-            &owner,
-            events_attended,
-            loyalty_points,
-        )
+        achievement_badge::check_milestone_eligibility(&env, &owner, milestone, value)
     }
 
-    /// Mint a soulbound achievement badge for `owner`. The caller must be
-    /// the owner (self-serve claim of a milestone). Fails with
-    /// `BadgeNotEligible` unless a milestone threshold is met and the owner
-    /// does not already hold an active badge.
+    /// Mint a soulbound achievement badge for `owner`. The contract does not
+    /// track per-attendee attendance or loyalty on-chain, so the platform
+    /// admin must authorize the mint and attests `value`, the owner's stat
+    /// for `milestone`. `expires_at` is a ledger timestamp (0 = no expiry).
+    /// Fails with `Unauthorized` if `admin` is not the stored admin,
+    /// `InvalidBadgeExpiry` if `expires_at` is not in the future, and
+    /// `BadgeNotEligible` unless the milestone threshold is met and the
+    /// owner holds no active badge for that milestone.
     pub fn mint_achievement_badge(
         env: Env,
+        admin: Address,
         owner: Address,
-        milestone: String,
-        events_attended: u32,
-        loyalty_points: u32,
+        milestone: crate::achievement_badge::Milestone,
+        label: String,
+        value: u32,
         expires_at: u64,
     ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
-        owner.require_auth();
-        achievement_badge::mint_achievement_badge(
-            &env,
-            owner,
-            milestone,
-            events_attended,
-            loyalty_points,
-            expires_at,
-        )
+        admin.require_auth();
+        if storage::get_admin(&env) != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        achievement_badge::mint_achievement_badge(&env, owner, milestone, label, value, expires_at)
     }
 
-    /// Revoke an expired or invalid badge by ID. Only the platform admin
-    /// can revoke. Returns `BadgeNotFound` for an unknown badge and
-    /// `BadgeAlreadyRevoked` on a repeated revoke.
+    /// Revoke an expired badge by ID. Only the platform admin can revoke.
+    /// Returns `BadgeNotFound` for an unknown badge, `BadgeAlreadyRevoked`
+    /// on a repeated revoke, and `BadgeNotExpired` if the badge has no
+    /// expiry or has not reached it yet.
     pub fn revoke_expired_badge(
         env: Env,
         admin: Address,

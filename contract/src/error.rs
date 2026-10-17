@@ -527,7 +527,7 @@ pub enum LumentixError {
     // ═══════════════════════════════════════════════════════════════════════
     // Achievement badge NFT errors (Issue #1208)
     // ═══════════════════════════════════════════════════════════════════════
-    /// Owner does not meet any milestone threshold for the badge
+    /// Owner does not meet the milestone threshold or already holds an active badge for it
     BadgeNotEligible = 259,
     /// Badge does not exist
     BadgeNotFound = 260,
@@ -557,4 +557,12 @@ pub enum LumentixError {
     EscrowSplitAlreadyDisputed = 268,
     /// The event has not finished yet, so held funds cannot be split out
     EscrowSplitEventNotConcluded = 269,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFT errors, continued (Issue #1430)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Badge cannot be revoked as expired: it has no expiry or has not reached it
+    BadgeNotExpired = 270,
+    /// Badge expiry must be 0 (no expiry) or a future ledger timestamp
+    InvalidBadgeExpiry = 271,
 }
