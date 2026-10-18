@@ -7,7 +7,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThan, Repository } from 'typeorm';
 import { SponsorTier } from './entities/sponsor-tier.entity';
 import { SponsorContribution, ContributionStatus } from './entities/sponsor-contribution.entity';
 import { Sponsor } from './entities/sponsor.entity';
@@ -16,6 +16,7 @@ import { EventsService } from '../events/events.service';
 import { CreateSponsorTierDto } from './dto/create-sponsor-tier.dto';
 import { UpdateSponsorTierDto } from './dto/update-sponsor-tier.dto';
 import { SponsorReportDto } from './dto/sponsor-report.dto';
+import { SponsorBannerDto, UpdateSponsorBannerDto } from './dto/sponsor-banner.dto';
 import { Event, EventStatus } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
 import { EscrowService } from '../payments/services/escrow.service';
@@ -297,42 +298,66 @@ export class SponsorsService {
   /**
    * Returns this event's active sponsor banners in a weighted-random display
    * order (Efraimidis-Spirakis weighted sampling) — higher `weight` sponsors
-   * are more likely to sort first on any given rotation.
+   * are more likely to sort first on any given rotation. A weight of 0 pauses
+   * a sponsor's banner without deactivating it.
    */
-  async rotateSponsorBanners(eventId: string): Promise<Sponsor[]> {
+  async rotateSponsorBanners(
+    eventId: string,
+    random: () => number = Math.random,
+  ): Promise<SponsorBannerDto[]> {
     const sponsors = await this.sponsorRepo.find({
-      where: { eventId, isActive: true },
+      where: { eventId, isActive: true, weight: MoreThan(0) },
     });
 
     return sponsors
-      .map((sponsor) => ({
-        sponsor,
-        key: Math.pow(Math.random(), 1 / Math.max(sponsor.weight, 1)),
-      }))
+      .map((sponsor) => ({ sponsor, key: Math.pow(random(), 1 / sponsor.weight) }))
       .sort((a, b) => b.key - a.key)
-      .map(({ sponsor }) => sponsor);
+      .map(({ sponsor }) => toBannerDto(sponsor));
   }
 
+  /** Counts a banner view. Only banners that are currently in rotation count. */
   async recordSponsorImpression(sponsorId: string): Promise<void> {
+    await this.incrementBannerCounter(sponsorId, 'impressionCount');
+  }
+
+  /** Counts a banner click-through. Only banners that are currently in rotation count. */
+  async recordSponsorClick(sponsorId: string): Promise<void> {
+    await this.incrementBannerCounter(sponsorId, 'clickCount');
+  }
+
+  private async incrementBannerCounter(
+    sponsorId: string,
+    column: 'impressionCount' | 'clickCount',
+  ): Promise<void> {
     const result = await this.sponsorRepo.increment(
-      { id: sponsorId },
-      'impressionCount',
+      { id: sponsorId, isActive: true, weight: MoreThan(0) },
+      column,
       1,
     );
     if (!result.affected) {
-      throw new NotFoundException(`Sponsor with id "${sponsorId}" not found`);
+      throw new NotFoundException(`Sponsor banner "${sponsorId}" not found`);
     }
   }
 
-  async recordSponsorClick(sponsorId: string): Promise<void> {
-    const result = await this.sponsorRepo.increment(
-      { id: sponsorId },
-      'clickCount',
-      1,
-    );
-    if (!result.affected) {
-      throw new NotFoundException(`Sponsor with id "${sponsorId}" not found`);
+  /** Organizer-only: adjust a sponsor's rotation weight and/or pause its banner. */
+  async updateSponsorBanner(
+    eventId: string,
+    sponsorId: string,
+    dto: UpdateSponsorBannerDto,
+    requesterId: string,
+  ): Promise<SponsorBannerDto & { weight: number; isActive: boolean }> {
+    await this.assertEventOrganizer(eventId, requesterId);
+
+    const sponsor = await this.sponsorRepo.findOne({ where: { id: sponsorId, eventId } });
+    if (!sponsor) {
+      throw new NotFoundException(`Sponsor "${sponsorId}" not found for this event`);
     }
+
+    if (dto.weight !== undefined) sponsor.weight = dto.weight;
+    if (dto.isActive !== undefined) sponsor.isActive = dto.isActive;
+    const saved = await this.sponsorRepo.save(sponsor);
+
+    return { ...toBannerDto(saved), weight: saved.weight, isActive: saved.isActive };
   }
 
   async generateSponsorReport(
@@ -343,18 +368,31 @@ export class SponsorsService {
 
     const sponsors = await this.sponsorRepo.find({ where: { eventId } });
 
+    const totalImpressions = sponsors.reduce((sum, s) => sum + s.impressionCount, 0);
+    const totalClicks = sponsors.reduce((sum, s) => sum + s.clickCount, 0);
+    const rotatingWeight = sponsors
+      .filter((s) => s.isActive && s.weight > 0)
+      .reduce((sum, s) => sum + s.weight, 0);
+
     return {
       eventId,
-      sponsors: sponsors.map((sponsor) => ({
-        sponsorId: sponsor.id,
-        displayName: sponsor.displayName,
-        impressions: sponsor.impressionCount,
-        clicks: sponsor.clickCount,
-        clickThroughRate:
-          sponsor.impressionCount > 0
-            ? Number((sponsor.clickCount / sponsor.impressionCount).toFixed(4))
-            : 0,
-      })),
+      totalImpressions,
+      totalClicks,
+      clickThroughRate: ratio(totalClicks, totalImpressions),
+      sponsors: sponsors
+        .map((sponsor) => ({
+          sponsorId: sponsor.id,
+          displayName: sponsor.displayName,
+          weight: sponsor.weight,
+          isActive: sponsor.isActive,
+          impressions: sponsor.impressionCount,
+          clicks: sponsor.clickCount,
+          clickThroughRate: ratio(sponsor.clickCount, sponsor.impressionCount),
+          impressionShare: ratio(sponsor.impressionCount, totalImpressions),
+          expectedShare:
+            sponsor.isActive && sponsor.weight > 0 ? ratio(sponsor.weight, rotatingWeight) : 0,
+        }))
+        .sort((a, b) => b.impressions - a.impressions),
     };
   }
 
@@ -380,4 +418,29 @@ export class SponsorsService {
       })),
     };
   }
+}
+
+function ratio(numerator: number, denominator: number): number {
+  return denominator > 0 ? Number((numerator / denominator).toFixed(4)) : 0;
+}
+
+/** Only http(s) URLs are safe to render as a link/image on the public event page. */
+function safeHttpUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'https:' || protocol === 'http:' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Public projection of a sponsor — no amounts, wallet or user identifiers. */
+function toBannerDto(sponsor: Sponsor): SponsorBannerDto {
+  return {
+    id: sponsor.id,
+    displayName: sponsor.displayName,
+    logoUrl: safeHttpUrl(sponsor.logoUrl),
+    websiteUrl: safeHttpUrl(sponsor.websiteUrl),
+  };
 }

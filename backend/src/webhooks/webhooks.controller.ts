@@ -1,4 +1,14 @@
-import { Controller, Get, Param, ParseUUIDPipe, Req, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -43,5 +53,20 @@ export class WebhooksController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.webhooksService.getDeadLettersForEvent(eventId, req.user.id);
+  }
+
+  @Post('events/:id/webhooks/dead-letters/:deadLetterId/retry')
+  @Roles(UserRole.ORGANIZER)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Re-queue a dead-lettered webhook delivery with a fresh retry budget' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiParam({ name: 'deadLetterId', description: 'Dead letter UUID' })
+  @ApiResponse({ status: 202, description: 'Delivery re-queued' })
+  retryDeadLetter(
+    @Param('id', ParseUUIDPipe) eventId: string,
+    @Param('deadLetterId', ParseUUIDPipe) deadLetterId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.webhooksService.replayDeadLetter(eventId, deadLetterId, req.user.id);
   }
 }

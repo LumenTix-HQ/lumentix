@@ -77,6 +77,17 @@ describe('NotificationPreferences', () => {
     );
   });
 
+  it('rolls back an optimistic toggle when the save fails', async () => {
+    savePrefs.mockRejectedValueOnce(new Error('Network down'));
+    render(<NotificationPreferences />);
+    const emailReminder = await screen.findByRole('checkbox', { name: /event reminders via email/i });
+
+    fireEvent.click(emailReminder);
+
+    expect(await screen.findByText('Network down')).toBeInTheDocument();
+    expect(emailReminder).toBeChecked();
+  });
+
   it('shows quiet-hours controls and saves them to the backend', async () => {
     render(<NotificationPreferences />);
     const quietToggle = await screen.findByRole('checkbox', { name: /quiet hours/i });

@@ -8,6 +8,8 @@ import {
   DEFAULT_BASE_BACKOFF_MS,
   MAX_BACKOFF_MS,
   WebhookDeliveryJob,
+  isRetryableStatus,
+  parseRetryAfter,
 } from './webhook-delivery.job';
 import { WebhookDelivery } from '../entities/webhook-delivery.entity';
 import { WebhookDeadLetter } from '../entities/webhook-dead-letter.entity';
@@ -28,6 +30,7 @@ describe('WebhookDeliveryJob', () => {
   };
 
   beforeEach(async () => {
+    process.env.WEBHOOK_SECRET = 'test-secret';
     deliveryRepo = { save: jest.fn().mockResolvedValue(undefined) };
     deadLetterRepo = { save: jest.fn().mockResolvedValue(undefined) };
     eventRepo = { findOne: jest.fn() };
@@ -51,6 +54,7 @@ describe('WebhookDeliveryJob', () => {
   afterEach(() => {
     delete process.env.WEBHOOK_MAX_RETRY_ATTEMPTS;
     delete process.env.WEBHOOK_RETRY_BASE_DELAY_MS;
+    delete process.env.WEBHOOK_SECRET;
   });
 
   describe('applyBackoffDelay', () => {
@@ -64,6 +68,12 @@ describe('WebhookDeliveryJob', () => {
     it('caps the delay at MAX_BACKOFF_MS', () => {
       expect(job.applyBackoffDelay(30)).toBe(MAX_BACKOFF_MS);
       expect(job.applyBackoffDelay(100)).toBeLessThanOrEqual(MAX_BACKOFF_MS);
+    });
+
+    it('honours a longer Retry-After hint, still capped at MAX_BACKOFF_MS', () => {
+      expect(job.applyBackoffDelay(1, 30_000)).toBe(30_000);
+      expect(job.applyBackoffDelay(3, 1_000)).toBe(4 * DEFAULT_BASE_BACKOFF_MS);
+      expect(job.applyBackoffDelay(1, 60 * 60_000)).toBe(MAX_BACKOFF_MS);
     });
 
     it('uses the configured base delay env var', () => {
@@ -114,7 +124,7 @@ describe('WebhookDeliveryJob', () => {
       expect(deadLetterRepo.save).not.toHaveBeenCalled();
     });
 
-    it('treats non-2xx statuses (e.g. 400) as failures and retries', async () => {
+    it('dead-letters permanent 4xx failures immediately instead of retrying', async () => {
       httpService.post.mockReturnValue(
         throwError(() => ({ response: { status: 400, data: { error: 'bad' } } })),
       );
@@ -123,8 +133,41 @@ describe('WebhookDeliveryJob', () => {
         data: { ...baseJobData, attempt: 1 },
       } as any);
 
-      expect(webhooksQueue.add).toHaveBeenCalled();
+      expect(webhooksQueue.add).not.toHaveBeenCalled();
+      expect(deadLetterRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ lastStatusCode: 400, attempts: 1 }),
+      );
+    });
+
+    it('retries 429 responses, waiting at least as long as Retry-After', async () => {
+      httpService.post.mockReturnValue(
+        throwError(() => ({
+          response: { status: 429, data: {}, headers: { 'retry-after': '60' } },
+        })),
+      );
+
+      await job.handle({
+        data: { ...baseJobData, attempt: 1 },
+      } as any);
+
+      expect(webhooksQueue.add).toHaveBeenCalledWith(
+        'send',
+        { ...baseJobData, attempt: 2 },
+        { delay: 60_000 },
+      );
       expect(deadLetterRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('sends with a request timeout so a hanging endpoint cannot stall the worker', async () => {
+      httpService.post.mockReturnValue(of({ status: 200, data: {} }));
+
+      await job.handle({ data: { ...baseJobData, attempt: 1 } } as any);
+
+      expect(httpService.post).toHaveBeenCalledWith(
+        'https://example.com/hook',
+        baseJobData.payload,
+        expect.objectContaining({ timeout: 10_000 }),
+      );
     });
 
     it('moves to the dead-letter queue once the retry cap is reached', async () => {
@@ -169,6 +212,17 @@ describe('WebhookDeliveryJob', () => {
       expect(deadLetterRepo.save).not.toHaveBeenCalled();
     });
 
+    it('dead-letters without sending when WEBHOOK_SECRET is not configured', async () => {
+      delete process.env.WEBHOOK_SECRET;
+
+      await job.handle({ data: { ...baseJobData, attempt: 1 } } as any);
+
+      expect(httpService.post).not.toHaveBeenCalled();
+      expect(deadLetterRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ lastError: 'WEBHOOK_SECRET is not configured' }),
+      );
+    });
+
     it('is a no-op when the event is missing', async () => {
       eventRepo.findOne.mockResolvedValue(null);
 
@@ -193,6 +247,32 @@ describe('WebhookDeliveryJob', () => {
         lastError: '{"error":"boom"}',
         attempts: 5,
       });
+    });
+  });
+
+  describe('isRetryableStatus', () => {
+    it.each([null, 500, 502, 503, 408, 429])('retries %p', (status) => {
+      expect(isRetryableStatus(status)).toBe(true);
+    });
+
+    it.each([400, 401, 403, 404, 410, 422])('does not retry %p', (status) => {
+      expect(isRetryableStatus(status)).toBe(false);
+    });
+  });
+
+  describe('parseRetryAfter', () => {
+    it('parses delta-seconds', () => {
+      expect(parseRetryAfter('120')).toBe(120_000);
+    });
+
+    it('parses an HTTP date relative to now', () => {
+      const now = Date.parse('2026-01-01T00:00:00Z');
+      expect(parseRetryAfter('Thu, 01 Jan 2026 00:00:30 GMT', now)).toBe(30_000);
+    });
+
+    it('ignores missing or malformed values', () => {
+      expect(parseRetryAfter(undefined)).toBeNull();
+      expect(parseRetryAfter('soon')).toBeNull();
     });
   });
 

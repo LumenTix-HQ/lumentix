@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -30,6 +31,7 @@ import { UpdateSponsorTierDto } from './dto/update-sponsor-tier.dto';
 import { ContributionIntentDto } from './dto/contribution-intent.dto';
 import { ConfirmContributionDto } from './dto/confirm-contribution.dto';
 import { SponsorReportDto } from './dto/sponsor-report.dto';
+import { SponsorBannerDto, UpdateSponsorBannerDto } from './dto/sponsor-banner.dto';
 import { Roles, Role } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -240,9 +242,30 @@ export class EventSponsorsController {
     summary: 'Rotate sponsor banners',
     description: 'Public. Returns this event\'s active sponsor banners in a weighted-random rotation order.',
   })
-  @ApiResponse({ status: 200, description: 'Sponsor banners in rotation order' })
+  @ApiResponse({ status: 200, description: 'Sponsor banners in rotation order', type: [SponsorBannerDto] })
   getBanners(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.sponsorsService.rotateSponsorBanners(eventId);
+  }
+
+  @Patch(':sponsorId/banner')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Configure sponsor banner rotation',
+    description: 'Organizer-only. Sets a sponsor\'s rotation weight (0 pauses it) and/or whether its banner is active.',
+  })
+  @ApiBody({ type: UpdateSponsorBannerDto })
+  @ApiResponse({ status: 200, description: 'Updated banner settings' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Sponsor not found for this event' })
+  updateBanner(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Param('sponsorId', ParseUUIDPipe) sponsorId: string,
+    @Body() dto: UpdateSponsorBannerDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.sponsorsService.updateSponsorBanner(eventId, sponsorId, dto, req.user.id);
   }
 
   @Get('report')

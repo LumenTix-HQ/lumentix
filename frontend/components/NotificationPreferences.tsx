@@ -133,30 +133,30 @@ export default function NotificationPreferences() {
   // offline behaviour working too).
   const toggleChannel = useCallback(
     async (channel: NotificationChannel, category: NotificationCategory) => {
-      setPrefs((prev) => {
-        const next: NotificationPreferences = {
-          ...prev,
-          channels: {
-            ...prev.channels,
-            [channel]: {
-              ...prev.channels[channel],
-              [category]: !prev.channels[channel][category],
+      // Derive the new value once so the optimistic state and the request
+      // agree, and roll back if the save fails.
+      const enabled = !prefs.channels[channel]?.[category];
+      const applyToggle = (value: boolean) =>
+        setPrefs((prev) => {
+          const next: NotificationPreferences = {
+            ...prev,
+            channels: {
+              ...prev.channels,
+              [channel]: { ...prev.channels[channel], [category]: value },
             },
-          },
-        };
-        persistLocal(next);
-        return next;
-      });
+          };
+          persistLocal(next);
+          return next;
+        });
 
+      applyToggle(enabled);
+      setError(null);
       try {
         await apiClient.saveNotificationPreferences({
-          channels: {
-            [channel]: {
-              [category]: !prefs.channels[channel][category],
-            },
-          },
+          channels: { [channel]: { [category]: enabled } },
         });
       } catch (e) {
+        applyToggle(!enabled);
         setError(e instanceof Error ? e.message : 'Failed to save preferences.');
       }
     },
