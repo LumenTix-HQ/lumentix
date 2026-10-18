@@ -2,7 +2,25 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
-import { NotificationChannel, SaveNotificationPreferencesDto } from './dto/save-notification-preferences.dto';
+import {
+  NotificationChannel,
+  SaveNotificationPreferencesDto,
+} from './dto/save-notification-preferences.dto';
+
+type QuietHours = User['quietHours'];
+type RoutableUser = Pick<User, 'channelNotificationPreferences' | 'quietHours'>;
+
+/**
+ * Where (and when) a notification should be delivered. `delayMs` is non-zero
+ * when the user is currently in quiet hours: the notification is held back
+ * until the window ends rather than dropped.
+ */
+export interface NotificationRoute {
+  channels: NotificationChannel[];
+  delayMs: number;
+}
+
+const MINUTES_PER_DAY = 24 * 60;
 
 @Injectable()
 export class NotificationPreferencesService {
@@ -19,7 +37,10 @@ export class NotificationPreferencesService {
     };
   }
 
-  async saveNotificationPreferences(userId: string, dto: SaveNotificationPreferencesDto) {
+  async saveNotificationPreferences(
+    userId: string,
+    dto: SaveNotificationPreferencesDto,
+  ) {
     const user = await this.findUser(userId);
 
     if (dto.channels) {
@@ -35,50 +56,81 @@ export class NotificationPreferencesService {
     }
 
     await this.usersRepository.save(user);
-    return { channels: user.channelNotificationPreferences, quietHours: user.quietHours };
+    return {
+      channels: user.channelNotificationPreferences,
+      quietHours: user.quietHours,
+    };
   }
 
   /**
    * Decides which channels a notification in `category` should go out on for
-   * this user: a channel is included when the user hasn't disabled that
-   * category for it, and — unless the notification is critical — the user
-   * isn't currently in quiet hours.
+   * this user, and how long to hold it back. A channel is included unless the
+   * user disabled that category for it; non-critical notifications raised
+   * during quiet hours are deferred until the window ends.
    */
   async routeNotification(
     userId: string,
     category: string,
     critical = false,
-  ): Promise<NotificationChannel[]> {
+  ): Promise<NotificationRoute> {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
-    if (!user) return [];
-
-    const suppressed = !critical && this.enforceQuietHours(user.quietHours);
-
-    return Object.values(NotificationChannel).filter((channel) => {
-      const enabled = user.channelNotificationPreferences?.[channel]?.[category] ?? true;
-      return enabled && !suppressed;
-    });
+    if (!user) return { channels: [], delayMs: 0 };
+    return this.resolveRoute(user, category, critical);
   }
 
-  /** True if "now" falls within the given quiet-hours window. */
-  enforceQuietHours(quietHours: User['quietHours'] | null | undefined): boolean {
-    if (!quietHours?.enabled) return false;
+  /** Same as {@link routeNotification}, for callers that already loaded the user. */
+  resolveRoute(
+    user: RoutableUser,
+    category: string,
+    critical = false,
+    now: Date = new Date(),
+  ): NotificationRoute {
+    const channels = Object.values(NotificationChannel).filter(
+      (channel) =>
+        user.channelNotificationPreferences?.[channel]?.[category] ?? true,
+    );
+    const delayMs = critical
+      ? 0
+      : this.msUntilQuietHoursEnd(user.quietHours, now);
+    return { channels, delayMs };
+  }
 
-    const { start, end, timezone } = quietHours;
-    if (!start || !end || start === end) return false;
+  /** True if `now` falls within the given quiet-hours window. */
+  enforceQuietHours(
+    quietHours: QuietHours | null | undefined,
+    now: Date = new Date(),
+  ): boolean {
+    return this.msUntilQuietHoursEnd(quietHours, now) > 0;
+  }
 
-    const current = new Intl.DateTimeFormat('en-GB', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      timeZone: timezone || 'UTC',
-    }).format(new Date());
+  /**
+   * Milliseconds from `now` until the quiet-hours window ends, or 0 when
+   * quiet hours are disabled or not currently in effect.
+   */
+  msUntilQuietHoursEnd(
+    quietHours: QuietHours | null | undefined,
+    now: Date = new Date(),
+  ): number {
+    if (!quietHours?.enabled) return 0;
 
-    if (start < end) {
-      return current >= start && current < end;
-    }
-    // Overnight window, e.g. 22:00 -> 08:00
-    return current >= start || current < end;
+    const start = parseTime(quietHours.start);
+    const end = parseTime(quietHours.end);
+    if (start === null || end === null || start === end) return 0;
+
+    const current = minutesInTimezone(now, quietHours.timezone);
+    const inWindow =
+      start < end
+        ? current >= start && current < end
+        : // Overnight window, e.g. 22:00 -> 08:00
+          current >= start || current < end;
+    if (!inWindow) return 0;
+
+    const minutesLeft = (end - current + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+    // Round up to the start of the `end` minute so we never land inside the window.
+    return (
+      minutesLeft * 60_000 -
+      (now.getUTCSeconds() * 1000 + now.getUTCMilliseconds())
+    );
   }
 
   private async findUser(userId: string): Promise<User> {
@@ -88,4 +140,27 @@ export class NotificationPreferencesService {
     }
     return user;
   }
+}
+
+function parseTime(value: string | undefined): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value ?? '');
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+/** Minutes since local midnight in `timezone`, falling back to UTC for unknown zones. */
+function minutesInTimezone(now: Date, timezone: string | undefined): number {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: timezone || 'UTC',
+    }).formatToParts(now);
+  } catch {
+    return now.getUTCHours() * 60 + now.getUTCMinutes();
+  }
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  return (hour % 24) * 60 + minute;
 }

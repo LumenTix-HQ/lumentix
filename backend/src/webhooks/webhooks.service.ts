@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,6 +16,8 @@ export class WebhooksService {
     private readonly deliveryRepo: Repository<WebhookDelivery>,
     @InjectRepository(WebhookDeadLetter)
     private readonly deadLetterRepo: Repository<WebhookDeadLetter>,
+    @InjectRepository(Event)
+    private readonly eventRepo: Repository<Event>,
   ) {}
 
   async queueDelivery(event: Event, payment: Payment): Promise<void> {
@@ -41,8 +43,7 @@ export class WebhooksService {
   }
 
   async getDeliveriesForEvent(eventId: string, organizerId: string) {
-    // This is a placeholder for the actual implementation
-    // which should include an organizer guard.
+    await this.assertEventOrganizer(eventId, organizerId);
     return this.deliveryRepo.find({
       where: { eventId },
       order: { sentAt: 'DESC' },
@@ -51,12 +52,52 @@ export class WebhooksService {
   }
 
   async getDeadLettersForEvent(eventId: string, organizerId: string) {
-    // This is a placeholder for the actual implementation
-    // which should include an organizer guard.
+    await this.assertEventOrganizer(eventId, organizerId);
     return this.deadLetterRepo.find({
       where: { eventId },
       order: { createdAt: 'DESC' },
       take: 50,
     });
+  }
+
+  /**
+   * Re-queues a dead-lettered delivery as a fresh first attempt (with the full
+   * retry budget) once the organizer has fixed their endpoint, and removes it
+   * from the dead-letter table.
+   */
+  async replayDeadLetter(
+    eventId: string,
+    deadLetterId: string,
+    organizerId: string,
+  ): Promise<{ queued: true }> {
+    await this.assertEventOrganizer(eventId, organizerId);
+
+    const deadLetter = await this.deadLetterRepo.findOne({
+      where: { id: deadLetterId, eventId },
+    });
+    if (!deadLetter) {
+      throw new NotFoundException(`Webhook dead letter "${deadLetterId}" not found`);
+    }
+
+    await this.webhooksQueue.add('send', {
+      eventId: deadLetter.eventId,
+      paymentId: deadLetter.paymentId,
+      payload: deadLetter.payload,
+    });
+    await this.deadLetterRepo.delete({ id: deadLetter.id });
+    return { queued: true };
+  }
+
+  private async assertEventOrganizer(eventId: string, organizerId: string): Promise<void> {
+    const event = await this.eventRepo.findOne({
+      where: { id: eventId },
+      select: ['id', 'organizerId'],
+    });
+    if (!event) {
+      throw new NotFoundException(`Event "${eventId}" not found`);
+    }
+    if (event.organizerId !== organizerId) {
+      throw new ForbiddenException('Only the event organizer can manage its webhooks');
+    }
   }
 }

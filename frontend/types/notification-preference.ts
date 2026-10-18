@@ -23,6 +23,6 @@ export interface NotificationPreferences {
 }
 
 export type SaveNotificationPreferences = {
-  channels?: ChannelPreferences;
+  channels?: Partial<Record<NotificationChannel, Partial<Record<NotificationCategory, boolean>>>>;
   quietHours?: QuietHours;
 };

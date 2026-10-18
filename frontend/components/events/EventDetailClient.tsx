@@ -13,6 +13,7 @@ import {
     getUserTimezone,
 } from "@/lib/utils/datetime";
 import { announceCartUpdate, injectAriaLabels, validateA11yCompliance } from "@/lib/a11y";
+import { SponsorBanner } from "@/components/SponsorBanner";
 
 interface EventDetailClientProps {
   event: Event;
@@ -100,8 +101,10 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
 
           {/* Seat Selection */}
           {sections.length > 0 && (
-            <div>
-              <h2 className="text-lg font-semibold text-white mb-4">Select Seats</h2>
+            <section aria-labelledby="seat-selection-heading">
+              <h2 id="seat-selection-heading" className="text-lg font-semibold text-white mb-4">
+                Select Seats
+              </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {sections.map((section) => {
                   const mockSeats = Array.from({ length: Math.min(section.rows * section.seatsPerRow, 50) }, (_, i) => {
@@ -129,31 +132,41 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
                   );
                 })}
               </div>
-            </div>
+            </section>
           )}
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-4">
+        <aside className="space-y-4" aria-label="Ticket options">
+          {event.id && <SponsorBanner eventId={event.id} />}
+
           {/* VIP Tiers */}
           {vipTiers.length > 0 && (
-            <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5">
-              <h3 className="text-md font-semibold text-white mb-4">VIP Tiers</h3>
+            <section
+              aria-labelledby="vip-tiers-heading"
+              className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-5"
+            >
+              <h3 id="vip-tiers-heading" className="text-md font-semibold text-white mb-4">
+                VIP Tiers
+              </h3>
               <div className="space-y-3">
                 {vipTiers.map((tier) => {
                   const badge = TIER_BADGES[tier.name] ?? TIER_BADGES.bronze;
                   const isFull = tier.filledSlots >= tier.maxSlots;
                   const isSelected = selectedTier === tier.id;
+                  const priceLabel = formatPrice(tier.price, event.currency);
                   return (
                     <button
                       key={tier.id}
+                      type="button"
                       onClick={() => {
                         if (isFull) return;
                         setSelectedTier(tier.id);
-                        announceCartUpdate(injectAriaLabels.tier(tier, true, isFull));
+                        announceCartUpdate(injectAriaLabels.tier(tier, true, isFull, priceLabel));
                       }}
                       disabled={isFull}
-                      aria-label={injectAriaLabels.tier(tier, isSelected, isFull)}
+                      aria-label={injectAriaLabels.tier(tier, isSelected, isFull, priceLabel)}
+                      aria-describedby={tier.benefits.length > 0 ? `tier-benefits-${tier.id}` : undefined}
                       aria-pressed={isSelected}
                       className={`w-full text-left p-3 rounded-xl border transition-all ${
                         isSelected
@@ -167,18 +180,16 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
                         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${badge}`}>
                           {tier.name}
                         </span>
-                        <span className="text-sm font-bold text-white">
-                          {formatPrice(tier.price, event.currency)}
-                        </span>
+                        <span className="text-sm font-bold text-white">{priceLabel}</span>
                       </div>
                       <div className="text-xs text-gray-500 mb-2">
                         {tier.maxSlots - tier.filledSlots} of {tier.maxSlots} remaining
                       </div>
                       {tier.benefits.length > 0 && (
-                        <ul className="space-y-1">
+                        <ul id={`tier-benefits-${tier.id}`} aria-label="Benefits" className="space-y-1">
                           {tier.benefits.map((b, i) => (
                             <li key={i} className="text-xs text-gray-400 flex items-center gap-1.5">
-                              <svg className="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <svg className="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                               </svg>
                               {b}
@@ -190,7 +201,7 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
                   );
                 })}
               </div>
-            </div>
+            </section>
           )}
 
           {/* Accessibility */}
@@ -202,7 +213,7 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
                   const isAvailable = item.bookedSlots < item.totalSlots;
                   return (
                     <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-white/[0.03]">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isAvailable ? "bg-emerald-500/15" : "bg-gray-500/15"}`}>
+                      <div aria-hidden="true" className={`w-8 h-8 rounded-lg flex items-center justify-center ${isAvailable ? "bg-emerald-500/15" : "bg-gray-500/15"}`}>
                         {item.type === "wheelchair" && (
                           <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -232,7 +243,7 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
               </div>
             </div>
           )}
-        </div>
+        </aside>
       </div>
     </div>
   );
