@@ -961,4 +961,90 @@ export class EventsService {
     await this.eventRepository.update(id, { maxAttendees });
     return this.getEventById(id);
   }
+
+  async cancelEventOnChain(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+    return { eventId: id, status: 'cancelled_on_chain', timestamp: new Date().toISOString() };
+  }
+
+  async executeMassRefund(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+    
+    const tickets = await this.ticketRepository.find({
+      where: { eventId: id, status: 'valid' },
+    });
+
+    const results = [];
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (const ticket of tickets) {
+      try {
+        const payment = await this.paymentRepository.findOne({
+          where: { transactionHash: ticket.transactionHash },
+        });
+
+        if (!payment) {
+          results.push({ ticketId: ticket.id, success: false, error: 'Payment not found' });
+          failedCount++;
+          continue;
+        }
+
+        if (payment.status === PaymentStatus.REFUNDED) {
+          results.push({ ticketId: ticket.id, paymentId: payment.id, success: true });
+          successCount++;
+          continue;
+        }
+
+        await this.refundService.processRefund(payment.id, payment.userId);
+        ticket.status = 'refunded';
+        await this.ticketRepository.save(ticket);
+
+        results.push({ ticketId: ticket.id, paymentId: payment.id, success: true });
+        successCount++;
+      } catch (error) {
+        results.push({ ticketId: ticket.id, success: false, error: (error as Error).message });
+        failedCount++;
+      }
+    }
+
+    return {
+      eventId: id,
+      totalTickets: tickets.length,
+      processedCount: results.length,
+      successCount,
+      failedCount,
+      results,
+    };
+  }
+
+  async verifyRefundCompletion(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    const [totalTickets, refundedTickets, validTickets] = await Promise.all([
+      this.ticketRepository.count({ where: { eventId: id } }),
+      this.ticketRepository.count({ where: { eventId: id, status: 'refunded' } }),
+      this.ticketRepository.count({ where: { eventId: id, status: 'valid' } }),
+    ]);
+
+    const failedCount = totalTickets - refundedTickets - validTickets;
+
+    return {
+      eventId: id,
+      complete: validTickets === 0,
+      totalTickets,
+      refundedCount: refundedTickets,
+      pendingCount: validTickets,
+      failedCount: failedCount > 0 ? failedCount : 0,
+    };
+  }
 }
