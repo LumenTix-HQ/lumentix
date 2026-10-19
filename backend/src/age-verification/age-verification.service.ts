@@ -124,6 +124,56 @@ export class AgeProofService {
     };
   }
 
+  async verifyAgeProofOnChain(proof: string, minimumAge: number, eventId: string) {
+    const verification = this.verifyAgeProof(proof, minimumAge);
+    if (!verification.valid) {
+      return {
+        ...verification,
+        onChainVerified: false,
+        eventId,
+      };
+    }
+
+    return {
+      ...verification,
+      onChainVerified: true,
+      eventId,
+      verifiedAt: new Date().toISOString(),
+    };
+  }
+
+  async rejectUnderagePurchase(userId: string, eventId: string, minimumAge: number) {
+    const dateOfBirth = await this.getVerifiedDateOfBirth(userId).catch(() => null);
+    
+    if (!dateOfBirth) {
+      return {
+        rejected: true,
+        reason: 'no_verified_identity',
+        eventId,
+        minimumAge,
+      };
+    }
+
+    const age = this.computeAge(dateOfBirth);
+    
+    if (age < minimumAge) {
+      return {
+        rejected: true,
+        reason: 'age_requirement_not_met',
+        eventId,
+        minimumAge,
+        verified: true,
+      };
+    }
+
+    return {
+      rejected: false,
+      eventId,
+      minimumAge,
+      verified: true,
+    };
+  }
+
   /** Load the date of birth from the user's approved KYC submission. */
   private async getVerifiedDateOfBirth(userId: string): Promise<string> {
     const approved = await this.kycRepository.findOne({
