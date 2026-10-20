@@ -167,6 +167,30 @@ export class MerchService {
     return this.reservationRepository.save(reservation);
   }
 
+  // Snake_case aliases for the token-gated merchandise API
+  async verify_token_gate_eligibility(
+    merchItemId: string,
+    buyerId: string,
+    proof: PurchaseMerchDto,
+  ): Promise<TokenGateEligibilityResult> {
+    return this.verifyTokenGateEligibility(merchItemId, buyerId, proof);
+  }
+
+  async restrict_merch_purchase(
+    merchItemId: string,
+    buyerId: string,
+    proof: PurchaseMerchDto,
+  ): Promise<MerchReservation> {
+    return this.restrictMerchPurchase(merchItemId, buyerId, proof);
+  }
+
+  async release_token_gate(
+    reservationId: string,
+    requesterId: string,
+  ): Promise<MerchReservation> {
+    return this.releaseTokenGate(reservationId, requesterId);
+  }
+
   async getMerchItemById(id: string): Promise<MerchItem> {
     const item = await this.merchItemRepository.findOne({ where: { id } });
     if (!item) throw new NotFoundException(`Merchandise item "${id}" not found`);

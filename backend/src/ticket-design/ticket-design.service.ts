@@ -124,6 +124,24 @@ export class TicketDesignService {
     return Promise.all(designs.map((design) => this.renderTicketLayout(design.id)));
   }
 
+  // Snake_case aliases for the ticket design builder API
+  async save_ticket_design(
+    eventId: string,
+    dto: SaveTicketDesignDto,
+    requesterId: string,
+    designId?: string,
+  ): Promise<TicketDesign> {
+    return this.saveTicketDesign(eventId, dto, requesterId, designId);
+  }
+
+  async render_ticket_layout(designId: string): Promise<RenderedTicketLayout> {
+    return this.renderTicketLayout(designId);
+  }
+
+  async compile_design_themes(eventId: string): Promise<RenderedTicketLayout[]> {
+    return this.compileDesignThemes(eventId);
+  }
+
   async listDesigns(eventId: string): Promise<TicketDesign[]> {
     return this.designRepository.find({ where: { eventId } });
   }
