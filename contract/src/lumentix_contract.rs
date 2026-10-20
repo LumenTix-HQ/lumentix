@@ -62,7 +62,7 @@ use crate::types::{
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
     PricingSchedule, MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics,
-    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode, CircuitBreakerState,
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
@@ -8458,5 +8458,113 @@ impl LumentixContract {
     ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
         crate::escrow_split::get_event_escrow_split(&env, event_id)
             .ok_or(LumentixError::EscrowSplitNotFound)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Smart Contract Circuit Breaker (Issue #1460)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Activate circuit breaker for emergency pause when anomalous activity is detected (Issue #1460)
+    pub fn activate_circuit_breaker(
+        env: Env,
+        caller: Address,
+        reason: String,
+        required_resume_signatures: u32,
+    ) -> Result<bool, LumentixError> {
+        caller.require_auth();
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        let admin = storage::get_admin(&env);
+        if caller != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        let now = env.ledger().timestamp();
+        let state = CircuitBreakerState {
+            is_active: true,
+            activated_at: now,
+            activated_by: caller.clone(),
+            reason,
+            anomaly_count: 1,
+            resume_signers: Vec::new(&env),
+            required_resume_signatures: if required_resume_signatures == 0 { 2 } else { required_resume_signatures },
+        };
+        storage::set_circuit_breaker_state(&env, &state);
+        Ok(true)
+    }
+
+    /// Check whether current metrics exceed anomaly threshold and trip circuit breaker if so (Issue #1460)
+    pub fn check_anomaly_threshold(
+        env: Env,
+        caller: Address,
+        failed_transfers: u32,
+        velocity: u32,
+    ) -> Result<bool, LumentixError> {
+        caller.require_auth();
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        let config = storage::get_anomaly_threshold_config(&env);
+        let anomalous = failed_transfers >= config.max_failed_transfers_window
+            || velocity >= config.max_velocity_per_window;
+
+        if anomalous {
+            let now = env.ledger().timestamp();
+            let mut state = storage::get_circuit_breaker_state(&env).unwrap_or(CircuitBreakerState {
+                is_active: true,
+                activated_at: now,
+                activated_by: caller.clone(),
+                reason: String::from_str(&env, "Anomaly threshold exceeded"),
+                anomaly_count: 0,
+                resume_signers: Vec::new(&env),
+                required_resume_signatures: 2,
+            });
+            state.is_active = true;
+            state.anomaly_count += 1;
+            state.activated_at = now;
+            storage::set_circuit_breaker_state(&env, &state);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Resume operations via multi-sig approval (Issue #1460)
+    pub fn resume_operations(
+        env: Env,
+        approver: Address,
+    ) -> Result<bool, LumentixError> {
+        approver.require_auth();
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        let mut state = storage::get_circuit_breaker_state(&env)
+            .ok_or(LumentixError::EscrowSplitNotFound)?;
+
+        if !state.is_active {
+            return Ok(true);
+        }
+
+        let mut already_signed = false;
+        for signer in state.resume_signers.iter() {
+            if signer == approver {
+                already_signed = true;
+                break;
+            }
+        }
+        if !already_signed {
+            state.resume_signers.push_back(approver.clone());
+        }
+
+        if state.resume_signers.len() >= state.required_resume_signatures {
+            state.is_active = false;
+        }
+
+        storage::set_circuit_breaker_state(&env, &state);
+        Ok(!state.is_active)
+    }
+
+    /// Query current circuit breaker status (Issue #1460)
+    pub fn get_circuit_breaker_status(env: Env) -> Option<CircuitBreakerState> {
+        storage::get_circuit_breaker_state(&env)
     }
 }

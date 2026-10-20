@@ -2790,3 +2790,34 @@ pub fn remove_token_gate_config(env: &Env, merchandise_id: u64) {
     let key = (TOKEN_GATE_PREFIX, merchandise_id);
     env.storage().persistent().remove(&key);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Smart Contract Circuit Breaker Storage (Issue #1460)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CIRCUIT_BREAKER_KEY: &str = "CIRCUIT_BREAKER_STATE";
+const CIRCUIT_BREAKER_THRESHOLD_KEY: &str = "CB_THRESHOLD_KEY";
+
+pub fn set_circuit_breaker_state(env: &Env, state: &crate::types::CircuitBreakerState) {
+    env.storage().instance().set(&CIRCUIT_BREAKER_KEY, state);
+}
+
+pub fn get_circuit_breaker_state(env: &Env) -> Option<crate::types::CircuitBreakerState> {
+    env.storage().instance().get(&CIRCUIT_BREAKER_KEY)
+}
+
+pub fn is_circuit_breaker_active(env: &Env) -> bool {
+    get_circuit_breaker_state(env).map(|s| s.is_active).unwrap_or(false)
+}
+
+pub fn set_anomaly_threshold_config(env: &Env, config: &crate::types::AnomalyThresholdConfig) {
+    env.storage().instance().set(&CIRCUIT_BREAKER_THRESHOLD_KEY, config);
+}
+
+pub fn get_anomaly_threshold_config(env: &Env) -> crate::types::AnomalyThresholdConfig {
+    env.storage().instance().get(&CIRCUIT_BREAKER_THRESHOLD_KEY).unwrap_or(crate::types::AnomalyThresholdConfig {
+        max_failed_transfers_window: 10,
+        max_velocity_per_window: 100,
+        window_seconds: 300,
+    })
+}

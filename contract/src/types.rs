@@ -1285,3 +1285,29 @@ pub struct TokenGateEligibility {
     pub user_balance: i128,
     pub required_balance: i128,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Smart Contract Circuit Breaker (Issue #1460)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// State of the emergency circuit breaker pause mechanism.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerState {
+    pub is_active: bool,
+    pub activated_at: u64,
+    pub activated_by: Address,
+    pub reason: String,
+    pub anomaly_count: u32,
+    pub resume_signers: Vec<Address>,
+    pub required_resume_signatures: u32,
+}
+
+/// Threshold configuration for automated anomaly detection.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnomalyThresholdConfig {
+    pub max_failed_transfers_window: u32,
+    pub max_velocity_per_window: u32,
+    pub window_seconds: u64,
+}

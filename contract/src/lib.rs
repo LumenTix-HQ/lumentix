@@ -271,6 +271,8 @@ mod dynamic_pricing_tests;
 
 #[cfg(test)]
 mod geo_fence_tests;
+#[cfg(test)]
+mod circuit_breaker_emergency_tests;
 
 pub use contract::TicketContract;
 pub use error::LumentixError;
