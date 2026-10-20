@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Min,
+} from 'class-validator';
 
 export class ManageContentDeliveryDto {
   @ApiProperty({ example: 'https://cdn.lumentix.example' })
@@ -10,7 +17,10 @@ export class ManageContentDeliveryDto {
   @IsUrl()
   streamUrl: string;
 
-  @ApiPropertyOptional({ example: 'auto', enum: ['auto', '1080p', '720p', '480p'] })
+  @ApiPropertyOptional({
+    example: 'auto',
+    enum: ['auto', '1080p', '720p', '480p'],
+  })
   @IsOptional()
   @IsString()
   qualityProfile?: string;

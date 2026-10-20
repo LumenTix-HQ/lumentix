@@ -63,7 +63,7 @@ export class StreamingService {
     dto: OptimizeStreamQualityDto,
   ): Promise<StreamDeliveryResponseDto> {
     const event = await this.requireOrganizerEvent(eventId, organizerId);
-    let config = await this.streamingRepo.findOne({ where: { eventId } });
+    const config = await this.streamingRepo.findOne({ where: { eventId } });
 
     if (!config || !config.streamUrl) {
       throw new NotFoundException(
@@ -97,7 +97,9 @@ export class StreamingService {
 
     const config = await this.streamingRepo.findOne({ where: { eventId } });
     if (!config) {
-      throw new NotFoundException('No streaming configuration found for this event');
+      throw new NotFoundException(
+        'No streaming configuration found for this event',
+      );
     }
 
     const stored = config.performanceMetrics ?? {};
@@ -175,7 +177,9 @@ export class StreamingService {
     return 'poor';
   }
 
-  private toDeliveryResponse(config: StreamingConfig): StreamDeliveryResponseDto {
+  private toDeliveryResponse(
+    config: StreamingConfig,
+  ): StreamDeliveryResponseDto {
     const cdn =
       config.cdnBaseUrl ??
       this.configService.get<string>('CDN_BASE_URL') ??

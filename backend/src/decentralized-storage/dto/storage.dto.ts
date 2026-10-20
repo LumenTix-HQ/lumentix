@@ -29,7 +29,10 @@ export class PinToIpfsDto {
   @IsString()
   content: string;
 
-  @ApiPropertyOptional({ description: 'Whether to use redundant pinning services', default: true })
+  @ApiPropertyOptional({
+    description: 'Whether to use redundant pinning services',
+    default: true,
+  })
   @IsOptional()
   redundant?: boolean;
 }
@@ -45,7 +48,11 @@ export class MigrateUnpinnedAssetsDto {
   @IsString()
   eventId: string;
 
-  @ApiPropertyOptional({ description: 'Dry run only — report what would be pinned without actually pinning', default: false })
+  @ApiPropertyOptional({
+    description:
+      'Dry run only — report what would be pinned without actually pinning',
+    default: false,
+  })
   @IsOptional()
   dryRun?: boolean;
 }
@@ -69,7 +76,10 @@ export class PinToIpfsResponseDto {
   @ApiProperty()
   pinned: boolean;
 
-  @ApiProperty({ description: 'Number of pinning services that successfully pinned the content' })
+  @ApiProperty({
+    description:
+      'Number of pinning services that successfully pinned the content',
+  })
   redundantPins: number;
 }
 
@@ -89,7 +99,9 @@ export class PinStatusResponseDto {
   @ApiPropertyOptional()
   pinnedAt?: Date;
 
-  @ApiProperty({ description: 'HTTP reachability status of the IPFS gateway URL' })
+  @ApiProperty({
+    description: 'HTTP reachability status of the IPFS gateway URL',
+  })
   gatewayReachable: boolean;
 }
 
@@ -112,6 +124,9 @@ export class MigrateUnpinnedAssetsResponseDto {
   @ApiProperty()
   dryRun: boolean;
 
-  @ApiProperty({ type: [String], description: 'List of IPFS hashes that were (or would be) migrated' })
+  @ApiProperty({
+    type: [String],
+    description: 'List of IPFS hashes that were (or would be) migrated',
+  })
   migratedHashes: string[];
 }

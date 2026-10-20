@@ -5,7 +5,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as crypto from 'crypto';
 import {
   PinToIpfsDto,
   PinToIpfsResponseDto,
@@ -23,7 +22,10 @@ import {
 @Injectable()
 export class DecentralizedStorageService {
   private readonly logger = new Logger(DecentralizedStorageService.name);
-  private readonly pinMetadata = new Map<string, { eventId: string; url: string; pinnedAt: Date }>();
+  private readonly pinMetadata = new Map<
+    string,
+    { eventId: string; url: string; pinnedAt: Date }
+  >();
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -32,7 +34,14 @@ export class DecentralizedStorageService {
     fileName: string,
     mimeType: string,
     content: string,
-  ): Promise<{ hash: string; url: string; eventId: string; fileName: string; mimeType: string; uploaded: boolean }> {
+  ): Promise<{
+    hash: string;
+    url: string;
+    eventId: string;
+    fileName: string;
+    mimeType: string;
+    uploaded: boolean;
+  }> {
     const apiKey = this.configService.get<string>('IPFS_API_KEY');
     const apiUrl = this.configService.get<string>('IPFS_API_URL');
 
@@ -44,13 +53,20 @@ export class DecentralizedStorageService {
 
     const contentBuffer = Buffer.from(content, 'utf-8');
     const formData = new FormData();
-    formData.append('file', new Blob([contentBuffer], { type: mimeType }), fileName);
-    formData.append('pinataMetadata', JSON.stringify({ name: fileName, keyvalues: { eventId } }));
+    formData.append(
+      'file',
+      new Blob([contentBuffer], { type: mimeType }),
+      fileName,
+    );
+    formData.append(
+      'pinataMetadata',
+      JSON.stringify({ name: fileName, keyvalues: { eventId } }),
+    );
 
     const response = await fetch(`${apiUrl}/pinning/pinFileToIPFS`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: formData,
     });
@@ -58,12 +74,17 @@ export class DecentralizedStorageService {
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
       this.logger.error(`IPFS pin failed: ${response.status} ${errorText}`);
-      throw new BadRequestException(`Failed to pin content to IPFS: ${response.statusText}`);
+      throw new BadRequestException(
+        `Failed to pin content to IPFS: ${response.statusText}`,
+      );
     }
 
     const result = (await response.json()) as { IpfsHash: string };
     const hash = result.IpfsHash;
-    const gateway = this.configService.get<string>('IPFS_GATEWAY', 'https://ipfs.io/ipfs');
+    const gateway = this.configService.get<string>(
+      'IPFS_GATEWAY',
+      'https://ipfs.io/ipfs',
+    );
     const url = `${gateway}/${hash}`;
 
     this.pinMetadata.set(hash, { eventId, url, pinnedAt: new Date() });
@@ -71,27 +92,29 @@ export class DecentralizedStorageService {
     return { hash, url, eventId, fileName, mimeType, uploaded: true };
   }
 
-  async pin_event_media(
+  pin_event_media(
     eventId: string,
     hash: string,
   ): Promise<{ hash: string; eventId: string; pinned: boolean; url: string }> {
-    const gateway = this.configService.get<string>('IPFS_GATEWAY', 'https://ipfs.io/ipfs');
+    const gateway = this.configService.get<string>(
+      'IPFS_GATEWAY',
+      'https://ipfs.io/ipfs',
+    );
     const url = `${gateway}/${hash}`;
     this.pinMetadata.set(hash, { eventId, url, pinnedAt: new Date() });
-    return { hash, eventId, pinned: true, url };
+    return Promise.resolve({ hash, eventId, pinned: true, url });
   }
 
-  async retrieve_media_by_hash(
+  retrieve_media_by_hash(
     hash: string,
   ): Promise<{ eventId: string; url: string; pinnedAt: Date; hash: string }> {
     const pinned = this.pinMetadata.get(hash);
-    if (!pinned) throw new NotFoundException(`Media with hash "${hash}" not found`);
-    return { ...pinned, hash };
+    if (!pinned)
+      throw new NotFoundException(`Media with hash "${hash}" not found`);
+    return Promise.resolve({ ...pinned, hash });
   }
 
-  async pin_to_ipfs(
-    dto: PinToIpfsDto,
-  ): Promise<PinToIpfsResponseDto> {
+  async pin_to_ipfs(dto: PinToIpfsDto): Promise<PinToIpfsResponseDto> {
     const apiKey = this.configService.get<string>('IPFS_API_KEY');
     const apiUrl = this.configService.get<string>('IPFS_API_URL');
 
@@ -124,7 +147,9 @@ export class DecentralizedStorageService {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
-      this.logger.error(`IPFS pin_to_ipfs failed: ${response.status} ${errorText}`);
+      this.logger.error(
+        `IPFS pin_to_ipfs failed: ${response.status} ${errorText}`,
+      );
       throw new BadRequestException(
         `Failed to pin content to IPFS: ${response.statusText}`,
       );
@@ -132,11 +157,18 @@ export class DecentralizedStorageService {
 
     const result = (await response.json()) as { IpfsHash: string };
     const hash = result.IpfsHash;
-    const gateway = this.configService.get<string>('IPFS_GATEWAY', 'https://ipfs.io/ipfs');
+    const gateway = this.configService.get<string>(
+      'IPFS_GATEWAY',
+      'https://ipfs.io/ipfs',
+    );
     const url = `${gateway}/${hash}`;
 
     // Store pin metadata
-    this.pinMetadata.set(hash, { eventId: dto.eventId, url, pinnedAt: new Date() });
+    this.pinMetadata.set(hash, {
+      eventId: dto.eventId,
+      url,
+      pinnedAt: new Date(),
+    });
 
     // For redundant pinning, attempt a second provider if configured
     let redundantPins = 1;
@@ -150,11 +182,14 @@ export class DecentralizedStorageService {
           new Blob([contentBuffer], { type: dto.mimeType }),
           dto.fileName,
         );
-        const backupResp = await fetch(`${backupApiUrl}/pinning/pinFileToIPFS`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${backupApiKey}` },
-          body: backupFormData,
-        });
+        const backupResp = await fetch(
+          `${backupApiUrl}/pinning/pinFileToIPFS`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${backupApiKey}` },
+            body: backupFormData,
+          },
+        );
         if (backupResp.ok) {
           redundantPins = 2;
           this.logger.log(`Redundant pin successful for hash ${hash}`);
@@ -200,14 +235,19 @@ export class DecentralizedStorageService {
             }
           }
         } catch (err) {
-          this.logger.warn(`IPFS pin status check failed for hash ${hash}: ${err}`);
+          this.logger.warn(
+            `IPFS pin status check failed for hash ${hash}: ${err}`,
+          );
         }
       }
 
       return { hash, isPinned: false, gatewayReachable: false };
     }
 
-    const gateway = this.configService.get<string>('IPFS_GATEWAY', 'https://ipfs.io/ipfs');
+    const gateway = this.configService.get<string>(
+      'IPFS_GATEWAY',
+      'https://ipfs.io/ipfs',
+    );
     const url = `${gateway}/${hash}`;
 
     // Probe the gateway URL for reachability
@@ -263,7 +303,9 @@ export class DecentralizedStorageService {
         remotePinnedHashes = data.rows.map((r) => r.ipfs_pin_hash);
       }
     } catch (err) {
-      this.logger.warn(`Failed to fetch remote pin list for event ${dto.eventId}: ${err}`);
+      this.logger.warn(
+        `Failed to fetch remote pin list for event ${dto.eventId}: ${err}`,
+      );
     }
 
     const allKnownHashes = new Set([...eventHashes, ...remotePinnedHashes]);
@@ -308,10 +350,14 @@ export class DecentralizedStorageService {
         if (resp.ok) {
           migrated++;
           migratedHashes.push(hash);
-          this.logger.log(`Migrated pin for hash ${hash} (event ${dto.eventId})`);
+          this.logger.log(
+            `Migrated pin for hash ${hash} (event ${dto.eventId})`,
+          );
         } else {
           failed++;
-          this.logger.warn(`Failed to migrate hash ${hash}: ${resp.statusText}`);
+          this.logger.warn(
+            `Failed to migrate hash ${hash}: ${resp.statusText}`,
+          );
         }
       } catch (err) {
         failed++;

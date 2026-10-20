@@ -36,7 +36,9 @@ export class StreamingController {
 
   @Put('events/:eventId/delivery')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Configure CDN and playback URLs for hybrid events' })
+  @ApiOperation({
+    summary: 'Configure CDN and playback URLs for hybrid events',
+  })
   @ApiResponse({ status: 200, type: StreamDeliveryResponseDto })
   manageContentDelivery(
     @Param('eventId', ParseUUIDPipe) eventId: string,
@@ -52,7 +54,9 @@ export class StreamingController {
 
   @Post('events/:eventId/optimize-quality')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Tune adaptive bitrate ladder for virtual attendees' })
+  @ApiOperation({
+    summary: 'Tune adaptive bitrate ladder for virtual attendees',
+  })
   @ApiResponse({ status: 200, type: StreamDeliveryResponseDto })
   optimizeStreamQuality(
     @Param('eventId', ParseUUIDPipe) eventId: string,
