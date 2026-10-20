@@ -1,7 +1,7 @@
 #![allow(clippy::len_zero)]
 
 use crate::error::LumentixError;
-use soroban_sdk::{Address, String};
+use soroban_sdk::{Address, Env, String};
 
 /// Validate that an address is not invalid
 /// In Soroban, addresses are validated by the SDK, but we keep this for consistency
@@ -76,6 +76,34 @@ pub fn validate_currency_code(code: &String) -> Result<(), LumentixError> {
         return Err(LumentixError::UnsupportedCurrency);
     }
     Ok(())
+}
+
+/// Validate that a country code is ISO 3166-1 alpha-2: exactly two uppercase
+/// ASCII letters (Issue #1448).
+pub fn validate_country_code(code: &String) -> Result<(), LumentixError> {
+    let bytes = code.to_bytes();
+    if bytes.len() != 2 {
+        return Err(LumentixError::InvalidCountryCode);
+    }
+    for i in 0..2 {
+        match bytes.get(i) {
+            Some(b) if b >= b'A' && b <= b'Z' => {}
+            _ => return Err(LumentixError::InvalidCountryCode),
+        }
+    }
+    Ok(())
+}
+
+/// Uppercase an ASCII country code so "us" and "US" compare equal.
+pub fn normalize_country_code(env: &Env, code: &String) -> String {
+    let bytes = code.to_bytes();
+    let len = bytes.len().min(64);
+    let mut buf = [0u8; 64];
+    for i in 0..len {
+        let b = bytes.get(i).unwrap_or(0);
+        buf[i as usize] = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+    }
+    String::from_bytes(env, &buf[..len as usize])
 }
 
 /// Validate that a wasm hash is not all zeros

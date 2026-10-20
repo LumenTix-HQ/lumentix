@@ -45,3 +45,22 @@ export interface PaginatedReviews {
   hasNextPage: boolean;
   hasPreviousPage: boolean;
 }
+
+export type SentimentLabel = 'positive' | 'negative' | 'neutral' | 'mixed';
+
+export interface SentimentTheme {
+  theme: string;
+  mentions: number;
+  score: number;
+}
+
+export interface EventSentiment {
+  eventId: string;
+  reviewsAnalysed: number;
+  aggregateScore: number;
+  averageRating: number | null;
+  distribution: Record<SentimentLabel, number>;
+  commonPraise: SentimentTheme[];
+  commonComplaints: SentimentTheme[];
+  summary: string;
+}

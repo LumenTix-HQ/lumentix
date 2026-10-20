@@ -7,46 +7,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
-import { randomBytes } from 'crypto';
-
-import { Insurer, InsurerStatus } from './entities/insurer.entity';
-import { InsuranceProduct } from './entities/insurance-product.entity';
-import { InsurancePolicy } from './entities/insurance-policy.entity';
-import { InsuranceClaim } from './entities/insurance-claim.entity';
-
-import { PolicyStatus } from './enums/policy-status.enum';
-import { ClaimStatus } from './enums/claim-status.enum';
-import { InsuranceProductStatus } from './enums/insurance-product-status.enum';
-
-import { RegisterInsurerDto } from './dto/register-insurer.dto';
-import { CreateInsuranceProductDto } from './dto/create-insurance-product.dto';
-import { UpdateInsuranceProductDto } from './dto/update-insurance-product.dto';
-import { ListInsuranceProductsDto } from './dto/list-insurance-products.dto';
-import { CompareInsuranceOptionsDto } from './dto/compare-insurance-options.dto';
-import { PurchasePolicyDto } from './dto/purchase-policy.dto';
-import { ProcessInsuranceClaimDto } from './dto/process-insurance-claim.dto';
-import { ReviewClaimDto } from './dto/review-claim.dto';
-import { ListClaimsDto } from './dto/list-claims.dto';
-
-import { AuditService } from '../audit/audit.service';
-
-export interface PaginatedResult<T> {
-  data: T[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
-
-/** Computed comparison entry returned by compare_insurance_options. */
-export interface InsuranceComparisonEntry {
-  product: InsuranceProduct;
-  insurer: Insurer;
-  valueScore: number;        // maxCoverageAmount / premiumAmount ratio
-  isEligible: boolean;       // passes attendee + days-before-event checks
-  eligibilityReasons: string[];
-}
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 
@@ -63,6 +23,9 @@ import {
   InsurancePolicyDto,
   InsurancePoolDto,
   InsuranceClaimResultDto,
+  InsuranceClaimEscalationDto,
+  ClaimRuleCheckDto,
+  ClaimRuleResultDto,
 } from './dto/insurance-policy.dto';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Event, EventStatus } from '../events/entities/event.entity';
@@ -83,417 +46,25 @@ const VALID_CLAIM_REASONS = new Set<CancellationReason>([
   CancellationReason.OTHER,
 ]);
 
+/**
+ * Reasons that, once the event is confirmed cancelled, are paid without human
+ * review. Discretionary reasons (force majeure, health & safety, government
+ * restriction, other) always go to a reviewer.
+ */
+export const AUTO_APPROVABLE_REASONS = new Set<CancellationReason>([
+  CancellationReason.EVENT_CANCELLED_BY_ORGANIZER,
+  CancellationReason.VENUE_UNAVAILABLE,
+  CancellationReason.ARTIST_PERFORMER_UNAVAILABLE,
+]);
+
+/** Default coverage cap for automatic approval (override with INSURANCE_AUTO_APPROVE_MAX_COVERAGE). */
+export const DEFAULT_AUTO_APPROVE_MAX_COVERAGE = 500;
+
 @Injectable()
 export class InsuranceService {
   private readonly logger = new Logger(InsuranceService.name);
 
   constructor(
-    @InjectRepository(Insurer)
-    private readonly insurerRepo: Repository<Insurer>,
-    @InjectRepository(InsuranceProduct)
-    private readonly productRepo: Repository<InsuranceProduct>,
-    @InjectRepository(InsurancePolicy)
-    private readonly policyRepo: Repository<InsurancePolicy>,
-    @InjectRepository(InsuranceClaim)
-    private readonly claimRepo: Repository<InsuranceClaim>,
-    private readonly auditService: AuditService,
-  ) {}
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // INSURER MANAGEMENT
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /** Register a new insurer profile for the authenticated user. */
-  async registerInsurer(dto: RegisterInsurerDto, userId: string): Promise<Insurer> {
-    const existing = await this.insurerRepo.findOne({ where: { userId } });
-    if (existing) {
-      throw new ConflictException('You already have an insurer profile registered.');
-    }
-
-    const licenseConflict = await this.insurerRepo.findOne({
-      where: { licenseNumber: dto.licenseNumber },
-    });
-    if (licenseConflict) {
-      throw new ConflictException('An insurer with this license number already exists.');
-    }
-
-    const insurer = this.insurerRepo.create({ ...dto, userId });
-    const saved = await this.insurerRepo.save(insurer);
-
-    await this.auditService.log({
-      action: 'INSURER_REGISTERED',
-      userId,
-      resourceId: saved.id,
-      meta: { companyName: saved.companyName },
-    });
-
-    return saved;
-  }
-
-  /** Admin: approve or suspend an insurer. */
-  async updateInsurerStatus(
-    insurerId: string,
-    status: InsurerStatus,
-    adminUserId: string,
-  ): Promise<Insurer> {
-    const insurer = await this.findInsurerOrFail(insurerId);
-    insurer.status = status;
-    const saved = await this.insurerRepo.save(insurer);
-
-    await this.auditService.log({
-      action: 'INSURER_STATUS_UPDATED',
-      userId: adminUserId,
-      resourceId: insurerId,
-      meta: { newStatus: status },
-    });
-
-    return saved;
-  }
-
-  async getInsurer(insurerId: string): Promise<Insurer> {
-    return this.findInsurerOrFail(insurerId);
-  }
-
-  async getMyInsurerProfile(userId: string): Promise<Insurer> {
-    const insurer = await this.insurerRepo.findOne({ where: { userId } });
-    if (!insurer) {
-      throw new NotFoundException('No insurer profile found for this account.');
-    }
-    return insurer;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // INSURANCE PRODUCTS  (list_insurance_product)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * list_insurance_product — browse and filter marketplace products.
-   * Public endpoint: no auth required to view active products.
-   */
-  async listInsuranceProducts(
-    dto: ListInsuranceProductsDto,
-  ): Promise<PaginatedResult<InsuranceProduct>> {
-    const {
-      coverageType,
-      status,
-      insurerId,
-      search,
-      premiumMin,
-      premiumMax,
-      attendeeCount,
-      daysBeforeEvent,
-      sortBy = 'createdAt',
-      order = 'DESC',
-      page = 1,
-      limit = 10,
-    } = dto;
-
-    const allowedSortFields: Record<string, string> = {
-      premiumAmount: 'product.premiumAmount',
-      maxCoverageAmount: 'product.maxCoverageAmount',
-      totalPoliciesSold: 'product.totalPoliciesSold',
-      createdAt: 'product.createdAt',
-    };
-    const sortField = allowedSortFields[sortBy] ?? 'product.createdAt';
-
-    const qb: SelectQueryBuilder<InsuranceProduct> = this.productRepo
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.insurer', 'insurer');
-
-    // Default to showing only active products unless a status filter is given
-    if (status) {
-      qb.andWhere('product.status = :status', { status });
-    } else {
-      qb.andWhere('product.status = :status', {
-        status: InsuranceProductStatus.ACTIVE,
-      });
-    }
-
-    if (coverageType) {
-      qb.andWhere('product.coverageType = :coverageType', { coverageType });
-    }
-    if (insurerId) {
-      qb.andWhere('product.insurerId = :insurerId', { insurerId });
-    }
-    if (search) {
-      qb.andWhere('LOWER(product.name) LIKE LOWER(:search)', {
-        search: `%${search}%`,
-      });
-    }
-    if (premiumMin !== undefined) {
-      qb.andWhere('product.premiumAmount >= :premiumMin', { premiumMin });
-    }
-    if (premiumMax !== undefined) {
-      qb.andWhere('product.premiumAmount <= :premiumMax', { premiumMax });
-    }
-    if (attendeeCount !== undefined) {
-      qb.andWhere(
-        '(product.maxAttendeesSupported IS NULL OR product.maxAttendeesSupported >= :attendeeCount)',
-        { attendeeCount },
-      );
-    }
-    if (daysBeforeEvent !== undefined) {
-      qb.andWhere('product.minDaysBeforeEvent <= :daysBeforeEvent', {
-        daysBeforeEvent,
-      });
-    }
-
-    // Only show products from APPROVED insurers in marketplace listings
-    qb.andWhere('insurer.status = :insurerStatus', {
-      insurerStatus: InsurerStatus.APPROVED,
-    });
-
-    qb.orderBy(sortField, order as 'ASC' | 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
-
-    const [data, total] = await qb.getManyAndCount();
-
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
-  }
-
-  async getInsuranceProduct(productId: string): Promise<InsuranceProduct> {
-    const product = await this.productRepo.findOne({
-      where: { id: productId },
-      relations: ['insurer'],
-    });
-    if (!product) {
-      throw new NotFoundException(`Insurance product "${productId}" not found.`);
-    }
-    return product;
-  }
-
-  /** Insurer: create a new product (starts in DRAFT). */
-  async createInsuranceProduct(
-    dto: CreateInsuranceProductDto,
-    userId: string,
-  ): Promise<InsuranceProduct> {
-    const insurer = await this.requireApprovedInsurer(userId);
-
-    const product = this.productRepo.create({
-      ...dto,
-      currency: dto.currency ?? 'USD',
-      coverageTerms: dto.coverageTerms ?? {},
-      minDaysBeforeEvent: dto.minDaysBeforeEvent ?? 0,
-      insurerId: insurer.id,
-      status: InsuranceProductStatus.DRAFT,
-    });
-
-    const saved = await this.productRepo.save(product);
-
-    await this.auditService.log({
-      action: 'INSURANCE_PRODUCT_CREATED',
-      userId,
-      resourceId: saved.id,
-      meta: { name: saved.name, coverageType: saved.coverageType },
-    });
-
-    return saved;
-  }
-
-  /** Insurer: update own product details or change status. */
-  async updateInsuranceProduct(
-    productId: string,
-    dto: UpdateInsuranceProductDto,
-    userId: string,
-  ): Promise<InsuranceProduct> {
-    const product = await this.requireOwnProduct(productId, userId);
-    Object.assign(product, dto);
-    const saved = await this.productRepo.save(product);
-
-    await this.auditService.log({
-      action: 'INSURANCE_PRODUCT_UPDATED',
-      userId,
-      resourceId: productId,
-      meta: { changes: Object.keys(dto) },
-    });
-
-    return saved;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // COMPARE  (compare_insurance_options)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * compare_insurance_options — side-by-side analysis of 2–5 products.
-   * Returns each product enriched with a value score and eligibility flags.
-   * Optionally checks eligibility against a real event when eventId is provided.
-   */
-  async compareInsuranceOptions(
-    dto: CompareInsuranceOptionsDto,
-  ): Promise<InsuranceComparisonEntry[]> {
-    const products = await this.productRepo.find({
-      where: dto.productIds.map((id) => ({ id })),
-      relations: ['insurer'],
-    });
-
-    if (products.length !== dto.productIds.length) {
-      const foundIds = products.map((p) => p.id);
-      const missing = dto.productIds.filter((id) => !foundIds.includes(id));
-      throw new NotFoundException(
-        `Products not found: ${missing.join(', ')}`,
-      );
-    }
-
-    // Optionally fetch event for eligibility checks
-    let eventDaysAway: number | null = null;
-    if (dto.eventId) {
-      // We do a lightweight raw query rather than injecting EventsService
-      // to avoid circular module dependencies.
-      const raw = await this.productRepo.manager.query(
-        `SELECT "startDate" FROM events WHERE id = $1 LIMIT 1`,
-        [dto.eventId],
-      );
-      if (raw.length > 0) {
-        const startDate = new Date(raw[0].startDate as string);
-        eventDaysAway = Math.floor(
-          (startDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
-        );
-      }
-    }
-
-    return products.map((product) => {
-      const eligibilityReasons: string[] = [];
-      let isEligible = true;
-
-      // Check insurer status
-      if (product.insurer.status !== InsurerStatus.APPROVED) {
-        isEligible = false;
-        eligibilityReasons.push('Insurer is not currently approved on the marketplace.');
-      }
-
-      // Check product status
-      if (product.status !== InsuranceProductStatus.ACTIVE) {
-        isEligible = false;
-        eligibilityReasons.push(`Product is ${product.status}, not active.`);
-      }
-
-      // Check attendee count compatibility
-      if (
-        dto.attendeeCount !== undefined &&
-        product.maxAttendeesSupported !== null &&
-        dto.attendeeCount > product.maxAttendeesSupported
-      ) {
-        isEligible = false;
-        eligibilityReasons.push(
-          `Product supports up to ${product.maxAttendeesSupported} attendees; event has ${dto.attendeeCount}.`,
-        );
-      }
-
-      // Check days-before-event requirement
-      if (eventDaysAway !== null && eventDaysAway < product.minDaysBeforeEvent) {
-        isEligible = false;
-        eligibilityReasons.push(
-          `Must be purchased at least ${product.minDaysBeforeEvent} days before the event (${eventDaysAway} days remaining).`,
-        );
-      }
-
-      // Value score: coverage bang-per-buck ratio (capped at 9999 for display)
-      const premium = Number(product.premiumAmount);
-      const coverage = Number(product.maxCoverageAmount);
-      const valueScore =
-        premium > 0 ? Math.min(Math.round((coverage / premium) * 10) / 10, 9999) : 0;
-
-      return { product, insurer: product.insurer, valueScore, isEligible, eligibilityReasons };
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // POLICIES
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Purchase a policy for a given event.
-   * If paymentTxHash is provided the policy is immediately activated;
-   * otherwise it sits in PENDING_PAYMENT until confirmed separately.
-   */
-  async purchasePolicy(dto: PurchasePolicyDto, userId: string): Promise<InsurancePolicy> {
-    const product = await this.productRepo.findOne({
-      where: { id: dto.productId },
-      relations: ['insurer'],
-    });
-    if (!product) {
-      throw new NotFoundException(`Insurance product "${dto.productId}" not found.`);
-    }
-    if (product.status !== InsuranceProductStatus.ACTIVE) {
-      throw new BadRequestException(
-        `Product "${product.name}" is not currently available for purchase.`,
-      );
-    }
-    if (product.insurer.status !== InsurerStatus.APPROVED) {
-      throw new BadRequestException('This insurer is not currently approved.');
-    }
-
-    // Prevent duplicate active policies for the same user+product+event
-    const duplicate = await this.policyRepo.findOne({
-      where: {
-        userId,
-        productId: dto.productId,
-        eventId: dto.eventId,
-        status: PolicyStatus.ACTIVE,
-      },
-    });
-    if (duplicate) {
-      throw new ConflictException(
-        'You already hold an active policy for this product and event.',
-      );
-    }
-
-    // Fetch event dates for coverage window
-    const eventRows = await this.policyRepo.manager.query(
-      `SELECT "startDate", "endDate", "maxAttendees" FROM events WHERE id = $1 LIMIT 1`,
-      [dto.eventId],
-    );
-    if (!eventRows.length) {
-      throw new NotFoundException(`Event "${dto.eventId}" not found.`);
-    }
-    const event = eventRows[0] as {
-      startDate: string;
-      endDate: string;
-      maxAttendees: number | null;
-    };
-
-    // Enforce minDaysBeforeEvent
-    const daysAway = Math.floor(
-      (new Date(event.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
-    );
-    if (daysAway < product.minDaysBeforeEvent) {
-      throw new BadRequestException(
-        `This product must be purchased at least ${product.minDaysBeforeEvent} day(s) before the event.`,
-      );
-    }
-
-    // Enforce maxAttendeesSupported
-    if (
-      product.maxAttendeesSupported !== null &&
-      event.maxAttendees !== null &&
-      event.maxAttendees > product.maxAttendeesSupported
-    ) {
-      throw new BadRequestException(
-        `This product supports events with up to ${product.maxAttendeesSupported} attendees.`,
-      );
-    }
-
-    const policyNumber = this.generatePolicyNumber();
-    const isActivated = !!dto.paymentTxHash;
-
-    const policy = this.policyRepo.create({
-      userId,
-      eventId: dto.eventId,
-      productId: product.id,
-      premiumPaid: product.premiumAmount,
-      currency: product.currency,
-      status: isActivated ? PolicyStatus.ACTIVE : PolicyStatus.PENDING_PAYMENT,
-      effectiveFrom: isActivated ? new Date() : null,
-      effectiveTo: isActivated ? new Date(event.endDate) : null,
-      policyNumber,
-      paymentTxHash: dto.paymentTxHash ?? null,
-      coverageSnapshot: {
-        coverageType: product.coverageType,
-        maxCoverageAmount: product.maxCoverageAmount,
-        ...product.coverageTerms,
-      },
     @InjectRepository(InsurancePolicyEntity)
     private readonly policyRepo: Repository<InsurancePolicyEntity>,
 
@@ -615,365 +186,6 @@ export class InsuranceService {
 
     const saved = await this.policyRepo.save(policy);
 
-    // Increment product counter (non-blocking)
-    this.productRepo
-      .increment({ id: product.id }, 'totalPoliciesSold', 1)
-      .catch(() => undefined);
-
-    await this.auditService.log({
-      action: 'INSURANCE_POLICY_PURCHASED',
-      userId,
-      resourceId: saved.id,
-      meta: {
-        productId: product.id,
-        eventId: dto.eventId,
-        status: saved.status,
-        policyNumber,
-      },
-    });
-
-    return saved;
-  }
-
-  /** Confirm payment for a PENDING_PAYMENT policy. */
-  async confirmPolicyPayment(
-    policyId: string,
-    txHash: string,
-    userId: string,
-  ): Promise<InsurancePolicy> {
-    const policy = await this.findPolicyOrFail(policyId);
-
-    if (policy.userId !== userId) {
-      throw new ForbiddenException('You do not own this policy.');
-    }
-    if (policy.status !== PolicyStatus.PENDING_PAYMENT) {
-      throw new BadRequestException(`Policy is already ${policy.status}.`);
-    }
-
-    // Fetch event end date for coverage window
-    const eventRows = await this.policyRepo.manager.query(
-      `SELECT "endDate" FROM events WHERE id = $1 LIMIT 1`,
-      [policy.eventId],
-    );
-
-    policy.status = PolicyStatus.ACTIVE;
-    policy.paymentTxHash = txHash;
-    policy.effectiveFrom = new Date();
-    policy.effectiveTo = eventRows.length ? new Date(eventRows[0].endDate as string) : null;
-
-    const saved = await this.policyRepo.save(policy);
-
-    await this.auditService.log({
-      action: 'INSURANCE_POLICY_ACTIVATED',
-      userId,
-      resourceId: policyId,
-      meta: { txHash },
-    });
-
-    return saved;
-  }
-
-  async listMyPolicies(userId: string, page = 1, limit = 10): Promise<PaginatedResult<InsurancePolicy>> {
-    const [data, total] = await this.policyRepo.findAndCount({
-      where: { userId },
-      relations: ['product', 'product.insurer'],
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
-  }
-
-  async getPolicyById(policyId: string, userId: string): Promise<InsurancePolicy> {
-    const policy = await this.findPolicyOrFail(policyId);
-    if (policy.userId !== userId) {
-      throw new ForbiddenException('You do not have access to this policy.');
-    }
-    return policy;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // CLAIMS  (process_insurance_claim)
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /**
-   * process_insurance_claim — submit a claim against an active policy.
-   * Validates ownership, policy status, and that requestedAmount ≤ maxCoverageAmount.
-   */
-  async processInsuranceClaim(
-    dto: ProcessInsuranceClaimDto,
-    userId: string,
-  ): Promise<InsuranceClaim> {
-    const policy = await this.findPolicyOrFail(dto.policyId);
-
-    if (policy.userId !== userId) {
-      throw new ForbiddenException('You do not own this policy.');
-    }
-    if (policy.status !== PolicyStatus.ACTIVE) {
-      throw new BadRequestException(
-        `Cannot file a claim against a policy with status "${policy.status}".`,
-      );
-    }
-
-    // Check policy coverage window
-    const now = new Date();
-    if (policy.effectiveTo && now > policy.effectiveTo) {
-      throw new BadRequestException('This policy has expired and no longer accepts claims.');
-    }
-
-    // Fetch max coverage from snapshot
-    const maxCoverage = Number(
-      (policy.coverageSnapshot as Record<string, unknown>)['maxCoverageAmount'] ?? 0,
-    );
-    if (maxCoverage > 0 && dto.requestedAmount > maxCoverage) {
-      throw new BadRequestException(
-        `Requested amount (${dto.requestedAmount}) exceeds maximum coverage (${maxCoverage}).`,
-      );
-    }
-
-    // Prevent a second open claim on the same policy
-    const openClaim = await this.claimRepo.findOne({
-      where: [
-        { policyId: dto.policyId, status: ClaimStatus.SUBMITTED },
-        { policyId: dto.policyId, status: ClaimStatus.UNDER_REVIEW },
-      ],
-    });
-    if (openClaim) {
-      throw new ConflictException(
-        'There is already an open claim for this policy. Wait for it to be resolved.',
-      );
-    }
-
-    const claim = this.claimRepo.create({
-      policyId: dto.policyId,
-      claimantUserId: userId,
-      description: dto.description,
-      requestedAmount: dto.requestedAmount,
-      evidenceUrls: dto.evidenceUrls ?? [],
-      status: ClaimStatus.SUBMITTED,
-    });
-
-    const saved = await this.claimRepo.save(claim);
-
-    // Mark the policy as CLAIMED so no second active claim window opens
-    policy.status = PolicyStatus.CLAIMED;
-    await this.policyRepo.save(policy);
-
-    await this.auditService.log({
-      action: 'INSURANCE_CLAIM_SUBMITTED',
-      userId,
-      resourceId: saved.id,
-      meta: { policyId: dto.policyId, requestedAmount: dto.requestedAmount },
-    });
-
-    return saved;
-  }
-
-  /**
-   * Insurer: review a submitted claim — approve or reject it.
-   */
-  async reviewClaim(
-    claimId: string,
-    dto: ReviewClaimDto,
-    reviewerUserId: string,
-  ): Promise<InsuranceClaim> {
-    const claim = await this.findClaimOrFail(claimId);
-
-    if (
-      claim.status !== ClaimStatus.SUBMITTED &&
-      claim.status !== ClaimStatus.UNDER_REVIEW
-    ) {
-      throw new BadRequestException(
-        `Claim is already in "${claim.status}" state and cannot be reviewed.`,
-      );
-    }
-
-    // Verify the reviewer belongs to the insurer that issued the product
-    await this.requireInsurerOwnsPolicy(reviewerUserId, claim.policyId);
-
-    if (dto.decision === ClaimStatus.APPROVED) {
-      if (dto.approvedAmount === undefined) {
-        throw new BadRequestException('approvedAmount is required when approving a claim.');
-      }
-      claim.approvedAmount = dto.approvedAmount;
-      claim.status = ClaimStatus.APPROVED;
-    } else {
-      claim.status = ClaimStatus.REJECTED;
-    }
-
-    claim.reviewNotes = dto.reviewNotes ?? null;
-    claim.reviewedByUserId = reviewerUserId;
-    claim.reviewedAt = new Date();
-
-    const saved = await this.claimRepo.save(claim);
-
-    await this.auditService.log({
-      action: 'INSURANCE_CLAIM_REVIEWED',
-      userId: reviewerUserId,
-      resourceId: claimId,
-      meta: { decision: dto.decision, approvedAmount: dto.approvedAmount },
-    });
-
-    return saved;
-  }
-
-  /** Insurer: mark an approved claim as paid and record the payout tx. */
-  async markClaimPaid(
-    claimId: string,
-    payoutTxHash: string,
-    reviewerUserId: string,
-  ): Promise<InsuranceClaim> {
-    const claim = await this.findClaimOrFail(claimId);
-
-    if (claim.status !== ClaimStatus.APPROVED) {
-      throw new BadRequestException('Only APPROVED claims can be marked as paid.');
-    }
-
-    await this.requireInsurerOwnsPolicy(reviewerUserId, claim.policyId);
-
-    claim.status = ClaimStatus.PAID;
-    claim.payoutTxHash = payoutTxHash;
-    const saved = await this.claimRepo.save(claim);
-
-    // Update insurer statistics (non-blocking)
-    const policy = await this.policyRepo.findOne({ where: { id: claim.policyId }, relations: ['product'] });
-    if (policy?.product?.insurerId) {
-      this.insurerRepo
-        .increment({ id: policy.product.insurerId }, 'totalClaimsPaid', 1)
-        .catch(() => undefined);
-    }
-
-    await this.auditService.log({
-      action: 'INSURANCE_CLAIM_PAID',
-      userId: reviewerUserId,
-      resourceId: claimId,
-      meta: { payoutTxHash },
-    });
-
-    return saved;
-  }
-
-  async listClaims(
-    dto: ListClaimsDto,
-    requesterId: string,
-    isInsurer: boolean,
-  ): Promise<PaginatedResult<InsuranceClaim>> {
-    const { status, policyId, claimantUserId, page = 1, limit = 10 } = dto;
-
-    const qb = this.claimRepo
-      .createQueryBuilder('claim')
-      .leftJoinAndSelect('claim.policy', 'policy')
-      .leftJoinAndSelect('policy.product', 'product')
-      .leftJoinAndSelect('product.insurer', 'insurer');
-
-    // Non-insurer users can only see their own claims
-    if (!isInsurer) {
-      qb.andWhere('claim.claimantUserId = :requesterId', { requesterId });
-    } else if (claimantUserId) {
-      qb.andWhere('claim.claimantUserId = :claimantUserId', { claimantUserId });
-    }
-
-    if (status) qb.andWhere('claim.status = :status', { status });
-    if (policyId) qb.andWhere('claim.policyId = :policyId', { policyId });
-
-    qb.orderBy('claim.createdAt', 'DESC').skip((page - 1) * limit).take(limit);
-
-    const [data, total] = await qb.getManyAndCount();
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
-  }
-
-  async getClaimById(claimId: string, userId: string, isInsurer: boolean): Promise<InsuranceClaim> {
-    const claim = await this.findClaimOrFail(claimId);
-
-    if (!isInsurer && claim.claimantUserId !== userId) {
-      throw new ForbiddenException('You do not have access to this claim.');
-    }
-
-    return claim;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // PRIVATE HELPERS
-  // ─────────────────────────────────────────────────────────────────────────
-
-  private async findInsurerOrFail(insurerId: string): Promise<Insurer> {
-    const insurer = await this.insurerRepo.findOne({ where: { id: insurerId } });
-    if (!insurer) throw new NotFoundException(`Insurer "${insurerId}" not found.`);
-    return insurer;
-  }
-
-  private async findPolicyOrFail(policyId: string): Promise<InsurancePolicy> {
-    const policy = await this.policyRepo.findOne({
-      where: { id: policyId },
-      relations: ['product'],
-    });
-    if (!policy) throw new NotFoundException(`Policy "${policyId}" not found.`);
-    return policy;
-  }
-
-  private async findClaimOrFail(claimId: string): Promise<InsuranceClaim> {
-    const claim = await this.claimRepo.findOne({
-      where: { id: claimId },
-      relations: ['policy', 'policy.product'],
-    });
-    if (!claim) throw new NotFoundException(`Claim "${claimId}" not found.`);
-    return claim;
-  }
-
-  /** Resolve the insurer for a given userId and verify it is APPROVED. */
-  private async requireApprovedInsurer(userId: string): Promise<Insurer> {
-    const insurer = await this.insurerRepo.findOne({ where: { userId } });
-    if (!insurer) {
-      throw new ForbiddenException('You do not have an insurer profile.');
-    }
-    if (insurer.status !== InsurerStatus.APPROVED) {
-      throw new ForbiddenException(
-        `Your insurer account status is "${insurer.status}". Only approved insurers can manage products.`,
-      );
-    }
-    return insurer;
-  }
-
-  /** Verify the userId owns the product (via their insurer profile). */
-  private async requireOwnProduct(
-    productId: string,
-    userId: string,
-  ): Promise<InsuranceProduct> {
-    const insurer = await this.insurerRepo.findOne({ where: { userId } });
-    if (!insurer) throw new ForbiddenException('No insurer profile found.');
-
-    const product = await this.productRepo.findOne({ where: { id: productId } });
-    if (!product) throw new NotFoundException(`Product "${productId}" not found.`);
-    if (product.insurerId !== insurer.id) {
-      throw new ForbiddenException('You do not own this product.');
-    }
-    return product;
-  }
-
-  /**
-   * Verify that the reviewer's insurer profile is the one that issued
-   * the product linked to this policy.
-   */
-  private async requireInsurerOwnsPolicy(reviewerUserId: string, policyId: string): Promise<void> {
-    const insurer = await this.insurerRepo.findOne({ where: { userId: reviewerUserId } });
-    if (!insurer) throw new ForbiddenException('No insurer profile found.');
-
-    const policy = await this.policyRepo.findOne({
-      where: { id: policyId },
-      relations: ['product'],
-    });
-    if (!policy) throw new NotFoundException(`Policy "${policyId}" not found.`);
-
-    if (policy.product.insurerId !== insurer.id) {
-      throw new ForbiddenException('You are not the insurer for this policy.');
-    }
-  }
-
-  /** Generate a human-readable policy number: LX-INS-<timestamp>-<random4>. */
-  private generatePolicyNumber(): string {
-    const ts = Date.now().toString(36).toUpperCase();
-    const rand = randomBytes(2).toString('hex').toUpperCase();
-    return `LX-INS-${ts}-${rand}`;
     // 7. Audit log
     await this.auditService.log({
       action: 'INSURANCE_PURCHASED',
@@ -1000,75 +212,272 @@ export class InsuranceService {
   // auto_adjudicate_claim & claim rules
   // ─────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Apply rule-based criteria to determine if an insurance claim can be auto-adjudicated.
-   * Straightforward event cancellations are auto-approved, while edge cases require human reviewer.
-   */
-  async apply_claim_rules(
-    ticketId: string,
-    cancellationReason: CancellationReason,
-  ): Promise<{ autoApprove: boolean; reason?: string; requiresReview: boolean }> {
-    const isValid = await this.validateCancellationReason(ticketId, cancellationReason);
-    if (!isValid) {
-      return {
-        autoApprove: false,
-        reason: `Invalid cancellation reason "${cancellationReason}" or inactive policy/event.`,
-        requiresReview: true,
-      };
-    }
-
-    const AUTO_APPROVED_REASONS = new Set<CancellationReason>([
-      CancellationReason.EVENT_CANCELLED,
-      CancellationReason.ORGANIZER_CANCELLATION,
-      CancellationReason.WEATHER,
-    ]);
-
-    if (AUTO_APPROVED_REASONS.has(cancellationReason)) {
-      return { autoApprove: true, requiresReview: false };
-    }
-
-    return {
-      autoApprove: false,
-      reason: `Cancellation reason "${cancellationReason}" requires human reviewer evaluation.`,
-      requiresReview: true,
-    };
+  /** Coverage above this is always sent to a human (INSURANCE_AUTO_APPROVE_MAX_COVERAGE). */
+  private get autoApproveMaxCoverage(): number {
+    const configured = Number(
+      this.configService.get<number>('INSURANCE_AUTO_APPROVE_MAX_COVERAGE'),
+    );
+    return Number.isFinite(configured) && configured >= 0
+      ? configured
+      : DEFAULT_AUTO_APPROVE_MAX_COVERAGE;
   }
 
   /**
-   * Escalate an edge-case insurance claim to a human reviewer.
+   * Evaluate a claim against the rule-based criteria. Rules are evaluated in
+   * order and every check is reported:
+   *  - `reject`  — the claim is invalid (no active policy, event not cancelled,
+   *                unknown reason); nothing to review.
+   *  - `review`  — a valid claim that needs judgement (a discretionary reason
+   *                such as force majeure or "other", or coverage above the
+   *                auto-approve cap).
+   *  - `approve` — a straightforward cancellation that can be paid automatically.
+   * Throws ForbiddenException if the caller does not hold the policy.
+   */
+  async apply_claim_rules(
+    userId: string,
+    dto: ProcessInsuranceClaimDto,
+  ): Promise<ClaimRuleResultDto & { policy: InsurancePolicyEntity | null }> {
+    const checks: ClaimRuleCheckDto[] = [];
+    const finish = (
+      decision: ClaimRuleResultDto['decision'],
+      reason: string | null,
+      policy: InsurancePolicyEntity | null,
+    ) => ({ decision, reason, checks, policy });
+
+    const policy = await this.policyRepo.findOne({
+      where: { ticketId: dto.ticketId },
+    });
+    checks.push({
+      rule: 'policy_exists',
+      passed: !!policy,
+      detail: policy
+        ? `Policy ${policy.id}`
+        : `No insurance policy for ticket ${dto.ticketId}`,
+    });
+    if (!policy)
+      return finish('reject', 'No insurance policy covers this ticket.', null);
+
+    if (policy.userId !== userId) {
+      throw new ForbiddenException(
+        'You are not the holder of this insurance policy.',
+      );
+    }
+
+    const policyActive = policy.status === InsurancePolicyStatus.ACTIVE;
+    checks.push({
+      rule: 'policy_active',
+      passed: policyActive,
+      detail: `Policy status is "${policy.status}"`,
+    });
+    if (!policyActive) {
+      return finish(
+        'reject',
+        `Policy is not active (status: "${policy.status}").`,
+        policy,
+      );
+    }
+
+    const knownReason = VALID_CLAIM_REASONS.has(dto.cancellationReason);
+    checks.push({
+      rule: 'reason_recognised',
+      passed: knownReason,
+      detail: `Cancellation reason "${dto.cancellationReason}"`,
+    });
+    if (!knownReason) {
+      return finish(
+        'reject',
+        `Unrecognised cancellation reason "${dto.cancellationReason}".`,
+        policy,
+      );
+    }
+
+    const event = await this.eventRepo.findOne({
+      where: { id: policy.eventId },
+      select: ['id', 'status'],
+    });
+    const cancelled = event?.status === EventStatus.CANCELLED;
+    checks.push({
+      rule: 'event_cancelled',
+      passed: cancelled,
+      detail: event
+        ? `Event status is "${event.status}"`
+        : `Event ${policy.eventId} not found`,
+    });
+    if (!cancelled) {
+      return finish(
+        'reject',
+        'Claims are only paid for cancelled events.',
+        policy,
+      );
+    }
+
+    const straightforward = AUTO_APPROVABLE_REASONS.has(dto.cancellationReason);
+    checks.push({
+      rule: 'reason_auto_approvable',
+      passed: straightforward,
+      detail: straightforward
+        ? `"${dto.cancellationReason}" is a straightforward cancellation`
+        : `"${dto.cancellationReason}" needs a reviewer's judgement`,
+    });
+
+    const cap = this.autoApproveMaxCoverage;
+    const coverage = Number(policy.coverageAmount);
+    const withinCap = coverage <= cap;
+    checks.push({
+      rule: 'coverage_within_auto_approve_cap',
+      passed: withinCap,
+      detail: `Coverage ${coverage} ${policy.currency} vs cap ${cap}`,
+    });
+
+    if (!straightforward) {
+      return finish(
+        'review',
+        `Cancellation reason "${dto.cancellationReason}" requires human review.`,
+        policy,
+      );
+    }
+    if (!withinCap) {
+      return finish(
+        'review',
+        `Coverage ${coverage} ${policy.currency} exceeds the auto-approve cap of ${cap}.`,
+        policy,
+      );
+    }
+    return finish('approve', null, policy);
+  }
+
+  /**
+   * Escalate a claim to a human reviewer: the policy moves to `under_review`
+   * with the reason recorded, so it appears in the review queue and can no
+   * longer be claimed automatically. Escalating an already-escalated policy
+   * is a no-op.
    */
   async escalate_to_reviewer(
     policyId: string,
     reason: string,
-  ): Promise<{ escalated: boolean; policyId: string; reason: string }> {
-    this.logger.warn(`Escalating insurance claim for policy ${policyId} to human reviewer: ${reason}`);
+    cancellationReason: CancellationReason,
+    actorId: string,
+  ): Promise<InsurancePolicyEntity> {
+    const policy = await this.policyRepo.findOne({ where: { id: policyId } });
+    if (!policy) {
+      throw new NotFoundException(`Insurance policy "${policyId}" not found.`);
+    }
+    if (policy.status === InsurancePolicyStatus.UNDER_REVIEW) {
+      return policy;
+    }
+    if (policy.status !== InsurancePolicyStatus.ACTIVE) {
+      throw new BadRequestException(
+        `Only active policies can be escalated (current status: "${policy.status}").`,
+      );
+    }
+
+    policy.status = InsurancePolicyStatus.UNDER_REVIEW;
+    policy.claimReason = cancellationReason;
+    policy.escalationReason = reason;
+    policy.escalatedAt = new Date();
+    const saved = await this.policyRepo.save(policy);
+
+    this.logger.warn(
+      `Escalating insurance claim for policy ${policyId} to human reviewer: ${reason}`,
+    );
     await this.auditService.log({
       action: 'INSURANCE_CLAIM_ESCALATED',
+      userId: actorId,
       resourceId: policyId,
-      meta: { reason },
+      meta: { reason, cancellationReason, ticketId: policy.ticketId },
     });
-    return { escalated: true, policyId, reason };
+    return saved;
   }
 
   /**
-   * Automatically process straightforward insurance claims using rule-based criteria before escalating edge cases.
+   * Automatically process a claim: straightforward cancellations are paid
+   * immediately, edge cases are escalated to a human reviewer, and invalid
+   * claims are rejected with the failing rule.
    */
   async auto_adjudicate_claim(
     userId: string,
     dto: ProcessInsuranceClaimDto,
-  ): Promise<InsuranceClaimResultDto | { escalated: boolean; policyId: string; reason: string }> {
-    const ruleResult = await this.apply_claim_rules(dto.ticketId, dto.cancellationReason);
+  ): Promise<InsuranceClaimResultDto | InsuranceClaimEscalationDto> {
+    const { decision, reason, checks, policy } = await this.apply_claim_rules(
+      userId,
+      dto,
+    );
 
-    if (ruleResult.autoApprove) {
+    if (decision === 'reject' || !policy) {
+      throw new BadRequestException(
+        reason ?? 'Claim does not meet the insurance criteria.',
+      );
+    }
+
+    if (decision === 'approve') {
       return this.processInsuranceClaim(userId, dto);
     }
 
-    const policy = await this.policyRepo.findOne({ where: { ticketId: dto.ticketId } });
-    const policyId = policy?.id ?? dto.ticketId;
+    const escalated = await this.escalate_to_reviewer(
+      policy.id,
+      reason ?? 'Claim flagged for human review.',
+      dto.cancellationReason,
+      userId,
+    );
+    return {
+      escalated: true,
+      policyId: escalated.id,
+      reason: escalated.escalationReason ?? reason ?? '',
+      policy: this.toDto(escalated),
+      checks,
+    };
+  }
 
-    return this.escalate_to_reviewer(
-      policyId,
-      ruleResult.reason ?? 'Claim criteria flagged for human reviewer evaluation',
+  /** Claims awaiting a human reviewer, oldest escalation first. */
+  async listClaimsUnderReview(): Promise<InsurancePolicyDto[]> {
+    const policies = await this.policyRepo.find({
+      where: { status: InsurancePolicyStatus.UNDER_REVIEW },
+      order: { escalatedAt: 'ASC' },
+    });
+    return policies.map((p) => this.toDto(p));
+  }
+
+  /**
+   * A reviewer's decision on an escalated claim. Approval pays the coverage
+   * to the policy holder exactly like an automatic approval; rejection closes
+   * the claim without payout.
+   */
+  async reviewEscalatedClaim(
+    policyId: string,
+    reviewerId: string,
+    decision: 'approve' | 'reject',
+    note?: string,
+  ): Promise<InsuranceClaimResultDto | InsurancePolicyDto> {
+    const policy = await this.policyRepo.findOne({ where: { id: policyId } });
+    if (!policy) {
+      throw new NotFoundException(`Insurance policy "${policyId}" not found.`);
+    }
+    if (policy.status !== InsurancePolicyStatus.UNDER_REVIEW) {
+      throw new BadRequestException(
+        `Only claims under review can be decided (current status: "${policy.status}").`,
+      );
+    }
+
+    policy.reviewedBy = reviewerId;
+    policy.reviewedAt = new Date();
+    policy.reviewNote = note ?? null;
+
+    if (decision === 'reject') {
+      policy.status = InsurancePolicyStatus.CLAIM_REJECTED;
+      const saved = await this.policyRepo.save(policy);
+      await this.auditService.log({
+        action: 'INSURANCE_CLAIM_REJECTED',
+        userId: reviewerId,
+        resourceId: policy.id,
+        meta: { ticketId: policy.ticketId, note: note ?? null },
+      });
+      return this.toDto(saved);
+    }
+
+    return this.payoutClaim(
+      policy,
+      (policy.claimReason as CancellationReason) ?? CancellationReason.OTHER,
+      reviewerId,
     );
   }
 
@@ -1119,6 +528,22 @@ export class InsuranceService {
         `Insurance policy is not active (current status: "${policy.status}"). Cannot process claim.`,
       );
     }
+
+    return this.payoutClaim(policy, dto.cancellationReason, userId);
+  }
+
+  /**
+   * Pays a policy's coverage from the event escrow to the policy holder and
+   * marks it claimed. Shared by direct/automatic claims and reviewer approval;
+   * `actorId` is who triggered the payout (holder or reviewer).
+   */
+  private async payoutClaim(
+    policy: InsurancePolicyEntity,
+    cancellationReason: CancellationReason,
+    actorId: string,
+  ): Promise<InsuranceClaimResultDto> {
+    const userId = policy.userId;
+    const dto = { ticketId: policy.ticketId, cancellationReason };
 
     // 5. Verify the event is actually cancelled
     const event = await this.eventRepo
@@ -1186,7 +611,7 @@ export class InsuranceService {
     // 10. Audit log
     await this.auditService.log({
       action: 'INSURANCE_CLAIM_PROCESSED',
-      userId,
+      userId: actorId,
       resourceId: policy.id,
       meta: {
         ticketId: dto.ticketId,
@@ -1330,6 +755,11 @@ export class InsuranceService {
       currency: policy.currency,
       status: policy.status,
       claimReason: policy.claimReason,
+      escalationReason: policy.escalationReason ?? null,
+      escalatedAt: policy.escalatedAt ?? null,
+      reviewedBy: policy.reviewedBy ?? null,
+      reviewedAt: policy.reviewedAt ?? null,
+      reviewNote: policy.reviewNote ?? null,
       premiumTransactionHash: policy.premiumTransactionHash,
       claimTransactionHash: policy.claimTransactionHash,
       createdAt: policy.createdAt,

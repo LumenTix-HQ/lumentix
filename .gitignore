@@ -92,3 +92,5 @@ frontend/.next/
 .agent/
 .agents/
 issue.md
+# Test run output
+test_output.txt

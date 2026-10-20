@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { axe } from 'jest-axe';
+import { renderWithIntl } from '../helpers/renderWithIntl';
 
 // jsdom cannot compute rendered colors, so color-contrast is unreliable here;
 // and isolated component fragments legitimately lack page landmarks. We disable
@@ -78,8 +79,9 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-// FeaturedEvents is an async server component that fetches at request time;
-// stub it so the home page renders synchronously under jsdom.
+// FeaturedEvents is an async server component that fetches at request time and
+// cannot render under jsdom, so it stays mocked (next-intl context is provided by
+// renderWithIntl for everything else on the page).
 vi.mock('@/components/FeaturedEvents', () => ({ default: () => null }));
 
 beforeEach(() => {
@@ -91,7 +93,7 @@ beforeEach(() => {
 describe('Page accessibility — zero critical/serious axe violations', () => {
   it('home page has no violations', async () => {
     const { default: Home } = await import('@/app/page');
-    const { container } = render(<Home />);
+    const { container } = renderWithIntl(<Home />);
     await checkA11y(container);
   });
 
@@ -103,13 +105,13 @@ describe('Page accessibility — zero critical/serious axe violations', () => {
 
   it('login page has no violations', async () => {
     const { default: Login } = await import('@/app/login/page');
-    const { container } = render(<Login />);
+    const { container } = renderWithIntl(<Login />);
     await checkA11y(container);
   });
 
   it('register page has no violations', async () => {
     const { default: Register } = await import('@/app/register/page');
-    const { container } = render(<Register />);
+    const { container } = renderWithIntl(<Register />);
     await checkA11y(container);
   });
 });

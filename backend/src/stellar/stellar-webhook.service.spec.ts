@@ -161,6 +161,7 @@ describe('StellarWebhookService', () => {
 
   // ── Reconnection ────────────────────────────────────────────────────────
 
+  describe('reconnection', () => {
     it('uses exponential backoff for reconnection attempts', () => {
       jest.useFakeTimers();
 

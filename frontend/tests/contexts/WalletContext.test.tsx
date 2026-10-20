@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { WalletProvider, useWallet } from '@/contexts/WalletContext';
+import { freighterMock, resetFreighterMock, TEST_PUBLIC_KEY } from '../mocks/freighter';
 import { WalletType, NetworkType } from '@/types/wallet';
 
 // Mock child component to test context
@@ -36,27 +37,15 @@ const renderWithContext = () => {
   );
 };
 
-// Mock Freighter API
-const mockFreighterAPI = {
-  isConnected: vi.fn(),
-  requestAccess: vi.fn(),
-};
-
-vi.mock('@stellar/freighter-api', () => ({
-  isConnected: () => mockFreighterAPI.isConnected(),
-  requestAccess: () => mockFreighterAPI.requestAccess(),
-  getNetworkDetails: vi.fn(),
-}));
+// Shared Freighter mock (v6 return shapes); see tests/mocks/freighter.ts
+vi.mock('@stellar/freighter-api', async () => (await import('../mocks/freighter')).freighterModule);
+const mockFreighterAPI = freighterMock;
 
 describe('WalletContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    mockFreighterAPI.isConnected.mockResolvedValue({ isConnected: true, error: null });
-    mockFreighterAPI.requestAccess.mockResolvedValue({
-      address: 'GTEST1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-      error: null,
-    });
+    resetFreighterMock();
   });
 
   it('should initialize with default state', () => {
@@ -85,7 +74,7 @@ describe('WalletContext', () => {
 
     expect(screen.getByTestId('is-connected').textContent).toBe('true');
     expect(screen.getByTestId('public-key').textContent).toBe(
-      'GTEST1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+      TEST_PUBLIC_KEY
     );
     expect(screen.getByTestId('wallet-type').textContent).toBe(WalletType.FREIGHTER);
     expect(screen.getByTestId('error').textContent).toBe('null');
@@ -167,7 +156,7 @@ describe('WalletContext', () => {
 
     expect(setItemSpy).toHaveBeenCalledWith(
       'lumentix_wallet',
-      expect.stringContaining('GTEST1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+      expect.stringContaining(TEST_PUBLIC_KEY)
     );
   });
 

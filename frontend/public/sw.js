@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lumentix-v1';
+const CACHE_NAME = 'lumentix-v2';
 
 // Event listings and ticket details live in their own cache, separate from the
 // app shell. They are versioned and evicted independently: a shell release
@@ -7,12 +7,16 @@ const CACHE_NAME = 'lumentix-v1';
 const DATA_CACHE_NAME = 'lumentix-data-v1';
 const CURRENT_CACHES = [CACHE_NAME, DATA_CACHE_NAME];
 
+// App-shell assets worth precaching. Auth-gated routes (e.g. /my-tickets) are
+// deliberately excluded: middleware redirects anonymous requests to /login, so
+// precaching them would just cache the login page under the wrong URL. The web
+// app manifest is served at /manifest.webmanifest (Next's app/manifest.ts
+// route), not /manifest.ts.
 const STATIC_ASSETS = [
   '/',
   '/offline',
   '/events',
-  '/my-tickets',
-  '/manifest.ts',
+  '/manifest.webmanifest',
 ];
 
 // Paths whose responses are worth keeping for offline browsing.
@@ -26,7 +30,12 @@ const SYNC_STORE = 'requests';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    // Cache each asset independently with `allSettled` so a single missing
+    // asset can never reject the whole install and leave the worker stuck in
+    // "installing" (which disabled offline support, background sync and push).
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(STATIC_ASSETS.map((asset) => cache.add(asset)))
+    )
   );
   self.skipWaiting();
 });

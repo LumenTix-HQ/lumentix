@@ -2,8 +2,6 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
 import { ConfigModule } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { BullModule } from '@nestjs/bull';
 import { stellarConfig } from './stellar.config';
 import { StellarController } from './stellar.controller';
 import { StellarService, PAYMENT_RETRY_QUEUE } from './stellar.service';

@@ -13,6 +13,7 @@ import { NotificationModule } from 'src/notifications/notification.module';
 import { User } from 'src/users/entities/user.entity';
 import { Event } from 'src/events/entities/event.entity';
 import { EscrowModule } from 'src/payments/escrow.module';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { EscrowModule } from 'src/payments/escrow.module';
     AuditModule,
     NotificationModule,
     EscrowModule,
+    RedisModule,
   ],
   controllers: [SponsorsController, EventSponsorsController, SponsorProfileController],
   providers: [SponsorsService, ContributionsService],

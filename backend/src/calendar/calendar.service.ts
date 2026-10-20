@@ -3,6 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { Event } from '../events/entities/event.entity';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { MailerService } from '../mailer/mailer.service';
+
+export interface CalendarAttendeeContact {
+  email: string;
+  name?: string;
+}
 
 export interface CalendarInviteData {
   to: string;
@@ -22,6 +28,7 @@ export class CalendarService {
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly mailerService: MailerService,
   ) {}
 
   /**
@@ -39,6 +46,15 @@ export class CalendarService {
     attendeeName?: string;
     uid?: string;
     url?: string;
+    /**
+     * RFC 5545 SEQUENCE — must increase on every update to the same UID so
+     * calendar clients apply the change instead of ignoring a stale/
+     * duplicate copy. Defaults to 0 for a first-time invite.
+     */
+    sequence?: number;
+    /** PUBLISH: first invite. REQUEST: update to an existing invite. CANCEL: remove it. */
+    method?: 'PUBLISH' | 'REQUEST' | 'CANCEL';
+    cancelled?: boolean;
   }): string {
     const now = this.formatIcalDate(new Date().toISOString());
     const dtStart = this.formatIcalDate(data.startDate);
@@ -47,20 +63,24 @@ export class CalendarService {
     const description = (data.eventDescription ?? '')
       .replace(/\n/g, '\\n')
       .replace(/,/g, '\\,');
+    const method = data.method ?? 'PUBLISH';
+    const sequence = data.sequence ?? 0;
 
     const lines: string[] = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//Lumentix//Event Calendar//EN',
       'CALSCALE:GREGORIAN',
-      'METHOD:PUBLISH',
+      `METHOD:${method}`,
       'BEGIN:VEVENT',
       `UID:${uid}`,
+      `SEQUENCE:${sequence}`,
       `DTSTAMP:${now}`,
       `DTSTART:${dtStart}`,
       `DTEND:${dtEnd}`,
       `SUMMARY:${data.eventTitle}`,
       `DESCRIPTION:${description || 'No description provided.'}`,
+      `STATUS:${data.cancelled ? 'CANCELLED' : 'CONFIRMED'}`,
     ];
 
     if (data.location) {
@@ -90,6 +110,150 @@ export class CalendarService {
     lines.push('END:VCALENDAR');
 
     return lines.join('\r\n');
+  }
+
+  /** Generate a calendar event for a purchased ticket. */
+  generate_ical_event(data: Parameters<CalendarService['generateIcalFile']>[0]): string {
+    return this.generateIcalFile(data);
+  }
+
+  /**
+   * Analytics #992 — build the (REQUEST-method, incremented-SEQUENCE) ICS
+   * for an event that just changed, and email it to every attendee so
+   * calendar apps that already imported the original invite apply the
+   * update automatically instead of showing stale details.
+   */
+  async syncCalendarUpdate(
+    event: {
+      id: string;
+      title: string;
+      description?: string | null;
+      startDate: Date;
+      endDate: Date;
+      location?: string | null;
+      updatedAt: Date;
+    },
+    attendees: CalendarAttendeeContact[],
+  ): Promise<void> {
+    if (attendees.length === 0) return;
+
+    // updatedAt (epoch seconds) is monotonically increasing across edits,
+    // which is all RFC 5545 requires of SEQUENCE — no separate counter to
+    // persist.
+    const sequence = Math.floor(event.updatedAt.getTime() / 1000);
+
+    await Promise.all(
+      attendees.map((attendee) =>
+        this.sendCalendarEmail(event, attendee, {
+          method: 'REQUEST',
+          sequence,
+          subject: `Updated: ${event.title}`,
+          intro: `The details for ${event.title} have changed. Your calendar invite has been updated below.`,
+        }),
+      ),
+    );
+  }
+
+  /** Synchronize a purchased ticket's calendar entry after an event change. */
+  async sync_calendar_update(
+    event: Parameters<CalendarService['syncCalendarUpdate']>[0],
+    attendees: CalendarAttendeeContact[],
+  ): Promise<void> {
+    return this.syncCalendarUpdate(event, attendees);
+  }
+
+  /**
+   * Analytics #992 — build a CANCEL-method ICS for a cancelled event and
+   * email it to every attendee, so calendar apps remove it automatically.
+   */
+  async removeCancelledEvent(
+    event: {
+      id: string;
+      title: string;
+      description?: string | null;
+      startDate: Date;
+      endDate: Date;
+      location?: string | null;
+      updatedAt: Date;
+    },
+    attendees: CalendarAttendeeContact[],
+  ): Promise<void> {
+    if (attendees.length === 0) return;
+
+    const sequence = Math.floor(event.updatedAt.getTime() / 1000);
+
+    await Promise.all(
+      attendees.map((attendee) =>
+        this.sendCalendarEmail(event, attendee, {
+          method: 'CANCEL',
+          sequence,
+          cancelled: true,
+          subject: `Cancelled: ${event.title}`,
+          intro: `${event.title} has been cancelled. It has been removed from your calendar below.`,
+        }),
+      ),
+    );
+  }
+
+  /** Remove a cancelled purchased event from attendee calendars. */
+  async remove_cancelled_event(
+    event: Parameters<CalendarService['removeCancelledEvent']>[0],
+    attendees: CalendarAttendeeContact[],
+  ): Promise<void> {
+    return this.removeCancelledEvent(event, attendees);
+  }
+
+  private async sendCalendarEmail(
+    event: {
+      id: string;
+      title: string;
+      description?: string | null;
+      startDate: Date;
+      endDate: Date;
+      location?: string | null;
+    },
+    attendee: CalendarAttendeeContact,
+    opts: {
+      method: 'REQUEST' | 'CANCEL';
+      sequence: number;
+      cancelled?: boolean;
+      subject: string;
+      intro: string;
+    },
+  ): Promise<void> {
+    const icsContent = this.generate_ical_event({
+      eventTitle: event.title,
+      eventDescription: event.description ?? undefined,
+      startDate: event.startDate.toISOString(),
+      endDate: event.endDate.toISOString(),
+      location: event.location ?? undefined,
+      uid: `event-${event.id}@lumentix`,
+      attendeeEmail: attendee.email,
+      attendeeName: attendee.name,
+      method: opts.method,
+      sequence: opts.sequence,
+      cancelled: opts.cancelled,
+    });
+
+    try {
+      await this.mailerService.send({
+        to: attendee.email,
+        subject: opts.subject,
+        html: `<p>${opts.intro}</p>`,
+        attachments: [
+          {
+            filename: `event-${event.id}.ics`,
+            content: icsContent,
+            contentType: `text/calendar; method=${opts.method}; charset=utf-8`,
+          },
+        ],
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to send calendar ${opts.method} email to ${attendee.email} for event ${event.id}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+    }
   }
 
   /**
@@ -209,7 +373,7 @@ export class CalendarService {
       google: this.createGoogleCalendarLink(data),
       outlook: this.createOutlookCalendarLink(data),
       yahoo: this.createYahooCalendarLink(data),
-      icsContent: this.generateIcalFile({ ...data, uid: `all-${Date.now()}@lumentix` }),
+      icsContent: this.generate_ical_event({ ...data, uid: `all-${Date.now()}@lumentix` }),
     };
   }
 

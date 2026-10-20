@@ -1,16 +1,18 @@
 import {
+  InjectQueue,
   Process,
   Processor,
   OnQueueActive,
   OnQueueCompleted,
   OnQueueFailed,
 } from '@nestjs/bull';
-import { Job } from 'bull';
+import { Job, Queue } from 'bull';
 import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { MailerService } from '../mailer/mailer.service';
 import { UsersService } from '../users/users.service';
 import { CalendarService } from '../calendar/calendar.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
+import { NotificationCategory, NotificationChannel } from './dto/save-notification-preferences.dto';
 
 @Processor('notifications')
 export class NotificationProcessor {
@@ -21,37 +23,59 @@ export class NotificationProcessor {
     private readonly usersService: UsersService,
     private readonly calendarService: CalendarService,
     private readonly notificationPreferencesService: NotificationPreferencesService,
+    @InjectQueue('notifications') private readonly notificationQueue: Queue,
   ) { }
 
-  private async shouldSkip(job: Job, preferenceKey: string): Promise<boolean> {
+  /**
+   * Applies the recipient's preferences to an email job. Returns true when the
+   * job should not be sent now — either because the user turned off email for
+   * this category (or the legacy per-type opt-out), or because they are in
+   * quiet hours, in which case the job is re-queued to run when they end.
+   */
+  private async shouldSkip(
+    job: Job,
+    preferenceKey: string,
+    category: NotificationCategory,
+  ): Promise<boolean> {
     const criticalJobs = ['sendRefundEmail', 'eventCancelled']; // cancellation is critical
     if (criticalJobs.includes(job.name)) {
       return false;
     }
 
-    if (!job.data.userId) {
+    const userId = job.data.userId ?? job.data.organizerId;
+    if (!userId) {
       this.logger.warn(`Job ${job.id} (${job.name}) missing userId, sending anyway.`);
       return false;
     }
 
     try {
-      const user = await this.usersService.findById(job.data.userId);
-      // We need the raw entity to access notificationPreferences if findById sanitizes it
-      // Actually UsersService.findById returns sanitized user.
-      // Let's check if notificationPreferences is included in sanitized user.
-      const prefs = (user as any).notificationPreferences;
+      const user = await this.usersService.findById(userId);
+      const prefs = user.notificationPreferences;
 
       if (prefs && prefs[preferenceKey] === false) {
-        this.logger.log(`Skipping ${job.name} email for user ${job.data.userId} — opted out`);
+        this.logger.log(`Skipping ${job.name} email for user ${userId} — opted out`);
         return true;
       }
 
-      if (this.notificationPreferencesService.enforceQuietHours((user as any).quietHours)) {
-        this.logger.log(`Skipping ${job.name} email for user ${job.data.userId} — quiet hours`);
+      const route = this.notificationPreferencesService.resolveRoute(user, category);
+      if (!route.channels.includes(NotificationChannel.EMAIL)) {
+        this.logger.log(`Skipping ${job.name} email for user ${userId} — email disabled for ${category}`);
+        return true;
+      }
+
+      if (route.delayMs > 0) {
+        await this.notificationQueue.add(job.name, job.data, {
+          ...job.opts,
+          jobId: undefined,
+          delay: route.delayMs,
+        });
+        this.logger.log(
+          `Deferring ${job.name} email for user ${userId} by ${route.delayMs}ms — quiet hours`,
+        );
         return true;
       }
     } catch (error) {
-      this.logger.error(`Failed to check preferences for user ${job.data.userId}: ${error.message}`);
+      this.logger.error(`Failed to check preferences for user ${userId}: ${error.message}`);
     }
 
     return false;
@@ -59,12 +83,14 @@ export class NotificationProcessor {
 
   @Process('sendTicketEmail')
   async handleTicketEmail(job: Job) {
-    if (await this.shouldSkip(job, 'ticketIssued')) return;
+    if (await this.shouldSkip(job, 'ticketIssued', NotificationCategory.PAYMENT_CONFIRMATIONS)) return;
 
     this.logger.log(`Sending ticket email for job ${job.id}...`);
     const { email, ticketId, eventName, pdfUrl, eventDate, eventLocation } = job.data;
     const subject = `Your ticket for ${eventName}`;
-    await this.mailerService.send(email, subject, {
+    await this.mailerService.send({
+      to: email,
+      subject: subject,
       template: 'ticket-ready',
       context: {
         name: email,
@@ -90,7 +116,7 @@ export class NotificationProcessor {
         <p>Sale amount: <strong>${amount} ${currency}</strong></p>
       </div>
     `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send({ to: email, subject, html });
     return { sent: true };
   }
 
@@ -100,7 +126,9 @@ export class NotificationProcessor {
     this.logger.log(`Sending refund email for job ${job.id}...`);
     const { email, amount, refundId, currency, eventTitle, transactionHash } = job.data;
     const subject = 'Your refund has been processed';
-    await this.mailerService.send(email, subject, {
+    await this.mailerService.send({
+      to: email,
+      subject: subject,
       template: 'refund-issued',
       context: {
         name: email,
@@ -115,7 +143,7 @@ export class NotificationProcessor {
 
   @Process('sendSponsorEmail')
   async handleSponsorEmail(job: Job) {
-    if (await this.shouldSkip(job, 'sponsorConfirmed')) return;
+    if (await this.shouldSkip(job, 'sponsorConfirmed', NotificationCategory.PAYMENT_CONFIRMATIONS)) return;
 
     this.logger.log(`Sending sponsor confirmation for job ${job.id}...`);
     const { email, sponsorName } = job.data;
@@ -126,7 +154,7 @@ export class NotificationProcessor {
         <p>Thank you, <strong>${sponsorName}</strong>, for your support!</p>
       </div>
     `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send({ to: email, subject, html });
   }
 
   @Process('sendSponsorConfirmedEmail')
@@ -154,7 +182,7 @@ export class NotificationProcessor {
         <p>Transaction: <strong>${transactionHash}</strong></p>
       </div>
     `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send({ to: email, subject, html });
     return { sent: true };
   }
 
@@ -184,7 +212,7 @@ export class NotificationProcessor {
         <p>Please try again or contact support if the issue persists.</p>
       </div>
     `;
-    await this.mailerService.send(email, subject, html);
+    await this.mailerService.send({ to: email, subject, html });
     return { sent: true };
   }
 
@@ -206,7 +234,9 @@ export class NotificationProcessor {
     }
 
     const subject = `Event Cancelled: ${eventTitle}`;
-    await this.mailerService.send(user.email, subject, {
+    await this.mailerService.send({
+      to: user.email,
+      subject: subject,
       template: 'event-cancelled',
       context: {
         name: user.email,
@@ -221,7 +251,7 @@ export class NotificationProcessor {
 
   @Process('sendEventPublishedEmail')
   async handleEventPublishedEmail(job: Job) {
-    if (await this.shouldSkip(job, 'eventPublished')) return;
+    if (await this.shouldSkip(job, 'eventPublished', NotificationCategory.SCHEDULE_CHANGES)) return;
 
     this.logger.log(`Sending event published email for job ${job.id}...`);
     const { organizerId, eventTitle } = job.data;
@@ -244,13 +274,13 @@ export class NotificationProcessor {
         <p>Congratulations! Your event <strong>${eventTitle}</strong> has been published and is now accepting registrations.</p>
       </div>
     `;
-    await this.mailerService.send(user.email, subject, html);
+    await this.mailerService.send({ to: user.email, subject, html });
     return { sent: true };
   }
 
   @Process('sendEventCompletedEmail')
   async handleEventCompletedEmail(job: Job) {
-    if (await this.shouldSkip(job, 'eventCompleted')) return;
+    if (await this.shouldSkip(job, 'eventCompleted', NotificationCategory.SCHEDULE_CHANGES)) return;
 
     this.logger.log(`Sending event completed email for job ${job.id}...`);
     const { organizerId, eventTitle } = job.data;
@@ -273,7 +303,7 @@ export class NotificationProcessor {
         <p>Your event <strong>${eventTitle}</strong> has been marked as completed. Thank you for hosting on Lumentix!</p>
       </div>
     `;
-    await this.mailerService.send(user.email, subject, html);
+    await this.mailerService.send({ to: user.email, subject, html });
     return { sent: true };
   }
 
@@ -304,7 +334,7 @@ export class NotificationProcessor {
         <p>Your loyalty tier has changed from <strong>${previousTier}</strong> to <strong>${newTier}</strong>.</p>
       </div>
     `;
-    await this.mailerService.send(user.email, subject, html);
+    await this.mailerService.send({ to: user.email, subject, html });
     return { sent: true };
   }
 

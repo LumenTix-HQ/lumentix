@@ -11,8 +11,10 @@ import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
 import { Event, EventStatus } from 'src/events/entities/event.entity';
 import { StellarService } from 'src/stellar';
-import { EncryptionService } from '../../common/encryption/encryption.service';
-import { ENCRYPTION_PROVIDER } from '../../common/encryption/encryption.service';
+import {
+  EncryptionService,
+  ENCRYPTION_PROVIDER,
+} from '../../common/encryption/encryption.service';
 import { LocalEncryptionProvider } from '../../common/encryption/providers/local-encryption.provider';
 
 // ─── Constants ───────────────────────────────────────────────────────────────

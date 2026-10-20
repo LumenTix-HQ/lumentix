@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { sanitizeEmailHtml } from '@/lib/sanitize-email-html';
 import type { CreateEmailCampaignPayload, EmailCampaign } from '@/types/email-campaign';
 
 interface Props {
@@ -169,7 +170,7 @@ export function EmailCampaignComposer({ events, onCreated, onCancel }: Props) {
               className="w-full min-h-[200px] rounded-lg bg-white border border-gray-600 p-4 text-sm overflow-auto"
               aria-label="Email preview"
               /* eslint-disable-next-line react/no-danger */
-              dangerouslySetInnerHTML={{ __html: bodyHtml || PREVIEW_PLACEHOLDER }}
+              dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(bodyHtml) || PREVIEW_PLACEHOLDER }}
             />
           )}
           <p className="text-xs text-gray-500 mt-1">

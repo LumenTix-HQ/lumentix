@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Achievement,
   AchievementCategory,
@@ -18,10 +19,6 @@ import {
   TIER_STYLES,
   UserAchievement,
 } from '@/types/gamification';
-
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('lumentix_access_token') ?? '' : '';
-}
 
 // ── XP level progress ─────────────────────────────────────────────────────────
 function xpForLevel(level: number) { return (level - 1) ** 2 * 100; }
@@ -240,7 +237,7 @@ function ActivityRecorder({ onRecord }: { onRecord: (result: { xpGained: number;
   const submit = async () => {
     setLoading(true); setFeedback(null);
     try {
-      const result = await apiClient.recordActivity({ activityType: activity }, getToken()) as any;
+      const result = await apiClient.recordActivity({ activityType: activity });
       const msg = `+${result.xpGained} XP${result.newAchievements?.length ? ` · ${result.newAchievements.length} new badge(s)!` : ''}`;
       setFeedback(msg);
       onRecord(result);
@@ -290,22 +287,21 @@ export default function GamificationPage() {
   const [catFilter, setCatFilter]       = useState<AchievementCategory | 'all'>('all');
   const [joiningId, setJoiningId]       = useState<string | null>(null);
   const [loading, setLoading]           = useState(true);
-  const [token, setToken]               = useState('');
-
-  useEffect(() => { setToken(getToken()); }, []);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [error, setError]               = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const t = getToken();
-    if (!t) { setLoading(false); return; }
+    if (!isAuthenticated) { setLoading(false); return; }
     setLoading(true);
+    setError(null);
     try {
       const [prof, all, mine, lb, ch, parts] = await Promise.all([
-        apiClient.getMyGamificationProfile(t) as Promise<GamificationProfile>,
-        apiClient.getAllAchievements(t) as Promise<Achievement[]>,
-        apiClient.getMyAchievements(t) as Promise<UserAchievement[]>,
-        apiClient.getLeaderboard(t, period, 50) as Promise<LeaderboardEntry[]>,
-        apiClient.getActiveChallenges(t) as Promise<Challenge[]>,
-        apiClient.getMyChallenges(t) as Promise<ChallengeParticipation[]>,
+        apiClient.getMyGamificationProfile(),
+        apiClient.getAllAchievements(),
+        apiClient.getMyAchievements(),
+        apiClient.getLeaderboard(period, 50),
+        apiClient.getActiveChallenges(),
+        apiClient.getMyChallenges(),
       ]);
       setProfile(prof);
       setAll(all);
@@ -313,19 +309,22 @@ export default function GamificationPage() {
       setLeaderboard(lb);
       setChallenges(ch);
       setMyParts(parts);
-    } catch { /* show stale */ }
-    finally { setLoading(false); }
-  }, [period]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load your achievements.');
+    } finally { setLoading(false); }
+  }, [isAuthenticated, period]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (!authLoading) load(); }, [authLoading, load]);
 
   const handleJoin = async (challengeId: string) => {
     setJoiningId(challengeId);
+    setError(null);
     try {
-      await apiClient.joinChallenge(challengeId, getToken());
+      await apiClient.joinChallenge(challengeId);
       await load();
-    } catch { /* show error inline */ }
-    finally { setJoiningId(null); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not join the challenge.');
+    } finally { setJoiningId(null); }
   };
 
   const earnedIds = new Set(myAchievements.map(ua => ua.achievementId));
@@ -352,10 +351,15 @@ export default function GamificationPage() {
           <p className="text-gray-500">Earn XP, unlock badges, climb the leaderboard, and complete challenges.</p>
         </div>
 
-        {!token ? (
+        {!isAuthenticated && !authLoading ? (
           <div className="text-center py-20 text-gray-500">
             <div className="text-5xl mb-4">🏆</div>
             <p className="text-lg">Sign in to track your achievements and compete on the leaderboard.</p>
+          </div>
+        ) : error && !profile ? (
+          <div role="alert" className="text-center py-16 text-red-400">
+            <p>{error}</p>
+            <button onClick={load} className="mt-4 px-4 py-2 rounded-xl bg-white/[0.06] text-white text-sm">Try again</button>
           </div>
         ) : loading ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

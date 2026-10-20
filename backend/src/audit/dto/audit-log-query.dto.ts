@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   Min,
 } from 'class-validator';
 
@@ -21,6 +22,14 @@ export class AuditLogQueryDto {
   @IsOptional()
   @IsString()
   resourceId?: string;
+
+  /**
+   * Free-text term matched against action, userId, resourceId and metadata.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  search?: string;
 
   @IsOptional()
   @IsDateString()

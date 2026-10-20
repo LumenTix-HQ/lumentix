@@ -13,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { ScanAnalyticsService } from './scan-analytics.service';
 import { RecordScanDto, FetchRealtimeScanSpeedDto } from './dto/record-scan.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../users/enums/user-role.enum';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
@@ -39,7 +40,7 @@ export class ScanAnalyticsController {
   }
 
   @Get('scan-velocity')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({
@@ -60,7 +61,7 @@ export class ScanAnalyticsController {
   }
 
   @Get('throughput')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({
@@ -77,7 +78,7 @@ export class ScanAnalyticsController {
   }
 
   @Get('realtime-speed')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({
@@ -97,5 +98,21 @@ export class ScanAnalyticsController {
       gateId,
       minutesBack,
     );
+  }
+
+  @Get('staffing-recommendation')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get gate staffing recommendations',
+    description: 'Organizer-only. Calculates recommended gate staffing based on scan velocity and queue volume.',
+  })
+  @ApiResponse({ status: 200, description: 'Staffing recommendation' })
+  async getStaffingRecommendation(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Query('gateId') gateId?: string,
+  ) {
+    return this.scanService.getStaffingRecommendation(eventId, gateId);
   }
 }

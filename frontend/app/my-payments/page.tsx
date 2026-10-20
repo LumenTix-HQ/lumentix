@@ -41,7 +41,19 @@ function getStellarExpertUrl(txHash: string): string {
 }
 
 export default function MyPaymentsPage() {
-  const { payments, loading, error, filter, setFilter } = usePaymentHistory();
+  const {
+    payments,
+    loading,
+    error,
+    filter,
+    setFilter,
+    page,
+    setPage,
+    total,
+    lastPage,
+    hasNextPage,
+    hasPreviousPage,
+  } = usePaymentHistory();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggleExpand = (id: string) => {
@@ -193,6 +205,29 @@ export default function MyPaymentsPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
+              <p className="text-sm text-gray-500">
+                Page {page} of {Math.max(1, lastPage)} &middot; {total} total
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={!hasPreviousPage}
+                  className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={!hasNextPage}
+                  className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         ) : (

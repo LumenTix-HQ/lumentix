@@ -7,11 +7,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, In } from 'typeorm';
-import { Event } from '../events/entities/event.entity';
+import { Event, EventStatus } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { Registration, RegistrationStatus } from '../registrations/entities/registration.entity';
-import { AgeVerification } from '../age-verification/entities/age-verification.entity';
 import { User } from '../users/entities/user.entity';
 
 import {
@@ -44,11 +43,18 @@ import {
   RevenueDashboardDto,
   CurrencyRevenue,
   RevenueTimePoint,
+  RevenueBreakdownRow,
+  RevenueReportDto,
 } from './dto/revenue-dashboard.dto';
-import { EventStatus } from '../events/entities/event.entity';
 import { MerchItem } from '../merch/entities/merch-item.entity';
 import { MerchReservation } from '../merch/entities/merch-reservation.entity';
-import { RevenueBreakdownRow, RevenueReportDto } from './dto/revenue-dashboard.dto';
+import * as PDFDocument from 'pdfkit';
+
+/** Minimal shape analyzeAgeDemographics needs; the age-verification module that supplied it was retired (#1023). */
+interface AgeRecord {
+  dateOfBirth: Date | string | null;
+  status: string;
+}
 
 @Injectable()
 export class AnalyticsService {
@@ -63,8 +69,6 @@ export class AnalyticsService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(Registration)
     private readonly registrationRepository: Repository<Registration>,
-    @InjectRepository(AgeVerification)
-    private readonly ageVerificationRepository: Repository<AgeVerification>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(MerchItem)
@@ -256,12 +260,9 @@ export class AnalyticsService {
         r.status === RegistrationStatus.PENDING,
     );
 
-    // Get age verifications
-    const ageVerifications = await this.ageVerificationRepository.find({
-      where: { eventId },
-    });
-
-    const demographics = this.analyzeAgeDemographics(ageVerifications);
+    // No date-of-birth source since age verification was retired (#1023), so
+    // the age buckets report zero; the response shape is kept for clients.
+    const demographics = this.analyzeAgeDemographics([]);
 
     // Get currency breakdown
     const payments = await this.paymentRepository.find({
@@ -308,7 +309,7 @@ export class AnalyticsService {
   }
 
   private analyzeAgeDemographics(
-    ageVerifications: AgeVerification[],
+    ageVerifications: AgeRecord[],
   ): DemographicBreakdown {
     const today = new Date();
     const ages: number[] = [];
@@ -852,7 +853,6 @@ export class AnalyticsService {
       return { contentType: 'text/csv; charset=utf-8', filename: `revenue-${eventId}.csv`, body: Buffer.from(rows.map((row) => row.map(escape).join(',')).join('\n')) };
     }
     return new Promise((resolve, reject) => {
-      const PDFDocument = require('pdfkit');
       const doc = new PDFDocument({ margin: 48 });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));

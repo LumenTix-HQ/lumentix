@@ -5,45 +5,6 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm';
-import { PolicyStatus } from '../enums/policy-status.enum';
-import { InsuranceProduct } from './insurance-product.entity';
-
-/**
- * A purchased insurance policy — one per (user × product × event) combination.
- */
-@Index(['userId', 'status'])
-@Index(['eventId', 'status'])
-@Entity('insurance_policies')
-export class InsurancePolicy {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  /** The attendee / organiser who purchased this policy. */
-  @Index()
-  @Column()
-  userId: string;
-
-  /** The event the policy covers. */
-  @Index()
-  @Column()
-  eventId: string;
-
-  @Index()
-  @Column()
-  productId: string;
-
-  @ManyToOne(() => InsuranceProduct, { onDelete: 'RESTRICT' })
-  @JoinColumn({ name: 'productId' })
-  product: InsuranceProduct;
-
-  /** Premium actually paid by the policyholder. */
-  @Column({ type: 'decimal', precision: 18, scale: 2 })
-  premiumPaid: number;
-
-  @Column({ default: 'USD' })
 } from 'typeorm';
 
 export enum InsurancePolicyStatus {
@@ -51,6 +12,10 @@ export enum InsurancePolicyStatus {
   CLAIMED = 'claimed',
   EXPIRED = 'expired',
   CANCELLED = 'cancelled',
+  /** Claim escalated by auto-adjudication; awaiting a human reviewer. */
+  UNDER_REVIEW = 'under_review',
+  /** Claim rejected by a human reviewer; the policy pays out nothing. */
+  CLAIM_REJECTED = 'claim_rejected',
 }
 
 /**
@@ -95,31 +60,6 @@ export class InsurancePolicyEntity {
 
   @Column({
     type: 'enum',
-    enum: PolicyStatus,
-    default: PolicyStatus.PENDING_PAYMENT,
-  })
-  status: PolicyStatus;
-
-  /** Policy becomes active from this timestamp. */
-  @Column({ type: 'timestamptz', nullable: true, default: null })
-  effectiveFrom: Date | null;
-
-  /** Policy expires at this timestamp (typically the event end date). */
-  @Column({ type: 'timestamptz', nullable: true, default: null })
-  effectiveTo: Date | null;
-
-  /** Unique policy reference number shown to the customer. */
-  @Index({ unique: true })
-  @Column({ type: 'varchar', nullable: true, default: null })
-  policyNumber: string | null;
-
-  /** Transaction hash of the premium payment (Stellar or other). */
-  @Column({ type: 'varchar', nullable: true, default: null })
-  paymentTxHash: string | null;
-
-  /** Snapshot of coverage terms at purchase time — immutable after issue. */
-  @Column({ type: 'jsonb', default: {} })
-  coverageSnapshot: Record<string, unknown>;
     enum: InsurancePolicyStatus,
     default: InsurancePolicyStatus.ACTIVE,
   })
@@ -128,6 +68,23 @@ export class InsurancePolicyEntity {
   /** Cancellation reason provided when a claim was filed */
   @Column({ type: 'varchar', nullable: true })
   claimReason: string | null;
+
+  /** Why auto-adjudication sent the claim to a human reviewer */
+  @Column({ type: 'varchar', nullable: true })
+  escalationReason: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  escalatedAt: Date | null;
+
+  /** Admin who approved or rejected an escalated claim */
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  reviewedBy: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  reviewedAt: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  reviewNote: string | null;
 
   /** Stellar transaction hash of the premium payment */
   @Column({ type: 'varchar', nullable: true })

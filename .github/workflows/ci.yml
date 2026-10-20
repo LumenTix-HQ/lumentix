@@ -29,7 +29,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d lumentix_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -46,7 +46,7 @@ jobs:
         working-directory: backend
         run: npm ci
 
-      - name: Check pending migrations
+      - name: Run migrations and check for entity/migration drift
         working-directory: backend
         run: npm run check-migrations
 
@@ -64,6 +64,19 @@ jobs:
       - name: Install dependencies
         working-directory: backend
         run: npm ci
+
+      - name: Verify package-lock.json is in sync
+        working-directory: backend
+        run: git diff --exit-code package-lock.json
+
+      - name: Check for undeclared dependencies
+        working-directory: backend
+        run: |
+          npx --yes depcheck@1.4.7 --json | node -e "
+            const report = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const missing = Object.keys(report.missing);
+            if (missing.length) { console.error('Undeclared imports: ' + missing.join(', ')); process.exit(1); }
+          "
 
       - name: Build
         working-directory: backend

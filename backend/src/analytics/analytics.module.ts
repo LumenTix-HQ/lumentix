@@ -6,7 +6,6 @@ import { Event } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { Registration } from '../registrations/entities/registration.entity';
-import { AgeVerification } from '../age-verification/entities/age-verification.entity';
 import { User } from '../users/entities/user.entity';
 import { MerchItem } from '../merch/entities/merch-item.entity';
 import { MerchReservation } from '../merch/entities/merch-reservation.entity';
@@ -18,7 +17,6 @@ import { MerchReservation } from '../merch/entities/merch-reservation.entity';
       TicketEntity,
       Payment,
       Registration,
-      AgeVerification,
       User,
       MerchItem,
       MerchReservation,

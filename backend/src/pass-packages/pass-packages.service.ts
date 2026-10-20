@@ -5,9 +5,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, IsNull } from 'typeorm';
 import { PassPackage, UserPassPackage } from './entities/pass-package.entity';
-import { User } from '../users/entities/user.entity';
+import { Role } from '../common/decorators/roles.decorator';
+import { AuthenticatedUser } from '../common/interfaces/authenticated-request.interface';
 import { Event } from '../events/entities/event.entity';
 import { CreatePassPackageDto } from './dto/create-pass-package.dto';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
@@ -27,11 +28,11 @@ export class PassPackagesService {
    * Create a new cross-event pass package
    */
   async createPassPackage(
-    creator: User,
+    creator: AuthenticatedUser,
     dto: CreatePassPackageDto,
   ): Promise<PassPackage> {
     // Validate organizer role
-    if (creator.role !== 'ORGANIZER' && creator.role !== 'ADMIN') {
+    if (creator.role !== Role.ORGANIZER && creator.role !== Role.ADMIN) {
       throw new ForbiddenException(
         'Only organizers can create pass packages',
       );
@@ -88,7 +89,7 @@ export class PassPackagesService {
     take = 20,
   ): Promise<PaginatedResponseDto<PassPackage>> {
     const [data, total] = await this.passPackageRepository.findAndCount({
-      where: { isActive: true, deletedAt: null },
+      where: { isActive: true, deletedAt: IsNull() },
       skip,
       take,
       order: { createdAt: 'DESC' },
@@ -102,7 +103,7 @@ export class PassPackagesService {
    */
   async getPassPackageById(id: string): Promise<PassPackage> {
     const passPackage = await this.passPackageRepository.findOne({
-      where: { id, isActive: true, deletedAt: null },
+      where: { id, isActive: true, deletedAt: IsNull() },
     });
 
     if (!passPackage) {
@@ -116,7 +117,7 @@ export class PassPackagesService {
    * Purchase a pass package
    */
   async purchasePassPackage(
-    user: User,
+    user: AuthenticatedUser,
     packageId: string,
     transactionHash: string,
   ): Promise<UserPassPackage> {
@@ -142,7 +143,7 @@ export class PassPackagesService {
       where: {
         userId: user.id,
         passPackageId: packageId,
-        deletedAt: null,
+        deletedAt: IsNull(),
       },
     });
 
@@ -182,7 +183,7 @@ export class PassPackagesService {
     const [data, total] = await this.userPassPackageRepository.findAndCount({
       where: {
         userId,
-        deletedAt: null,
+        deletedAt: IsNull(),
       },
       relations: ['passPackage'],
       skip,
@@ -205,7 +206,7 @@ export class PassPackagesService {
     isValid: boolean;
   }> {
     const userPass = await this.userPassPackageRepository.findOne({
-      where: { id: passId, deletedAt: null },
+      where: { id: passId, deletedAt: IsNull() },
       relations: ['passPackage'],
     });
 
@@ -240,7 +241,7 @@ export class PassPackagesService {
     reason?: string;
   }> {
     const userPass = await this.userPassPackageRepository.findOne({
-      where: { id: passId, deletedAt: null },
+      where: { id: passId, deletedAt: IsNull() },
       relations: ['passPackage'],
     });
 
@@ -311,7 +312,7 @@ export class PassPackagesService {
     eventId: string,
   ): Promise<UserPassPackage> {
     const userPass = await this.userPassPackageRepository.findOne({
-      where: { id: passId, deletedAt: null },
+      where: { id: passId, deletedAt: IsNull() },
       relations: ['passPackage'],
     });
 
@@ -340,7 +341,7 @@ export class PassPackagesService {
    */
   async updatePassPackage(
     packageId: string,
-    creator: User,
+    creator: AuthenticatedUser,
     updates: Partial<CreatePassPackageDto>,
   ): Promise<PassPackage> {
     const passPackage = await this.passPackageRepository.findOne({
@@ -351,7 +352,7 @@ export class PassPackagesService {
       throw new NotFoundException('Pass package not found');
     }
 
-    if (passPackage.createdBy !== creator.id && creator.role !== 'ADMIN') {
+    if (passPackage.createdBy !== creator.id && creator.role !== Role.ADMIN) {
       throw new ForbiddenException(
         'Not authorized to update this pass package',
       );
@@ -369,7 +370,7 @@ export class PassPackagesService {
   /**
    * Delete pass package (soft delete)
    */
-  async deletePassPackage(packageId: string, user: User): Promise<void> {
+  async deletePassPackage(packageId: string, user: AuthenticatedUser): Promise<void> {
     const passPackage = await this.passPackageRepository.findOne({
       where: { id: packageId },
     });
@@ -378,7 +379,7 @@ export class PassPackagesService {
       throw new NotFoundException('Pass package not found');
     }
 
-    if (passPackage.createdBy !== user.id && user.role !== 'ADMIN') {
+    if (passPackage.createdBy !== user.id && user.role !== Role.ADMIN) {
       throw new ForbiddenException(
         'Not authorized to delete this pass package',
       );

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder, Between, LessThan } from 'typeorm';
+import { Repository, SelectQueryBuilder, LessThan } from 'typeorm';
 import { AuditLog } from './entities/audit-log.entity';
 import { ListAuditLogsDto } from './dto/list-audit-logs.dto';
 import { paginate } from '../common/pagination/pagination.helper';
@@ -46,7 +46,15 @@ export class AuditService {
     return saved;
   }
 
-  async list(dto: ListAuditLogsDto) {
+  /**
+   * Search audit logs with the full filter set.
+   *
+   * `search` is a free-text term applied across the action, the actor, the
+   * resource and the metadata blob, so an organizer can paste an ID or a word
+   * out of a gift message and still land on the right row. It is combined
+   * (AND) with the structured filters rather than replacing them.
+   */
+  async findLogs(dto: ListAuditLogsDto) {
     const qb = this.auditLogRepository.createQueryBuilder('log');
 
     if (dto.action) {
@@ -58,9 +66,20 @@ export class AuditService {
     if (dto.resourceId) {
       qb.andWhere('log.resourceId = :resourceId', { resourceId: dto.resourceId });
     }
+    if (dto.search) {
+      const term = `%${dto.search.trim()}%`;
+      qb.andWhere(
+        `(log.action ILIKE :search
+          OR log.userId ILIKE :search
+          OR log.resourceId ILIKE :search
+          OR log.metadata::text ILIKE :search)`,
+        { search: term },
+      );
+    }
     if (dto.fromDate && dto.toDate) {
-      qb.andWhere({
-        createdAt: Between(new Date(dto.fromDate), new Date(dto.toDate)),
+      qb.andWhere('log.createdAt BETWEEN :fromDate AND :toDate', {
+        fromDate: new Date(dto.fromDate),
+        toDate: new Date(dto.toDate),
       });
     } else if (dto.fromDate) {
       qb.andWhere('log.createdAt >= :fromDate', { fromDate: new Date(dto.fromDate) });
@@ -69,6 +88,10 @@ export class AuditService {
     }
 
     return paginate(qb, dto, 'log');
+  }
+
+  async list(dto: ListAuditLogsDto) {
+    return this.findLogs(dto);
   }
 
   async prune(retentionDays: number): Promise<number> {

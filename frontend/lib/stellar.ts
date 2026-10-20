@@ -1,9 +1,9 @@
 import {
-  Account,
   Asset,
   BASE_FEE,
   Horizon,
   Keypair,
+  Memo,
   Networks,
   Operation,
   TransactionBuilder,
@@ -22,7 +22,7 @@ export class StellarService {
     this.networkPassphrase = useTestnet ? Networks.TESTNET : Networks.PUBLIC;
   }
 
-  async loadAccount(publicKey: string): Promise<Account> {
+  async loadAccount(publicKey: string): Promise<Horizon.AccountResponse> {
     return await this.server.loadAccount(publicKey);
   }
 
@@ -47,7 +47,7 @@ export class StellarService {
     );
 
     if (memo) {
-      transaction.addMemo(Horizon.Memo.text(memo));
+      transaction.addMemo(Memo.text(memo));
     }
 
     return transaction.setTimeout(30).build();

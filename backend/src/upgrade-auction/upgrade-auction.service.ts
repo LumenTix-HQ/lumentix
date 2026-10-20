@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { UpgradeAuction } from './entities/upgrade-auction.entity';
 import { UpgradeBid } from './entities/upgrade-bid.entity';
 import { OpenUpgradeAuctionDto } from './dto/open-upgrade-auction.dto';
@@ -27,6 +27,7 @@ export class UpgradeAuctionService {
     private readonly bidRepository: Repository<UpgradeBid>,
     private readonly eventsService: EventsService,
     private readonly ticketsService: TicketsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async openUpgradeAuction(
@@ -85,30 +86,46 @@ export class UpgradeAuctionService {
       throw new BadRequestException('Ticket does not belong to this event');
     }
 
-    const highestBid = await this.bidRepository.findOne({
-      where: { auctionId, status: 'active' },
-      order: { amount: 'DESC' },
-    });
-    const minRequired = highestBid
-      ? Number(highestBid.amount) + Number(auction.minIncrement)
-      : Number(auction.startingPrice);
-    if (dto.amount < minRequired) {
-      throw new BadRequestException(`Bid must be at least ${minRequired}`);
-    }
+    // The highest-bid read, the minRequired check, the outbid update, and the
+    // new bid insert must all happen atomically under a lock on the auction
+    // row — otherwise two concurrent bids can both read the same "highest
+    // bid" before either write lands, letting both pass the minRequired
+    // check (mirrors the pattern in loyalty.service.ts's redeemPoints()).
+    return this.dataSource.transaction(async (em) => {
+      const lockedAuction = await em.findOne(UpgradeAuction, {
+        where: { id: auctionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedAuction) {
+        throw new NotFoundException(`Upgrade auction "${auctionId}" not found`);
+      }
 
-    await this.bidRepository.update(
-      { auctionId, ticketId: dto.ticketId, status: 'active' },
-      { status: 'outbid' },
-    );
+      const highestBid = await em.findOne(UpgradeBid, {
+        where: { auctionId, status: 'active' },
+        order: { amount: 'DESC' },
+      });
+      const minRequired = highestBid
+        ? Number(highestBid.amount) + Number(lockedAuction.minIncrement)
+        : Number(lockedAuction.startingPrice);
+      if (dto.amount < minRequired) {
+        throw new BadRequestException(`Bid must be at least ${minRequired}`);
+      }
 
-    const bid = this.bidRepository.create({
-      auctionId,
-      ticketId: dto.ticketId,
-      bidderId,
-      amount: dto.amount,
-      status: 'active',
+      await em.update(
+        UpgradeBid,
+        { auctionId, ticketId: dto.ticketId, status: 'active' },
+        { status: 'outbid' },
+      );
+
+      const bid = em.create(UpgradeBid, {
+        auctionId,
+        ticketId: dto.ticketId,
+        bidderId,
+        amount: dto.amount,
+        status: 'active',
+      });
+      return em.save(bid);
     });
-    return this.bidRepository.save(bid);
   }
 
   async finalizeWinningBid(
@@ -122,28 +139,38 @@ export class UpgradeAuctionService {
       throw new BadRequestException('This auction has already been finalized or cancelled');
     }
 
-    const activeBids = await this.bidRepository.find({
-      where: { auctionId, status: 'active' },
-      order: { amount: 'DESC', placedAt: 'ASC' },
+    return this.dataSource.transaction(async (em) => {
+      const lockedAuction = await em.findOne(UpgradeAuction, {
+        where: { id: auctionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedAuction || lockedAuction.status !== 'open') {
+        throw new BadRequestException('This auction has already been finalized or cancelled');
+      }
+
+      const activeBids = await em.find(UpgradeBid, {
+        where: { auctionId, status: 'active' },
+        order: { amount: 'DESC', placedAt: 'ASC' },
+      });
+
+      const winningBids = activeBids.slice(0, lockedAuction.slotsAvailable);
+      const losingBids = activeBids.slice(lockedAuction.slotsAvailable);
+
+      for (const bid of winningBids) {
+        bid.status = 'won';
+      }
+      for (const bid of losingBids) {
+        bid.status = 'lost';
+      }
+      await em.save([...winningBids, ...losingBids]);
+
+      lockedAuction.slotsAwarded = winningBids.length;
+      lockedAuction.status = 'finalized';
+      lockedAuction.finalizedAt = new Date();
+      await em.save(lockedAuction);
+
+      return { auction: lockedAuction, winningBids };
     });
-
-    const winningBids = activeBids.slice(0, auction.slotsAvailable);
-    const losingBids = activeBids.slice(auction.slotsAvailable);
-
-    for (const bid of winningBids) {
-      bid.status = 'won';
-    }
-    for (const bid of losingBids) {
-      bid.status = 'lost';
-    }
-    await this.bidRepository.save([...winningBids, ...losingBids]);
-
-    auction.slotsAwarded = winningBids.length;
-    auction.status = 'finalized';
-    auction.finalizedAt = new Date();
-    await this.auctionRepository.save(auction);
-
-    return { auction, winningBids };
   }
 
   async listAuctions(eventId: string): Promise<UpgradeAuction[]> {

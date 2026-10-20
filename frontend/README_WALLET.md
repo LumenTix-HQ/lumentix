@@ -183,7 +183,6 @@ open http://localhost:3000/wallet-demo
 | `WALLET_INTEGRATION.md` | Comprehensive integration guide |
 | `ARCHITECTURE.md` | System architecture details |
 | `TESTING_CHECKLIST.md` | Testing procedures |
-| `../WALLET_IMPLEMENTATION_SUMMARY.md` | Implementation summary |
 
 ## 🔧 Configuration
 

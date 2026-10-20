@@ -14,6 +14,7 @@ import Redis from 'ioredis';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { StellarService } from '../stellar/stellar.service';
+import { verifySignature } from '../stellar/verify-signature.util';
 import { REDIS_CLIENT } from '../common/redis/redis.provider';
 import { UserWallet } from './entities/user-wallet.entity';
 
@@ -195,7 +196,7 @@ export class WalletService {
     }
 
     const message = `Sign this message to link wallet: ${nonce}`;
-    const isValid = this.verifySignature(publicKey, message, signature);
+    const isValid = verifySignature(publicKey, signature, message);
 
     if (!isValid) {
       throw new UnauthorizedException('Invalid signature.');
@@ -250,24 +251,6 @@ export class WalletService {
   // ─────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────
-
-  private verifySignature(
-    publicKey: string,
-    message: string,
-    signatureHex: string,
-  ): boolean {
-    try {
-      const keypair = Keypair.fromPublicKey(publicKey);
-      const messageBuffer = Buffer.from(message, 'utf8');
-      const signatureBuffer = Buffer.from(signatureHex, 'hex');
-      return keypair.verify(messageBuffer, signatureBuffer);
-    } catch (err) {
-      this.logger.warn(
-        `Signature verification error: ${(err as Error).message}`,
-      );
-      return false;
-    }
-  }
 
   private validatePublicKeyFormat(publicKey: string): void {
     try {

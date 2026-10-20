@@ -5,7 +5,7 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { Request } from 'express';
 
 /** Maximum age of a signed request before it is considered stale (30 seconds). */
@@ -87,6 +87,6 @@ function timingSafeEqual(a: string, b: string): boolean {
   const bufB = Buffer.from(b);
   return (
     bufA.length === bufB.length &&
-    require('crypto').timingSafeEqual(bufA, bufB)
+    timingSafeEqual(bufA, bufB)
   );
 }

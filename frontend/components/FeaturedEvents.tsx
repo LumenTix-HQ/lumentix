@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { solidColorPlaceholder } from '@/lib/images/blur-placeholder';
+import type { Event } from '@/types/event';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 

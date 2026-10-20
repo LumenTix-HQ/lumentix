@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TestingService } from './testing.service';
 import { TestingController } from './testing.controller';
+import { NonProductionGuard } from './non-production.guard';
 import { Event } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment } from '../payments/entities/payment.entity';
@@ -18,7 +19,7 @@ import { PaymentsModule } from '../payments/payments.module';
     PaymentsModule,
   ],
   controllers: [TestingController],
-  providers: [TestingService],
+  providers: [TestingService, NonProductionGuard],
   exports: [TestingService],
 })
 export class TestingModule {}

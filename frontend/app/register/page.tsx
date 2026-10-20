@@ -7,7 +7,13 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { registerSchema, type RegisterFormValues } from '@/lib/schemas/auth.schema';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+// Requests go through the same-origin proxy so the API base is configured in one place.
+const REGISTER_URL = '/api/proxy/auth/register';
+
+const inputClass = (hasError: boolean) =>
+  `w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
+    hasError ? 'border-red-500/50' : 'border-white/10'
+  }`;
 
 function getStrength(pw: string): { label: string; width: string; color: string } {
   if (!pw) return { label: '', width: '0%', color: '' };
@@ -43,7 +49,7 @@ export default function RegisterPage() {
   const onSubmit = handleSubmit(async (values) => {
     setServerError(null);
     try {
-      const res = await fetch(`${API_BASE}/auth/register`, {
+      const res = await fetch(REGISTER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -74,25 +80,7 @@ export default function RegisterPage() {
     } catch {
       setServerError('Something went wrong. Please try again.');
     }
-  };
-
-  const field = (name: keyof FormData, label: string, type = 'text', placeholder = '') => (
-    <div>
-      <label htmlFor={name} className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
-      <input
-        id={name}
-        name={name}
-        type={type}
-        value={form[name] as string}
-        onChange={set(name)}
-        placeholder={placeholder}
-        className={`w-full bg-white/5 border rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-          errors[name] ? 'border-red-500/50' : 'border-white/10'
-        }`}
-      />
-      {errors[name] && <p className="text-red-400 text-xs mt-1">{errors[name]}</p>}
-    </div>
-  );
+  });
 
   return (
     <div className="min-h-screen bg-[#060609] text-white flex items-center justify-center px-4">
@@ -111,26 +99,34 @@ export default function RegisterPage() {
 
           <form onSubmit={onSubmit} className="space-y-4" noValidate>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Email</label>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-1">Email</label>
               <input
+                id="email"
                 type="email"
                 placeholder="you@example.com"
+                aria-invalid={!!errors.email}
+                aria-describedby={errors.email ? 'email-error' : undefined}
                 className={inputClass(!!errors.email)}
                 {...register('email')}
               />
-              {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
+              {errors.email && (
+                <p id="email-error" className="text-red-400 text-xs mt-1">{errors.email.message}</p>
+              )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Display name (optional)</label>
+              <label htmlFor="displayName" className="block text-sm font-medium text-gray-300 mb-1">Display name (optional)</label>
               <input
+                id="displayName"
                 type="text"
                 placeholder="Your name"
+                aria-invalid={!!errors.displayName}
+                aria-describedby={errors.displayName ? 'displayName-error' : undefined}
                 className={inputClass(!!errors.displayName)}
                 {...register('displayName')}
               />
               {errors.displayName && (
-                <p className="text-red-400 text-xs mt-1">{errors.displayName.message}</p>
+                <p id="displayName-error" className="text-red-400 text-xs mt-1">{errors.displayName.message}</p>
               )}
             </div>
 
@@ -138,9 +134,10 @@ export default function RegisterPage() {
               <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-1">Password</label>
               <input
                 id="password"
-                name="password"
                 type="password"
                 placeholder="Min 8 characters, at least 1 number"
+                aria-invalid={!!errors.password}
+                aria-describedby={errors.password ? 'password-error' : undefined}
                 className={inputClass(!!errors.password)}
                 {...register('password')}
               />
@@ -155,18 +152,23 @@ export default function RegisterPage() {
                   <span className="text-xs text-gray-500 w-12">{strength.label}</span>
                 </div>
               )}
-              {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
+              {errors.password && (
+                <p id="password-error" className="text-red-400 text-xs mt-1">{errors.password.message}</p>
+              )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Confirm password</label>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-300 mb-1">Confirm password</label>
               <input
+                id="confirmPassword"
                 type="password"
+                aria-invalid={!!errors.confirmPassword}
+                aria-describedby={errors.confirmPassword ? 'confirmPassword-error' : undefined}
                 className={inputClass(!!errors.confirmPassword)}
                 {...register('confirmPassword')}
               />
               {errors.confirmPassword && (
-                <p className="text-red-400 text-xs mt-1">{errors.confirmPassword.message}</p>
+                <p id="confirmPassword-error" className="text-red-400 text-xs mt-1">{errors.confirmPassword.message}</p>
               )}
             </div>
 

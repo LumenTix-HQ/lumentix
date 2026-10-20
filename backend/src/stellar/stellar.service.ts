@@ -12,6 +12,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { Repository } from 'typeorm';
 import { Queue } from 'bull';
 import { UsersService } from '../users/users.service';
+import { verifySignature as verifyStellarSignature } from './verify-signature.util';
 import { InsufficientBalanceException } from '../common/exceptions/insufficient-balance.exception';
 import { Payment } from '../payments/entities/payment.entity';
 import {
@@ -568,22 +569,13 @@ export class StellarService implements OnModuleDestroy {
     return tx.toXDR();
   }
 
+  /** @param signature Base64-encoded signature. See verify-signature.util.ts. */
   verifySignature(
     publicKey: string,
     signature: string,
     message: string,
   ): boolean {
-    try {
-      const keypair = Keypair.fromPublicKey(publicKey);
-      const messageBuffer = Buffer.from(message, 'utf8');
-      const signatureBuffer = Buffer.from(signature, 'base64');
-      return keypair.verify(messageBuffer, signatureBuffer);
-    } catch (err) {
-      this.logger.warn(
-        `Signature verification failed: ${(err as Error).message}`,
-      );
-      return false;
-    }
+    return verifyStellarSignature(publicKey, signature, message);
   }
 
   /**

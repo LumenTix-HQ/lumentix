@@ -1,11 +1,11 @@
- import { Module } from '@nestjs/common';
+import { ClassSerializerInterceptor, Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { envValidationSchema } from './config/env.validation';
 import { BullModule } from '@nestjs/bull';
 import { ThrottlerModule, ThrottlerGuard, seconds } from '@nestjs/throttler';
-import { ThrottlerStorageRedisService } from 'nestjs-throttler-storage-redis';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import Redis from 'ioredis';
 import { APP_GUARD, APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -37,6 +37,7 @@ import { SocialModule } from './social/social.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { InsuranceModule } from './insurance/insurance.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { RecommendationsModule } from './recommendations/recommendations.module';
 import { VenuesModule } from './venues/venues.module';
 import { GamificationModule } from './gamification/gamification.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
@@ -45,8 +46,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { StreamingModule } from './streaming/streaming.module';
 import { DecentralizedStorageModule } from './decentralized-storage/decentralized-storage.module';
 import { ChatModule } from './chat/chat.module';
-import { ZkpModule } from './zkp/zkp.module';
-import { LoyaltyModule } from './loyalty/loyalty.module';
+import { AgeVerificationModule } from './age-verification/age-verification.module';
 import { TelemetryModule } from './telemetry/telemetry.module';
 import { MerchModule } from './merch/merch.module';
 import { UpgradeAuctionModule } from './upgrade-auction/upgrade-auction.module';
@@ -56,9 +56,15 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { TicketDesignModule } from './ticket-design/ticket-design.module';
 import { ScanAnalyticsModule } from './scan-analytics/scan-analytics.module';
 import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module';
+import { IdentityModule } from './identity/identity.module';
+import { FraudDetectionModule } from './fraud-detection/fraud-detection.module';
+import { PassPackagesModule } from './pass-packages/pass-packages.module';
+import { TestingModule } from './testing/testing.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
 import { RateLimitModule } from './common/rate-limit.module';
+import { RedisClientModule } from './common/redis/redis-client.module';
+import { REDIS_CLIENT } from './common/redis/redis.provider';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 
@@ -70,22 +76,18 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
       validationSchema: envValidationSchema,
       validationOptions: { abortEarly: false },
     }),
+    RedisClientModule,
     RateLimitModule,
 
     // ── Redis-backed rate limiting — shared across all instances ──────────────
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      inject: [REDIS_CLIENT],
+      useFactory: (redis: Redis) => ({
         throttlers: [
           { name: 'global', ttl: seconds(60), limit: 100 },
         ],
-        storage: new ThrottlerStorageRedisService(
-          new Redis({
-            host: config.get<string>('REDIS_HOST') ?? 'localhost',
-            port: config.get<number>('REDIS_PORT') ?? 6379,
-          }),
-        ),
+        storage: new ThrottlerStorageRedisService(redis),
       }),
     }),
 
@@ -141,6 +143,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     SocialModule,
     InsuranceModule,
     ReviewsModule,
+    RecommendationsModule,
     VenuesModule,
     GamificationModule,
     AnalyticsModule,
@@ -150,9 +153,8 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     StreamingModule,
     DecentralizedStorageModule,
     ChatModule,
-    ZkpModule,
+    AgeVerificationModule,
     WorkspaceModule,
-    LoyaltyModule,
     TelemetryModule,
     MerchModule,
     UpgradeAuctionModule,
@@ -162,8 +164,12 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     TicketDesignModule,
     ScanAnalyticsModule,
     TermsOfServiceModule,
+    FraudDetectionModule,
+    PassPackagesModule,
+    TestingModule,
     InternalModule,
     InternalRoutingModule,
+    IdentityModule,
   ],
   controllers: [AppController],
   providers: [
@@ -185,6 +191,12 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+    {
+      // Honour @Exclude() on entity fields (e.g. User.mfaConfig,
+      // passwordHash) so sensitive columns never reach HTTP responses.
+      provide: APP_INTERCEPTOR,
+      useClass: ClassSerializerInterceptor,
     },
     {
       provide: APP_FILTER,

@@ -1,6 +1,5 @@
-import { PartialType } from '@nestjs/swagger';
+import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { CreateVenueDto } from './create-venue.dto';
-import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional } from 'class-validator';
 import { VenueStatus } from '../entities/venue.entity';
 

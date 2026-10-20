@@ -48,8 +48,9 @@ export default function SeatMap({ seats, sectionName, onSelectSeat, selectedSeat
                         key={seat.id}
                         disabled={!isAvailable}
                         onClick={() => isAvailable && onSelectSeat(seat)}
+                        style={{ width: SEAT_SIZE, height: SEAT_SIZE }}
                         className={`
-                          w-[${SEAT_SIZE}px] h-[${SEAT_SIZE}px] rounded-t-lg text-[9px] font-bold
+                          rounded-t-lg text-[9px] font-bold
                           transition-all duration-200 flex items-center justify-center
                           ${isSelected
                             ? "bg-blue-500 text-white scale-110 shadow-lg shadow-blue-500/30"

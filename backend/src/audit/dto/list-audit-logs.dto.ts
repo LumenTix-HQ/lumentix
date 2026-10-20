@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsDateString, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsDateString, IsInt, MaxLength, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ListAuditLogsDto {
@@ -13,6 +13,14 @@ export class ListAuditLogsDto {
   @IsOptional()
   @IsString()
   resourceId?: string;
+
+  /**
+   * Free-text term matched against action, userId, resourceId and metadata.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  search?: string;
 
   @IsOptional()
   @IsDateString()

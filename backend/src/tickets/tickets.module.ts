@@ -23,15 +23,19 @@ import { RedisModule } from '../redis/redis.module';
 import { ResaleTransaction } from './resale/resale-transaction.entity';
 import { DynamicQrService } from './dynamic-qr/dynamic-qr.service';
 import { DynamicQrController } from './dynamic-qr/dynamic-qr.controller';
+import { FraudFlag } from './resale/fraud-detection/fraud-flag.entity';
+import { FraudDetectionService } from './resale/fraud-detection/fraud-detection.service';
+import { FraudDetectionController } from './resale/fraud-detection/fraud-detection.controller';
 import { TicketGift } from './gifting/ticket-gift.entity';
 import { GiftingService } from './gifting/gifting.service';
 import { GiftingController } from './gifting/gifting.controller';
 import { GiftDeliveryJob } from './gifting/gift-delivery.job';
+import { ResalePriceCeiling } from './resale/resale-price-ceiling.entity';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction, TicketGift]),
+    TypeOrmModule.forFeature([TicketEntity, Event, EventSeries, User, ResaleTransaction, ResalePriceCeiling, FraudFlag, TicketGift]),
     forwardRef(() => PaymentsModule),
     StellarModule,
     NotificationModule,
@@ -39,8 +43,27 @@ import { GiftDeliveryJob } from './gifting/gift-delivery.job';
     // #861: provides CACHE_MANAGER for the marketplace listing cache.
     RedisModule,
   ],
-  providers: [TicketsService, TicketSigningService, TicketPdfService, TicketExpiryJob, ResaleService, DynamicQrService, GiftingService, GiftDeliveryJob],
-  controllers: [TicketsController, TicketsPublicController, VerificationController, ResaleController, ResaleMarketplaceController, DynamicQrController, GiftingController],
-  exports: [TicketsService, ResaleService, GiftingService],
+  providers: [
+    TicketsService,
+    TicketSigningService,
+    TicketPdfService,
+    TicketExpiryJob,
+    ResaleService,
+    DynamicQrService,
+    FraudDetectionService,
+    GiftingService,
+    GiftDeliveryJob,
+  ],
+  controllers: [
+    TicketsController,
+    TicketsPublicController,
+    VerificationController,
+    ResaleController,
+    ResaleMarketplaceController,
+    DynamicQrController,
+    FraudDetectionController,
+    GiftingController,
+  ],
+  exports: [TicketsService, ResaleService, FraudDetectionService, GiftingService],
 })
 export class TicketsModule {}

@@ -140,7 +140,6 @@ describe('AuthService', () => {
     const registerDto = {
       email: 'test@example.com',
       password: 'password123',
-      role: 'user',
     } as any;
 
     it('should throw ConflictException if createUser throws', async () => {
@@ -163,12 +162,32 @@ describe('AuthService', () => {
       expect(usersService.createUser).toHaveBeenCalledWith({
         email: registerDto.email,
         password: registerDto.password,
-        role: registerDto.role,
       });
       expect(jwtService.sign).toHaveBeenCalledWith({
         sub: 'user-1',
         role: 'user',
       });
+    });
+
+    it('should ignore an attacker-supplied role during self-service registration', async () => {
+      usersService.createUser.mockResolvedValue({ id: 'user-2', role: 'EVENT_GOER' });
+      jwtService.sign.mockReturnValue('token');
+      refreshTokenRepository.create.mockReturnValue({ id: 'uuid-2', token: 'hash' });
+      refreshTokenRepository.save.mockResolvedValue({ id: 'uuid-2', token: 'hash' });
+
+      await authService.register({
+        email: 'attacker@example.com',
+        password: 'password123',
+        role: 'ADMIN',
+      } as any);
+
+      expect(usersService.createUser).toHaveBeenCalledWith({
+        email: 'attacker@example.com',
+        password: 'password123',
+      });
+      expect(usersService.createUser).not.toHaveBeenCalledWith(
+        expect.objectContaining({ role: 'ADMIN' }),
+      );
     });
   });
 

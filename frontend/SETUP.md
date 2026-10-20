@@ -143,7 +143,6 @@ npm run build
 - **Quick Start**: `WALLET_QUICKSTART.md`
 - **Full Guide**: `WALLET_INTEGRATION.md`
 - **Testing**: `TESTING_CHECKLIST.md`
-- **Summary**: `../WALLET_IMPLEMENTATION_SUMMARY.md`
 
 ## Support
 

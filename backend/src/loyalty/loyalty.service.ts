@@ -5,8 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, LessThan, Repository } from 'typeorm';
+import { DataSource, LessThan, Repository, QueryFailedError } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
+import { randomBytes, randomInt } from 'crypto';
 import { LoyaltyAccount } from './entities/loyalty-account.entity';
 import {
   LoyaltyTransaction,
@@ -33,8 +35,27 @@ export const MAX_DISCOUNT_PERCENT = 50;
 /** Discount code validity in days */
 export const DISCOUNT_VALIDITY_DAYS = 90;
 
-/** Inactivity expiry threshold in months */
-export const INACTIVITY_EXPIRY_MONTHS = 12;
+/**
+ * Default inactivity period after which a balance expires. Override with the
+ * LOYALTY_POINTS_INACTIVITY_DAYS environment variable.
+ */
+export const DEFAULT_INACTIVITY_EXPIRY_DAYS = 365;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Tier thresholds, evaluated against the active points balance so tiers are
+ * promoted as points are earned and demoted when they expire or are redeemed.
+ */
+export const LOYALTY_TIERS = [
+  { name: 'Bronze', minPoints: 0 },
+  { name: 'Silver', minPoints: 500 },
+  { name: 'Gold', minPoints: 1500 },
+  { name: 'Platinum', minPoints: 5000 },
+] as const;
+
+/** Maximum retry attempts for code generation on collision */
+export const MAX_COLLISION_RETRIES = 5;
 
 @Injectable()
 export class LoyaltyService {
@@ -49,7 +70,18 @@ export class LoyaltyService {
     private readonly discountRepo: Repository<LoyaltyDiscount>,
     private readonly dataSource: DataSource,
     private readonly notificationService: NotificationService,
+    private readonly configService: ConfigService,
   ) {}
+
+  /** Days without activity before a balance expires (validated ≥ 1 in env.validation). */
+  private get inactivityExpiryDays(): number {
+    const configured = Number(
+      this.configService.get<number>('LOYALTY_POINTS_INACTIVITY_DAYS'),
+    );
+    return Number.isInteger(configured) && configured >= 1
+      ? configured
+      : DEFAULT_INACTIVITY_EXPIRY_DAYS;
+  }
 
   // ── Award Loyalty Points ───────────────────────────────────────────────────
 
@@ -60,7 +92,7 @@ export class LoyaltyService {
   async awardLoyaltyPoints(dto: AwardPointsDto): Promise<LoyaltyTransaction> {
     const { userId, points, eventId, description } = dto;
 
-    return this.dataSource.transaction(async (em) => {
+    const saved = await this.dataSource.transaction(async (em) => {
       // Upsert loyalty account
       let account = await em.findOne(LoyaltyAccount, { where: { userId } });
       if (!account) {
@@ -95,6 +127,10 @@ export class LoyaltyService {
 
       return saved;
     });
+
+    // Earning points can promote the user; evaluate after the balance commits.
+    await this.evaluateTierStatusSafely(userId);
+    return saved;
   }
 
   // ── Redeem Points for Discount ─────────────────────────────────────────────
@@ -103,6 +139,7 @@ export class LoyaltyService {
    * Redeem loyalty points for a discount code.
    * 100 points = 1% discount, capped at 50%.
    * Discount code is valid for 90 days.
+   * Uses cryptographically secure code generation with automatic retry on collision.
    */
   async redeemPointsForDiscount(
     userId: string,
@@ -116,7 +153,7 @@ export class LoyaltyService {
       );
     }
 
-    return this.dataSource.transaction(async (em) => {
+    const redeemed = await this.dataSource.transaction(async (em) => {
       const account = await em.findOne(LoyaltyAccount, {
         where: { userId },
         lock: { mode: 'pessimistic_write' },
@@ -136,8 +173,8 @@ export class LoyaltyService {
       const rawPercent = points / POINTS_PER_PERCENT;
       const discountPercent = Math.min(rawPercent, MAX_DISCOUNT_PERCENT);
 
-      // Generate unique discount code
-      const code = this.generateDiscountCode();
+      // Generate unique discount code with collision retry
+      const code = await this.generateUniqueDiscountCode(em);
 
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + DISCOUNT_VALIDITY_DAYS);
@@ -178,6 +215,10 @@ export class LoyaltyService {
 
       return savedDiscount;
     });
+
+    // Spending points lowers the active balance and can demote the tier.
+    await this.evaluateTierStatusSafely(userId);
+    return redeemed;
   }
 
   // ── Get User Loyalty Status ────────────────────────────────────────────────
@@ -203,12 +244,11 @@ export class LoyaltyService {
       };
     }
 
-    // Calculate expiry date (12 months from last activity)
+    // Points expire after the configured inactivity period
     const pointsExpiryDate = account.lastActivityAt
       ? new Date(
-          new Date(account.lastActivityAt).setMonth(
-            new Date(account.lastActivityAt).getMonth() + INACTIVITY_EXPIRY_MONTHS,
-          ),
+          new Date(account.lastActivityAt).getTime() +
+            this.inactivityExpiryDays * DAY_MS,
         )
       : null;
 
@@ -233,7 +273,8 @@ export class LoyaltyService {
       pointsExpiryDate,
       activeDiscounts,
       recentTransactions,
-      tier: this.calculateTier(account.totalPointsEarned),
+      // Tier status follows the active balance, matching evaluateTierStatus.
+      tier: this.calculateTier(account.pointsBalance),
     };
   }
 
@@ -280,11 +321,12 @@ export class LoyaltyService {
     };
   }
 
-  // ── Scheduled: Expire Points After 12 Months of Inactivity ────────────────
+  // ── Scheduled: Expire Points After the Inactivity Period ──────────────────
 
   /**
    * Runs daily at 02:00 UTC.
-   * Expires all points for accounts with no activity in the last 12 months.
+   * Expires all points for accounts with no activity within
+   * LOYALTY_POINTS_INACTIVITY_DAYS (default 365).
    */
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
   async expireInactivePoints(): Promise<void> {
@@ -292,13 +334,13 @@ export class LoyaltyService {
   }
 
   /**
-   * Expires points for accounts that have been inactive for
-   * INACTIVITY_EXPIRY_MONTHS, then re-evaluates their tier status so
-   * demotions triggered by the expiry are detected and notified.
+   * Expires points for accounts that have been inactive for the configured
+   * period, then re-evaluates their tier status so demotions triggered by the
+   * expiry are detected and notified.
    */
-  async expireStalePoints(): Promise<void> {
-    const cutoff = new Date();
-    cutoff.setMonth(cutoff.getMonth() - INACTIVITY_EXPIRY_MONTHS);
+  async expireStalePoints(now: Date = new Date()): Promise<void> {
+    const inactivityDays = this.inactivityExpiryDays;
+    const cutoff = new Date(now.getTime() - inactivityDays * DAY_MS);
 
     const staleAccounts = await this.accountRepo.find({
       where: {
@@ -334,14 +376,14 @@ export class LoyaltyService {
           type: LoyaltyTransactionType.EXPIRE,
           points: -expiredPoints,
           balanceAfter: 0,
-          description: `Points expired due to ${INACTIVITY_EXPIRY_MONTHS} months of inactivity`,
+          description: `Points expired after ${inactivityDays} days of inactivity`,
           eventId: null,
           discountId: null,
         });
         await em.save(LoyaltyTransaction, tx);
       });
 
-      await this.evaluateTierStatus(account.userId);
+      await this.evaluateTierStatusSafely(account.userId);
     }
 
     this.logger.log(`Points expiry job completed for ${toExpire.length} accounts`);
@@ -388,6 +430,20 @@ export class LoyaltyService {
       currentTier: evaluatedTier,
       changed,
     };
+  }
+
+  /**
+   * Tier evaluation is a follow-up to a balance change that has already
+   * committed, so a failure here must not fail the award/redeem/expiry.
+   */
+  private async evaluateTierStatusSafely(userId: string): Promise<void> {
+    try {
+      await this.evaluateTierStatus(userId);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to evaluate tier status for user ${userId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   // ── Notify Tier Change ──────────────────────────────────────────────────────
@@ -589,7 +645,8 @@ export class LoyaltyService {
       };
     }
 
-    const tierInfo = this.calculateTier(account.totalPointsEarned);
+    // Discounts follow the active tier so a demoted account loses its perks.
+    const tierInfo = this.calculateTier(account.pointsBalance);
     const discountPercent = this.getTierAutoDiscountPercent(tierInfo.name);
 
     return {
@@ -600,6 +657,31 @@ export class LoyaltyService {
   }
 
   // ── Private Helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Generates a cryptographically secure discount code with automatic collision retry.
+   * Format: LOYALTY-XXXX-XXXX (16 chars alphanumeric)
+   * Retries up to MAX_COLLISION_RETRIES times on unique constraint violation.
+   */
+  private async generateUniqueDiscountCode(em: any): Promise<string> {
+    for (let attempt = 1; attempt <= MAX_COLLISION_RETRIES; attempt++) {
+      const code = this.generateDiscountCode();
+
+      // Check if code already exists
+      const existing = await em.findOne(LoyaltyDiscount, { where: { code } });
+      if (!existing) {
+        return code;
+      }
+
+      this.logger.warn(
+        `Discount code collision detected (attempt ${attempt}/${MAX_COLLISION_RETRIES}): ${code}`,
+      );
+    }
+
+    throw new Error(
+      `Failed to generate unique discount code after ${MAX_COLLISION_RETRIES} attempts`,
+    );
+  }
 
   private getTierUpgradeDiscountPercent(tier: string): number {
     switch (tier) {
@@ -627,19 +709,33 @@ export class LoyaltyService {
     }
   }
 
+  /**
+   * Generates a cryptographically secure short code for tier-up discounts.
+   * Format: 8 alphanumeric characters
+   * Uses crypto.randomInt for secure randomness.
+   */
   private generateShortCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return Array.from({ length: 8 }, () =>
-      chars.charAt(Math.floor(Math.random() * chars.length)),
-    ).join('');
+    const code = Array.from({ length: 8 }, () => {
+      const randomIndex = randomInt(0, chars.length);
+      return chars[randomIndex];
+    }).join('');
+    return code;
   }
 
+  /**
+   * Generates a cryptographically secure discount code.
+   * Format: LOYALTY-XXXX-XXXX (16 chars alphanumeric)
+   * Uses crypto.randomBytes for secure randomness.
+   */
   private generateDiscountCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    const segment = (len: number) =>
-      Array.from({ length: len }, () =>
-        chars.charAt(Math.floor(Math.random() * chars.length)),
-      ).join('');
+    const segment = (len: number) => {
+      return Array.from({ length: len }, () => {
+        const randomIndex = randomInt(0, chars.length);
+        return chars[randomIndex];
+      }).join('');
+    };
     return `LOYALTY-${segment(4)}-${segment(4)}`;
   }
 
@@ -649,14 +745,9 @@ export class LoyaltyService {
     nextTier: string | null;
     pointsToNextTier: number | null;
   } {
-    const tiers = [
-      { name: 'Bronze', minPoints: 0 },
-      { name: 'Silver', minPoints: 500 },
-      { name: 'Gold', minPoints: 1500 },
-      { name: 'Platinum', minPoints: 5000 },
-    ];
+    const tiers = LOYALTY_TIERS;
 
-    let currentTier = tiers[0];
+    let currentTier: (typeof LOYALTY_TIERS)[number] = tiers[0];
     for (const tier of tiers) {
       if (totalEarned >= tier.minPoints) {
         currentTier = tier;

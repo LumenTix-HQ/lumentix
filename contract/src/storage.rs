@@ -1,7 +1,6 @@
 use crate::error::LumentixError;
-use crate::error::LumentixError;
 use crate::types::{
-    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, BridgeTransaction,
+    AccessibilityBooking, AccessibilityInventory, AnonymousSurveyResponse, AgeProof, BridgeTransaction,
     CarbonFootprint,
     CarbonOffsetPurchase, CollectibleInventory, CrossChainLock, CrossChainTransfer, CurrencyConfig,
     EnvironmentalImpact, Event, EventMerchandise, EventReview, IdentityCredential,
@@ -12,11 +11,11 @@ use crate::types::{
     VenueLayout, VipTier, WaitlistOffer, PricingSchedule, MintGasUsage, StreamDeliveryConfig,
     StreamPerformanceMetrics, INSTANCE_LIFETIME, PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
-
-  CertificationStandard, EventCertificate,
+    CertificationStandard, EventCertificate, BiometricCredential, PassPackage,
     WalletSession, ValidationProof, OfflineScanRecord,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules,
 };
-use soroban_sdk::{Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
 
 // Storage keys
 const INITIALIZED: &str = "INIT";
@@ -71,6 +70,11 @@ const CERTIFICATE_PREFIX: &str = "CERT_";
 const CERTIFICATE_ID_COUNTER: &str = "CERT_CTR";
 const EVENT_CERTIFICATE_PREFIX: &str = "EVCERT_";
 const CERT_STANDARD_PREFIX: &str = "CERTSTD_";
+const BIOMETRIC_CONSENT_PREFIX: &str = "BIOCONS_";
+const BIOMETRIC_CRED_PREFIX: &str = "BIOCRED_";
+const EVENT_BIOMETRIC_REQUIRED_PREFIX: &str = "BIOREQ_";
+const PASS_PACKAGE_PREFIX: &str = "PPKG_";
+const PASS_PACKAGE_ID_COUNTER: &str = "PPKG_CTR";
 const SURVEY_ID_COUNTER: &str = "SURVEY_CTR";
 const SURVEY_PREFIX: &str = "SURVEY_";
 const SURVEY_EVENT_INDEX_PREFIX: &str = "SUREVT_";
@@ -80,6 +84,12 @@ const SCHEDULE_VOTE_PREFIX: &str = "SCHVOTE_";
 const SCHEDULE_VOTE_CAST_PREFIX: &str = "SCHCAST_";
 const PROMO_CODE_PREFIX: &str = "PROMO_";
 const PROMO_USER_USAGE_PREFIX: &str = "PROMOUSR_";
+const AGE_PROOF_PREFIX: &str = "AGEPF_";
+const EVENT_MIN_AGE_PREFIX: &str = "MINAGE_";
+const TELEMETRY_STATUS: &str = "TELEMETRY_STATUS";
+const METRIC_DATAPOINT_PREFIX: &str = "METRIC_";
+const METRIC_LATEST_PREFIX: &str = "METRCLT_";
+const TOKEN_GATE_PREFIX: &str = "TGATE_";
 
 /// Check if contract is initialized
 pub fn is_initialized(env: &Env) -> bool {
@@ -311,6 +321,175 @@ pub fn is_certification_standard_enabled(env: &Env, standard: &CertificationStan
         certification_standard_discriminant(standard),
     );
     env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Biometric Authentication (Issue #649)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Record whether `user` has granted biometric enrollment consent.
+pub fn set_biometric_consent(env: &Env, user: &Address, consent_given: bool) {
+    let key = (BIOMETRIC_CONSENT_PREFIX, user.clone());
+    env.storage().persistent().set(&key, &consent_given);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether `user` currently has biometric consent granted.
+pub fn has_biometric_consent(env: &Env, user: &Address) -> bool {
+    let key = (BIOMETRIC_CONSENT_PREFIX, user.clone());
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+/// Store a biometric credential, keyed by (user, event_id).
+pub fn set_biometric_credential(env: &Env, credential: &BiometricCredential) {
+    let key = (
+        BIOMETRIC_CRED_PREFIX,
+        credential.user.clone(),
+        credential.event_id,
+    );
+    env.storage().persistent().set(&key, credential);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the biometric credential registered for `user` on `event_id`.
+pub fn get_biometric_credential(
+    env: &Env,
+    user: &Address,
+    event_id: u64,
+) -> Result<BiometricCredential, LumentixError> {
+    let key = (BIOMETRIC_CRED_PREFIX, user.clone(), event_id);
+    let credential = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::BiometricCredentialNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(credential)
+}
+
+/// Whether a biometric credential is registered for `user` on `event_id`.
+pub fn has_biometric_credential(env: &Env, user: &Address, event_id: u64) -> bool {
+    let key = (BIOMETRIC_CRED_PREFIX, user.clone(), event_id);
+    env.storage().persistent().has(&key)
+}
+
+/// Permanently remove the stored biometric credential for `user` on `event_id`.
+pub fn remove_biometric_credential(env: &Env, user: &Address, event_id: u64) {
+    let key = (BIOMETRIC_CRED_PREFIX, user.clone(), event_id);
+    env.storage().persistent().remove(&key);
+}
+
+/// Organizer-configured flag: whether `event_id` requires biometric verification.
+pub fn set_event_biometric_required(env: &Env, event_id: u64, required: bool) {
+    let key = (EVENT_BIOMETRIC_REQUIRED_PREFIX, event_id);
+    env.storage().persistent().set(&key, &required);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether `event_id` currently requires biometric verification for entry.
+pub fn is_event_biometric_required(env: &Env, event_id: u64) -> bool {
+    let key = (EVENT_BIOMETRIC_REQUIRED_PREFIX, event_id);
+    env.storage().persistent().get(&key).unwrap_or(false)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Age Verification (Issue #970)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Persist a fresh age proof for `subject`.
+pub fn set_age_proof(env: &Env, subject: &Address, proof: &AgeProof) {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    env.storage().persistent().set(&key, proof);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Read the current age proof for `subject`, if any.
+pub fn get_age_proof(env: &Env, subject: &Address) -> Option<AgeProof> {
+    let key = (AGE_PROOF_PREFIX, subject.clone());
+    let proof: Option<AgeProof> = env.storage().persistent().get(&key);
+    if proof.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    proof
+}
+
+/// Set (or clear, with 0) the minimum age required to purchase a ticket to `event_id`.
+pub fn set_event_min_age(env: &Env, event_id: u64, min_age: u32) {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    env.storage().persistent().set(&key, &min_age);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Minimum age required to purchase a ticket to `event_id`. Returns 0 when no
+/// age restriction is configured.
+pub fn get_event_min_age(env: &Env, event_id: u64) -> u32 {
+    let key = (EVENT_MIN_AGE_PREFIX, event_id);
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Event Pass Packages (Issue #906)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Get the next pass package ID (auto-incrementing, starts at 1).
+pub fn get_next_pass_package_id(env: &Env) -> u64 {
+    let id = env
+        .storage()
+        .instance()
+        .get(&PASS_PACKAGE_ID_COUNTER)
+        .unwrap_or(1);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+    id
+}
+
+/// Increment the pass package ID counter.
+pub fn increment_pass_package_id(env: &Env) {
+    let next_id = get_next_pass_package_id(env) + 1;
+    env.storage()
+        .instance()
+        .set(&PASS_PACKAGE_ID_COUNTER, &next_id);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Store/update a pass package.
+pub fn set_pass_package(env: &Env, package_id: u64, package: &PassPackage) {
+    let key = (PASS_PACKAGE_PREFIX, package_id);
+    env.storage().persistent().set(&key, package);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a pass package by ID.
+pub fn get_pass_package(env: &Env, package_id: u64) -> Result<PassPackage, LumentixError> {
+    let key = (PASS_PACKAGE_PREFIX, package_id);
+    let package = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .ok_or(LumentixError::PassPackageNotFound)?;
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    Ok(package)
 }
 
 /// Set ticket data
@@ -855,6 +1034,174 @@ pub fn get_pricing_schedule(env: &Env, event_id: u64) -> Option<PricingSchedule>
 pub fn has_pricing_schedule(env: &Env, event_id: u64) -> bool {
     let key = (PRICING_SCHEDULE_PREFIX, event_id);
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DYNAMIC PRICING CURVE / DEMAND WINDOW / DECISION LOG (Issue #1451)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PRICING_CURVE_PREFIX: &str = "PRCCURVE_";
+const PRICING_DECISION_PREFIX: &str = "PRCDEC_";
+const DEMAND_WINDOW_PREFIX: &str = "DEMANDW_";
+
+/// Length of the rolling window used to derive real-time demand velocity.
+pub const DEMAND_WINDOW_SECONDS: u64 = 3_600;
+
+/// Rolling one-hour sales window backing real-time demand velocity.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DemandWindow {
+    pub window_start: u64,
+    pub purchases_in_window: u32,
+}
+
+/// Persist the organizer's configurable pricing curve for an event.
+pub fn set_pricing_curve(env: &Env, event_id: u64, curve: &DynamicPricingCurve) {
+    let key = (PRICING_CURVE_PREFIX, event_id);
+    env.storage().persistent().set(&key, curve);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the organizer's configurable pricing curve for an event, if any.
+pub fn get_pricing_curve(env: &Env, event_id: u64) -> Option<DynamicPricingCurve> {
+    let key = (PRICING_CURVE_PREFIX, event_id);
+    let curve: Option<DynamicPricingCurve> = env.storage().persistent().get(&key);
+    if curve.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    curve
+}
+
+/// Persist the most recent pricing decision for an event.
+pub fn set_pricing_decision(env: &Env, event_id: u64, decision: &PricingDecision) {
+    let key = (PRICING_DECISION_PREFIX, event_id);
+    env.storage().persistent().set(&key, decision);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the most recent pricing decision for an event, if any.
+pub fn get_pricing_decision(env: &Env, event_id: u64) -> Option<PricingDecision> {
+    let key = (PRICING_DECISION_PREFIX, event_id);
+    let decision: Option<PricingDecision> = env.storage().persistent().get(&key);
+    if decision.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    decision
+}
+
+/// Read the current rolling demand window for an event (zeroed when absent).
+pub fn get_demand_window(env: &Env, event_id: u64) -> DemandWindow {
+    let key = (DEMAND_WINDOW_PREFIX, event_id);
+    let window: Option<DemandWindow> = env.storage().persistent().get(&key);
+    match window {
+        Some(w) => {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+            w
+        }
+        None => DemandWindow {
+            window_start: 0,
+            purchases_in_window: 0,
+        },
+    }
+}
+
+/// Roll `quantity` new sales into the event's demand window, resetting the
+/// window when it has aged past `DEMAND_WINDOW_SECONDS`.
+pub fn record_pricing_sale(env: &Env, event_id: u64, quantity: u32, now: u64) {
+    let key = (DEMAND_WINDOW_PREFIX, event_id);
+    let mut window = get_demand_window(env, event_id);
+
+    if window.purchases_in_window == 0
+        || now.saturating_sub(window.window_start) >= DEMAND_WINDOW_SECONDS
+    {
+        window = DemandWindow {
+            window_start: now,
+            purchases_in_window: quantity,
+        };
+    } else {
+        window.purchases_in_window = window.purchases_in_window.saturating_add(quantity);
+    }
+
+    env.storage().persistent().set(&key, &window);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Sales per hour represented by the current demand window.
+pub fn get_demand_velocity_per_hour(env: &Env, event_id: u64) -> u64 {
+    let window = get_demand_window(env, event_id);
+    if window.purchases_in_window == 0 {
+        return 0;
+    }
+
+    let now = env.ledger().timestamp();
+    let elapsed = now.saturating_sub(window.window_start).min(DEMAND_WINDOW_SECONDS);
+    if elapsed == 0 {
+        // Purchases recorded in the same ledger second as the caller: treat
+        // the window as full-length so early sales are not over-weighted.
+        return (window.purchases_in_window as u64 * 3_600) / DEMAND_WINDOW_SECONDS;
+    }
+    (window.purchases_in_window as u64 * 3_600) / elapsed
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GEO-FENCE STORAGE (Issue #1448)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GEO_FENCE_PREFIX: &str = "GEOFENCE_";
+const BUYER_GEO_PREFIX: &str = "BUYERGEO_";
+
+/// Persist the geo-fence rules for an event.
+pub fn set_geo_fence_rules(env: &Env, event_id: u64, rules: &GeoFenceRules) {
+    let key = (GEO_FENCE_PREFIX, event_id);
+    env.storage().persistent().set(&key, rules);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the geo-fence rules for an event, if any.
+pub fn get_geo_fence_rules(env: &Env, event_id: u64) -> Option<GeoFenceRules> {
+    let key = (GEO_FENCE_PREFIX, event_id);
+    let rules: Option<GeoFenceRules> = env.storage().persistent().get(&key);
+    if rules.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    rules
+}
+
+/// Persist a buyer's attested region for an event.
+pub fn set_buyer_geo_location(env: &Env, event_id: u64, buyer: &Address, country_code: &String) {
+    let key = (BUYER_GEO_PREFIX, event_id, buyer.clone());
+    env.storage().persistent().set(&key, country_code);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a buyer's attested region for an event, if any.
+pub fn get_buyer_geo_location(env: &Env, event_id: u64, buyer: &Address) -> Option<String> {
+    let key = (BUYER_GEO_PREFIX, event_id, buyer.clone());
+    let country: Option<String> = env.storage().persistent().get(&key);
+    if country.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    country
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2321,4 +2668,125 @@ pub fn get_offline_scan(env: &Env, ticket_id: u64) -> Option<OfflineScanRecord> 
 pub fn has_offline_scan_synced(env: &Env, ticket_id: u64) -> bool {
     let key = (OFFLINE_SCAN_PREFIX, ticket_id);
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Transaction replay protection (Issue #1007)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TX_NONCE_PREFIX: &str = "TXNONCE_";
+const IDEMPOTENCY_KEY_PREFIX: &str = "IDEMKEY_";
+
+/// Returns the next nonce that would be issued to `account`, without
+/// consuming it. Useful for a client to preview the value it should embed
+/// in an idempotency key before submitting a transaction.
+pub fn get_transaction_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_PREFIX, account.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Atomically returns the next nonce for `account` and advances its counter,
+/// so two calls in the same invocation never receive the same value.
+pub fn consume_transaction_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_PREFIX, account.clone());
+    let next: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+    env.storage().persistent().set(&key, &(next + 1));
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    next
+}
+
+/// Whether `key` has already been consumed by a prior `consume_idempotency_key`
+/// call, i.e. whether accepting this call again would be a replay.
+pub fn is_idempotency_key_used(env: &Env, account: &Address, key: &BytesN<32>) -> bool {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, account.clone(), key.clone());
+    // Preserve replay records created before account scoping was introduced.
+    env.storage().persistent().has(&storage_key)
+        || env.storage().persistent().has(&(IDEMPOTENCY_KEY_PREFIX, key.clone()))
+}
+
+/// Marks `key` as used so a later call with the same key can be rejected as
+/// a replay. Callers should check `is_idempotency_key_used` first.
+pub fn consume_idempotency_key(env: &Env, account: &Address, key: &BytesN<32>) {
+    let storage_key = (IDEMPOTENCY_KEY_PREFIX, account.clone(), key.clone());
+    env.storage().persistent().set(&storage_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Real-Time Health & Telemetry (Issue #1192)
+// ═══════════════════════════════════════════════════════════════════════════
+
+use crate::types::{MetricDatapoint, TelemetryStatus};
+
+/// Persist the latest telemetry status snapshot.
+pub fn set_telemetry_status(env: &Env, status: &TelemetryStatus) {
+    env.storage().instance().set(&TELEMETRY_STATUS, status);
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+}
+
+/// Fetch the latest telemetry status snapshot, if any.
+pub fn get_telemetry_status(env: &Env) -> Option<TelemetryStatus> {
+    env.storage().instance().get(&TELEMETRY_STATUS)
+}
+
+/// Record a metric datapoint (append-only log) and refresh the per-metric
+/// latest pointer. Soroban persistent storage offers no key enumeration, so
+/// the pointer is what makes `get_latest_metric` a single lookup.
+pub fn record_metric_datapoint(env: &Env, datapoint: &MetricDatapoint) {
+    let key = (METRIC_DATAPOINT_PREFIX, datapoint.metric_name.clone(), datapoint.recorded_at);
+    env.storage().persistent().set(&key, datapoint);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+
+    let latest_key = (METRIC_LATEST_PREFIX, datapoint.metric_name.clone());
+    env.storage().persistent().set(&latest_key, datapoint);
+    env.storage()
+        .persistent()
+        .extend_ttl(&latest_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the most recent metric datapoint for a given metric name.
+pub fn get_latest_metric(env: &Env, metric_name: &String) -> Option<MetricDatapoint> {
+    let latest_key = (METRIC_LATEST_PREFIX, metric_name.clone());
+    let latest: Option<MetricDatapoint> = env.storage().persistent().get(&latest_key);
+    if latest.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&latest_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    latest
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token-Gated Merchandise (Issue #1193)
+// ═══════════════════════════════════════════════════════════════════════════
+
+use crate::types::TokenGateConfig;
+
+/// Persist a token-gate configuration for a merchandise item.
+pub fn set_token_gate_config(env: &Env, config: &TokenGateConfig) {
+    let key = (TOKEN_GATE_PREFIX, config.merchandise_id);
+    env.storage().persistent().set(&key, config);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the token-gate configuration for a merchandise item, if any.
+pub fn get_token_gate_config(env: &Env, merchandise_id: u64) -> Option<TokenGateConfig> {
+    let key = (TOKEN_GATE_PREFIX, merchandise_id);
+    env.storage().persistent().get(&key)
+}
+
+/// Remove the token-gate configuration for a merchandise item.
+pub fn remove_token_gate_config(env: &Env, merchandise_id: u64) {
+    let key = (TOKEN_GATE_PREFIX, merchandise_id);
+    env.storage().persistent().remove(&key);
 }

@@ -138,13 +138,12 @@ what each router covers so you know where to look.
 | `/currencies`, `/exchange-rates` | `currencies`, `exchange-rates` | Multi-currency pricing |
 | `/wallet` | `wallet` | Wallet linking to user accounts |
 | `/stellar` | `stellar` | Stellar network helpers (fees, network passphrase, etc.) |
-| `/zkp` | `zkp` | Zero-knowledge proof helpers |
 | `/decentralized-storage` (`/storage`) | `decentralized-storage` | IPFS/Arweave asset pinning |
 | `/categories` | `categories` | Event category taxonomy |
 | `/chat` | `chat` | In-app messaging |
 | `/transactions` | `transactions` | Cross-cutting transaction ledger |
 | `/admin`, `/admin/audit` | `admin`, `audit` | Admin console + audit log |
-| `/age-verification` | `age-verification` | Age-gated event compliance |
+| `/age-verification` | `age-verification` | Server-signed age proofs + age-gated event compliance |
 | `/health` | `health` | Liveness/readiness probes |
 | `/internal/*` | `internal` | Service-to-service only — see `docs/internal-api.md` |
 | `/webhooks` | `webhooks` | Inbound webhook receivers (payment providers, etc.) |

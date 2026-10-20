@@ -78,7 +78,7 @@ function appendStyles(root: HTMLElement): void {
   root.appendChild(style);
 }
 
-export function track_widget_referrals(
+export function trackWidgetReferrals(
   eventId: string,
   partnerId: string,
   referralSource = "embed",
@@ -100,7 +100,7 @@ export function track_widget_referrals(
   return record;
 }
 
-export function initialize_widget_payment(options: {
+export function initializeWidgetPayment(options: {
   eventId: string;
   partnerId: string;
   quantity?: number;
@@ -108,7 +108,7 @@ export function initialize_widget_payment(options: {
   referralSource?: string;
 }): WidgetPaymentPayload {
   const quantity = Math.max(1, Math.floor(options.quantity ?? 1));
-  const referral = track_widget_referrals(
+  const referral = trackWidgetReferrals(
     options.eventId,
     options.partnerId,
     options.referralSource,
@@ -125,7 +125,7 @@ export function initialize_widget_payment(options: {
   };
 }
 
-export function render_ticketing_widget(options: TicketingWidgetOptions): HTMLElement {
+export function renderTicketingWidget(options: TicketingWidgetOptions): HTMLElement {
   const container = resolveContainer(options.container);
   const root = document.createElement("section");
   const theme = options.theme ?? "light";
@@ -156,7 +156,7 @@ export function render_ticketing_widget(options: TicketingWidgetOptions): HTMLEl
 
   root.querySelector<HTMLButtonElement>(".lumentix-ticket-widget__button")!.addEventListener("click", () => {
     const quantityInput = root.querySelector<HTMLInputElement>(".lumentix-ticket-widget__quantity")!;
-    const payload = initialize_widget_payment({
+    const payload = initializeWidgetPayment({
       eventId: options.event.id,
       partnerId: options.partnerId,
       quantity: Number(quantityInput.value),

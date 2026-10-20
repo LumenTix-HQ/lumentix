@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import * as qrcode from 'qrcode';
 
 import { TicketEntity } from './entities/ticket.entity';
@@ -172,7 +172,7 @@ export class TicketsService {
       const eventIds = events.map((e) => e.id);
       const existingTickets = await this.ticketRepo.find({
         where: eventIds.map((eventId) => ({
-          transactionHash: payment.transactionHash,
+          transactionHash: payment.transactionHash ?? IsNull(),
           eventId,
         })),
       });
@@ -543,6 +543,7 @@ export class TicketsService {
 
 
     const previousOwnerId = ticket.ownerId;
+    const previousOwnerPublicKey = ticket.ownerPublicKey;
     const saved = await this.dataSource.transaction(async (em) => {
       ticket.ownerId = recipient.id;
       ticket.ownerPublicKey = recipient.stellarPublicKey;
@@ -551,7 +552,7 @@ export class TicketsService {
         {
           from: previousOwnerId,
           to: recipient.id,
-          fromPublicKey: ticket.ownerPublicKey,
+          fromPublicKey: previousOwnerPublicKey,
           toPublicKey: recipient.stellarPublicKey,
           transactionHash: dto.transactionHash,
           timestamp: new Date().toISOString(),
@@ -636,12 +637,25 @@ export class TicketsService {
         },
       });
 
-      await this.notificationService.notifyUser(t.recipientUserId, {
-        title: 'Ticket Received',
-        body: `You received a ticket for event ${t.eventId}`,
-        type: 'ticket_transferred',
-        data: { ticketId: t.ticketId },
-      });
+      // The transfer is already committed; a notification failure must not undo or fail it.
+      try {
+        const [recipient, event] = await Promise.all([
+          this.userRepo.findOne({ where: { id: t.recipientUserId } }),
+          this.eventRepo.findOne({ where: { id: t.eventId } }),
+        ]);
+        if (recipient?.email) {
+          await this.notificationService.queueTicketEmail({
+            userId: recipient.id,
+            email: recipient.email,
+            ticketId: t.ticketId,
+            eventName: event?.title ?? t.eventId,
+          });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Could not queue transfer notification for ticket ${t.ticketId}: ${(err as Error).message}`,
+        );
+      }
     }
   }
 
@@ -734,12 +748,17 @@ export class TicketsService {
     return this.ticketRepo.save(ticket);
   }
 
-  async verifyQrCheckIn(qrData: string): Promise<{
+  async verifyQrCheckIn(
+    qrData: string,
+    actor: { id: string; role: string },
+    expectedEventId?: string,
+  ): Promise<{
     ticketId: string;
     status: string;
     eventId: string;
     attendeeName: string;
     attendeeEmail: string;
+    attendeePhotoUrl: string | null;
     ticketType: string;
   }> {
     let parsed: { ticketId: string; signature: string };
@@ -749,7 +768,11 @@ export class TicketsService {
       throw new BadRequestException('Invalid QR code data');
     }
 
-    if (!parsed.ticketId || !parsed.signature) {
+    if (
+      !parsed ||
+      typeof parsed.ticketId !== 'string' ||
+      typeof parsed.signature !== 'string'
+    ) {
       throw new BadRequestException('QR code missing ticketId or signature');
     }
 
@@ -760,6 +783,15 @@ export class TicketsService {
     const ticket = await this.ticketRepo.findOne({ where: { id: parsed.ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
+    if (expectedEventId && ticket.eventId !== expectedEventId) {
+      throw new BadRequestException('Ticket belongs to a different event');
+    }
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (actor.role !== 'admin' && event.organizerId !== actor.id) {
+      throw new ForbiddenException('You cannot check in attendees for this event');
+    }
+
     if (ticket.status === 'used') {
       throw new BadRequestException('Ticket has already been checked in');
     }
@@ -767,12 +799,17 @@ export class TicketsService {
       throw new BadRequestException('Ticket is no longer valid');
     }
 
-    ticket.status = 'used';
-    await this.ticketRepo.save(ticket);
+    const updated = await this.ticketRepo.update(
+      { id: ticket.id, ownerId: ticket.ownerId, status: 'valid' },
+      { status: 'used' },
+    );
+    if (updated.affected !== 1) {
+      throw new BadRequestException('Ticket has already been checked in or transferred');
+    }
 
     await this.auditService.log({
       action: 'TICKET_CHECKED_IN' as any,
-      userId: ticket.ownerId,
+      userId: actor.id,
       resourceId: ticket.id,
       meta: { eventId: ticket.eventId, method: 'qr_scan' },
     });
@@ -783,8 +820,9 @@ export class TicketsService {
       ticketId: ticket.id,
       status: 'checked_in',
       eventId: ticket.eventId,
-      attendeeName: (user as any)?.displayName ?? 'Unknown',
-      attendeeEmail: (user as any)?.email ?? '',
+      attendeeName: user?.displayName ?? 'Unknown',
+      attendeeEmail: user?.email ?? '',
+      attendeePhotoUrl: user?.logoUrl ?? null,
       ticketType: ticket.assetCode ?? 'general',
     };
   }

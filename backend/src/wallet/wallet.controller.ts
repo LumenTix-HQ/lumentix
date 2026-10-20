@@ -35,10 +35,20 @@ export class WalletController {
   @UseGuards(JwtAuthGuard)
   @Post('verify')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Verify and link wallet', description: 'Verifies the signature and links the Stellar public key to the user account.' })
+  @ApiOperation({
+    summary: 'Verify and link wallet',
+    description:
+      'Verifies the base64-encoded signature of the challenge message and links the Stellar public key to the user account.',
+  })
   @ApiResponse({ status: 201, description: 'Wallet verified and linked' })
-  @ApiResponse({ status: 400, description: 'Invalid signature' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid public key, or challenge expired / never issued',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid signature, or missing/invalid JWT',
+  })
   async verify(
     @Req() req: AuthenticatedRequest,
     @Body() dto: VerifySignatureDto,

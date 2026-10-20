@@ -21,6 +21,8 @@ import { BullModule } from '@nestjs/bull';
 import { CancelEventProcessor } from './jobs/cancel-event.processor';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { StellarModule } from '../stellar';
+import { CalendarModule } from '../calendar/calendar.module';
+import { SchedulingModule } from '../scheduling/scheduling.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { StellarModule } from '../stellar';
     forwardRef(() => RefundModule),
     WebhooksModule,
     StellarModule,
+    CalendarModule,
+    SchedulingModule,
     BullModule.registerQueue({
       name: 'events',
     }),

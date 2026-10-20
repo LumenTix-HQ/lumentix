@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api-client';
+import { apiGet, apiPost, apiPatch, apiDelete, apiRequest } from '@/lib/api-client';
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -12,10 +12,15 @@ Object.defineProperty(window, 'location', {
   writable: true,
 });
 
-describe('API Client', () => {
+const ok = (body: unknown = {}) => ({
+  ok: true,
+  status: 200,
+  json: () => Promise.resolve(body),
+});
+
+describe('API Client (cookie + proxy auth model)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
     mockLocation.href = '';
   });
 
@@ -23,126 +28,102 @@ describe('API Client', () => {
     vi.restoreAllMocks();
   });
 
-  describe('Token Management', () => {
-    it('should include access token in request headers when available', async () => {
-      localStorage.setItem('lumentix_access_token', 'test-token-123');
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ data: 'test' }),
-      });
+  describe('Proxy requests', () => {
+    it('sends requests to /api/proxy/* with a JSON Content-Type and no Authorization header', async () => {
+      mockFetch.mockResolvedValue(ok({ data: 'test' }));
 
       await apiGet('/test-endpoint');
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            Authorization: 'Bearer test-token-123',
-          }),
-        })
-      );
-    });
-
-    it('should not include authorization header when no token', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ data: 'test' }),
-      });
-
-      await apiGet('/test-endpoint');
-
-      const callArgs = mockFetch.mock.calls[0];
-      const headers = callArgs[1]?.headers || {};
-      expect(headers).not.toHaveProperty('Authorization');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/proxy/test-endpoint');
+      expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+      expect(init.headers).not.toHaveProperty('Authorization');
     });
   });
 
-  describe('Token Refresh', () => {
-    it('should refresh token on 401 response and retry request', async () => {
-      localStorage.setItem('lumentix_access_token', 'expired-token');
-      localStorage.setItem('lumentix_refresh_token', 'refresh-token-123');
-
-      // First call returns 401
-      // Second call (after refresh) succeeds
+  describe('Session refresh', () => {
+    it('refreshes through POST /api/auth/refresh on 401 and retries the request', async () => {
       mockFetch
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ access_token: 'new-token', refresh_token: 'new-refresh' }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ data: 'success' }),
-        });
+        .mockResolvedValueOnce({ ok: false, status: 401 })
+        .mockResolvedValueOnce({ ok: true, status: 200 })
+        .mockResolvedValueOnce(ok({ data: 'success' }));
 
       const result = await apiGet('/test-endpoint');
 
       expect(result).toEqual({ data: 'success' });
-      // Should have called fetch 3 times: original, refresh, retry
       expect(mockFetch).toHaveBeenCalledTimes(3);
-      // Verify new tokens were stored
-      expect(localStorage.getItem('lumentix_access_token')).toBe('new-token');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/proxy/test-endpoint');
+      expect(mockFetch.mock.calls[1][0]).toBe('/api/auth/refresh');
+      expect(mockFetch.mock.calls[1][1]).toEqual({ method: 'POST' });
+      expect(mockFetch.mock.calls[2][0]).toBe('/api/proxy/test-endpoint');
     });
 
-    it('should redirect to login when refresh fails', async () => {
-      localStorage.setItem('lumentix_access_token', 'expired-token');
-      localStorage.setItem('lumentix_refresh_token', 'invalid-refresh');
-
+    it('redirects to /login and throws a 401 ApiProxyError when the refresh fails', async () => {
       mockFetch
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-        });
+        .mockResolvedValueOnce({ ok: false, status: 401 })
+        .mockResolvedValueOnce({ ok: false, status: 401 });
 
-      await expect(apiGet('/test-endpoint')).rejects.toThrow('Session expired');
+      const error = await apiGet('/test-endpoint').catch((err: unknown) => err);
 
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).name).toBe('ApiProxyError');
+      expect((error as { status: number }).status).toBe(401);
+      expect((error as Error).message).toContain('Session expired');
       expect(mockLocation.href).toBe('/login');
-      expect(localStorage.getItem('lumentix_access_token')).toBeNull();
-      expect(localStorage.getItem('lumentix_refresh_token')).toBeNull();
     });
 
-    it('should not retry if request already failed once', async () => {
-      localStorage.setItem('lumentix_access_token', 'test-token');
-
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 401,
-      });
+    it('does not retry a second time when the retried request is still unauthorized', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 401 })
+        .mockResolvedValueOnce({ ok: true, status: 200 })
+        .mockResolvedValueOnce({ ok: false, status: 401 });
 
       await expect(apiGet('/test-endpoint')).rejects.toThrow('Session expired');
 
-      // Should only call twice: original + refresh (not retry)
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      // original, refresh, retry (not refreshed again)
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
   });
 
   describe('Error Handling', () => {
-    it('should throw error with message for non-ok responses', async () => {
+    it("throws the backend `message` as-is and exposes the status", async () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 400,
-        text: () => Promise.resolve('Bad request'),
+        text: () => Promise.resolve(JSON.stringify({ message: 'Bad request' })),
       });
 
-      await expect(apiGet('/test-endpoint')).rejects.toThrow('API error 400: Bad request');
+      const error = await apiGet('/test-endpoint').catch((err: unknown) => err);
+
+      expect((error as Error).message).toBe('Bad request');
+      expect((error as { status: number }).status).toBe(400);
+    });
+
+    it('uses the first element when the backend message is an array', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: () => Promise.resolve(JSON.stringify({ message: ['email must be an email', 'password too short'] })),
+      });
+
+      await expect(apiGet('/test-endpoint')).rejects.toThrow('email must be an email');
+    });
+
+    it('falls back to the raw body when the error response is not JSON', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 502,
+        text: () => Promise.resolve('Bad gateway'),
+      });
+
+      const error = await apiPost('/test-endpoint', {}).catch((err: unknown) => err);
+
+      expect((error as Error).message).toBe('Bad gateway');
+      expect((error as { status: number }).status).toBe(502);
     });
 
     it('should handle 204 no content response', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 204,
-      });
+      mockFetch.mockResolvedValue({ ok: true, status: 204 });
 
       const result = await apiGet('/test-endpoint');
       expect(result).toBeNull();
@@ -150,11 +131,7 @@ describe('API Client', () => {
 
     it('should parse JSON response for successful requests', async () => {
       const mockData = { id: 1, name: 'Test' };
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockData),
-      });
+      mockFetch.mockResolvedValue(ok(mockData));
 
       const result = await apiGet('/test-endpoint');
       expect(result).toEqual(mockData);
@@ -163,26 +140,18 @@ describe('API Client', () => {
 
   describe('HTTP Methods', () => {
     it('should make GET request', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ method: 'GET' }),
-      });
+      mockFetch.mockResolvedValue(ok({ method: 'GET' }));
 
       const result = await apiGet('/test');
       expect(result).toEqual({ method: 'GET' });
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/test'),
-        expect.objectContaining({ method: 'GET' })
+        expect.objectContaining({ method: 'GET' }),
       );
     });
 
     it('should make POST request with body', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ method: 'POST' }),
-      });
+      mockFetch.mockResolvedValue(ok({ method: 'POST' }));
 
       const body = { name: 'Test Item' };
       const result = await apiPost('/test', body);
@@ -190,19 +159,12 @@ describe('API Client', () => {
       expect(result).toEqual({ method: 'POST' });
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/test'),
-        expect.objectContaining({
-          method: 'POST',
-          body: JSON.stringify(body),
-        })
+        expect.objectContaining({ method: 'POST', body: JSON.stringify(body) }),
       );
     });
 
     it('should make PATCH request', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ method: 'PATCH' }),
-      });
+      mockFetch.mockResolvedValue(ok({ method: 'PATCH' }));
 
       const body = { id: 1, name: 'Updated' };
       const result = await apiPatch('/test/1', body);
@@ -210,68 +172,39 @@ describe('API Client', () => {
       expect(result).toEqual({ method: 'PATCH' });
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/test/1'),
-        expect.objectContaining({
-          method: 'PATCH',
-          body: JSON.stringify(body),
-        })
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify(body) }),
       );
     });
 
     it('should make DELETE request', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ method: 'DELETE' }),
-      });
+      mockFetch.mockResolvedValue(ok({ method: 'DELETE' }));
 
       const result = await apiDelete('/test/1');
 
       expect(result).toEqual({ method: 'DELETE' });
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('/test/1'),
-        expect.objectContaining({ method: 'DELETE' })
+        expect.objectContaining({ method: 'DELETE' }),
       );
     });
   });
 
   describe('Request Configuration', () => {
-    it('should use correct API base URL', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({}),
-      });
+    it('keeps the default Content-Type when the caller supplies other headers', async () => {
+      mockFetch.mockResolvedValue(ok());
 
-      await apiGet('/test');
-
-      const url = mockFetch.mock.calls[0][0];
-      expect(url).toContain('/test');
-    });
-
-    it('should set Content-Type header by default', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({}),
-      });
-
-      await apiGet('/test');
+      await apiRequest('/test', { headers: { 'X-Custom': '1' } });
 
       const headers = mockFetch.mock.calls[0][1].headers;
-      expect(headers['Content-Type']).toBe('application/json');
+      expect(headers).toEqual({ 'Content-Type': 'application/json', 'X-Custom': '1' });
     });
 
-    it('should merge custom headers with default headers', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({}),
-      });
+    it('lets a caller-supplied header override the default Content-Type', async () => {
+      mockFetch.mockResolvedValue(ok());
 
-      await apiGet('/test');
+      await apiRequest('/test', { headers: { 'Content-Type': 'text/plain' } });
 
-      const headers = mockFetch.mock.calls[0][1].headers;
-      expect(headers).toHaveProperty('Content-Type');
+      expect(mockFetch.mock.calls[0][1].headers['Content-Type']).toBe('text/plain');
     });
   });
 });

@@ -263,11 +263,11 @@ export class AdminService {
     });
 
     this.mailerService
-      .send(
-        user.email,
-        'Your role request has been approved',
-        `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been approved.</p>`,
-      )
+      .send({
+        to: user.email,
+        subject: 'Your role request has been approved',
+        html: `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been approved.</p>`,
+      })
       .catch(() => undefined);
 
     return saved;
@@ -294,11 +294,11 @@ export class AdminService {
 
     const user = await this.findUserOrFail(request.userId);
     this.mailerService
-      .send(
-        user.email,
-        'Your role request has been declined',
-        `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been declined.${reason ? ` Reason: ${reason}` : ''}</p>`,
-      )
+      .send({
+        to: user.email,
+        subject: 'Your role request has been declined',
+        html: `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been declined.${reason ? ` Reason: ${reason}` : ''}</p>`,
+      })
       .catch(() => undefined);
 
     return saved;

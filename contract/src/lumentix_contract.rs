@@ -37,9 +37,14 @@ use crate::events::{
     SubscriptionPlanCreated, RecurringBillingProcessed, SubscriptionStatusValidated,
     SecurityThreatMonitored, SuspiciousActivityDetected, IncidentResponded,
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
-
-  EventCertificateIssued, CertificationStandardUpdated, UnderagePurchaseRejected,
+    EventCertificateIssued, CertificationStandardUpdated, UnderagePurchaseRejected,
+    AgeProofIssued, AgeProofVerified,
+    BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
+    PassPackageCreated, PassAllowanceDeducted,
+    DynamicPricingCurveSet, PricingDecisionLogged,
+    GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
 };
+use crate::achievement_badge;
 use crate::storage;
 use crate::types::{
     OfflineScanRecord, OfflineScanResult, ValidationProof, WalletSession,
@@ -57,10 +62,12 @@ use crate::types::{
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
     PricingSchedule, MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
-    CertificationStandard, AgeProof,
+    CertificationStandard, AgeProof, EventCertificate,
+    BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
 };
 use crate::validation;
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, Map, String, Vec};
@@ -442,6 +449,10 @@ impl LumentixContract {
 
         Self::reject_underage_purchase(env.clone(), event_id, buyer.clone())?;
 
+        // Enforce the event's geo-fence against the buyer's attested region
+        // (Issue #1448). No-op for events without active rules.
+        Self::check_purchase_geo(&env, &buyer, event_id)?;
+
         let now = env.ledger().timestamp();
         Self::cleanup_expired_waitlist_offers(&env, event_id, now);
         let reserved_for_waitlist = storage::get_waitlist_reserved(&env, event_id);
@@ -459,6 +470,10 @@ impl LumentixContract {
         {
             return Err(LumentixError::EventSoldOut);
         }
+
+        // Enforce the on-chain venue capacity (Issue #1245). No-op for events
+        // with no configured capacity.
+        crate::venue_capacity::guard_mint_against_capacity(&env, event_id, 1)?;
 
         // Validate payment amount against time-based dynamic pricing
         let required_price =
@@ -489,6 +504,14 @@ impl LumentixContract {
         // Increment tickets_sold counter
         event.tickets_sold += 1;
         storage::set_event(&env, event_id, &event);
+
+        // Roll the sale into the rolling demand window so dynamic pricing
+        // sees real-time velocity (Issue #1451).
+        storage::record_pricing_sale(&env, event_id, 1, now);
+
+        // Record the seat against the on-chain venue capacity (Issue #1245).
+        // No-ops for events that never had a capacity configured.
+        crate::venue_capacity::increment_attendance_counter_if_configured(&env, event_id, 1)?;
 
         // Create ticket
         let ticket_id = storage::get_next_ticket_id(&env);
@@ -571,6 +594,10 @@ impl LumentixContract {
 
         Self::reject_underage_purchase(env.clone(), event_id, buyer.clone())?;
 
+        // Enforce the event's geo-fence against the buyer's attested region
+        // (Issue #1448). No-op for events without active rules.
+        Self::check_purchase_geo(&env, &buyer, event_id)?;
+
         let now = env.ledger().timestamp();
         Self::cleanup_expired_waitlist_offers(&env, event_id, now);
         let reserved_for_waitlist = storage::get_waitlist_reserved(&env, event_id);
@@ -582,6 +609,10 @@ impl LumentixContract {
         if available < quantity {
             return Err(LumentixError::EventSoldOut);
         }
+
+        // Enforce the on-chain venue capacity for the whole batch at once
+        // (Issue #1245). No-op for events with no configured capacity.
+        crate::venue_capacity::guard_mint_against_capacity(&env, event_id, quantity)?;
 
         // Calculate total amount using dynamic per-ticket pricing
         let unit_price = Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
@@ -609,6 +640,13 @@ impl LumentixContract {
         // Update tickets_sold counter
         event.tickets_sold += quantity;
         storage::set_event(&env, event_id, &event);
+
+        // Roll the batch into the rolling demand window (Issue #1451).
+        storage::record_pricing_sale(&env, event_id, quantity, now);
+
+        // Record the seats against the on-chain venue capacity (Issue #1245).
+        // No-ops for events that never had a capacity configured.
+        crate::venue_capacity::increment_attendance_counter_if_configured(&env, event_id, quantity)?;
 
         // Create tickets and collect IDs
         let mut ticket_ids = Vec::new(&env);
@@ -851,6 +889,174 @@ impl LumentixContract {
         to: Address,
     ) -> Result<(), LumentixError> {
         from.require_auth();
+
+        let mut ticket = storage::get_ticket(&env, ticket_id)?;
+        Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+        Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from, to);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Transaction replay protection: keys are scoped to an authenticated
+    // account. Reuse the SAME key when retrying an operation; generate a new
+    // nonce only for a new logical operation. Persistent records survive TTL
+    // archival and must be restored, never treated as unused.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Returns the caller's next transaction nonce and advances their
+    /// counter, so two calls never receive the same value. A client
+    /// includes this nonce when deriving an idempotency key for a
+    /// subsequent sensitive call, so a network-retried or replayed
+    /// transaction carrying the same key can be rejected.
+    pub fn generate_transaction_nonce(env: Env, account: Address) -> u64 {
+        account.require_auth();
+        storage::consume_transaction_nonce(&env, &account)
+    }
+
+    /// Returns whether `key` is still unused (`true`) or has already been
+    /// consumed by a prior `reject_replay_attempt` call (`false`). Read-only
+    /// — does not itself consume the key.
+    pub fn validate_idempotency_key(env: Env, account: Address, key: BytesN<32>) -> bool {
+        !storage::is_idempotency_key_used(&env, &account, &key)
+    }
+
+    /// Consumes `key`, erroring with `IdempotencyKeyAlreadyUsed` if it has
+    /// already been used. Call this once, before any state changes, at the
+    /// start of an operation that must not be double-applied by a network
+    /// retry or a replayed transaction.
+    pub fn reject_replay_attempt(
+        env: Env,
+        account: Address,
+        key: BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        account.require_auth();
+        Self::consume_replay_key(&env, &account, &key)
+    }
+
+    // Internal operations authorize the account once in their purchase/transfer
+    // path. Requiring auth twice in one Soroban frame is an error.
+    fn consume_replay_key(
+        env: &Env,
+        account: &Address,
+        key: &BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        if storage::is_idempotency_key_used(env, account, key) {
+            return Err(LumentixError::IdempotencyKeyAlreadyUsed);
+        }
+        storage::consume_idempotency_key(env, account, key);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFTs (Issue #1208)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Returns whether `owner`, with stat `value` for `milestone` (events
+    /// attended, or loyalty points), meets that milestone's threshold (10
+    /// events or 1,000 points) and holds no active (non-revoked, non-expired)
+    /// badge for the same milestone. Read-only view.
+    pub fn check_milestone_eligibility(
+        env: Env,
+        owner: Address,
+        milestone: crate::achievement_badge::Milestone,
+        value: u32,
+    ) -> bool {
+        achievement_badge::check_milestone_eligibility(&env, &owner, milestone, value)
+    }
+
+    /// Mint a soulbound achievement badge for `owner`. The contract does not
+    /// track per-attendee attendance or loyalty on-chain, so the platform
+    /// admin must authorize the mint and attests `value`, the owner's stat
+    /// for `milestone`. `expires_at` is a ledger timestamp (0 = no expiry).
+    /// Fails with `Unauthorized` if `admin` is not the stored admin,
+    /// `InvalidBadgeExpiry` if `expires_at` is not in the future, and
+    /// `BadgeNotEligible` unless the milestone threshold is met and the
+    /// owner holds no active badge for that milestone.
+    pub fn mint_achievement_badge(
+        env: Env,
+        admin: Address,
+        owner: Address,
+        milestone: crate::achievement_badge::Milestone,
+        label: String,
+        value: u32,
+        expires_at: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        admin.require_auth();
+        if storage::get_admin(&env) != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        achievement_badge::mint_achievement_badge(&env, owner, milestone, label, value, expires_at)
+    }
+
+    /// Revoke an expired badge by ID. Only the platform admin can revoke.
+    /// Returns `BadgeNotFound` for an unknown badge, `BadgeAlreadyRevoked`
+    /// on a repeated revoke, and `BadgeNotExpired` if the badge has no
+    /// expiry or has not reached it yet.
+    pub fn revoke_expired_badge(
+        env: Env,
+        admin: Address,
+        badge_id: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        admin.require_auth();
+        if storage::get_admin(&env) != admin {
+            return Err(LumentixError::Unauthorized);
+        }
+        achievement_badge::revoke_expired_badge(&env, badge_id)
+    }
+
+    /// Return a single achievement badge by ID, or `BadgeNotFound`.
+    pub fn get_badge(
+        env: Env,
+        badge_id: u64,
+    ) -> Result<crate::achievement_badge::AchievementBadge, LumentixError> {
+        achievement_badge::get_badge(&env, badge_id)
+    }
+
+    /// Return all achievement badges currently held by `owner`.
+    pub fn get_owner_badges(
+        env: Env,
+        owner: Address,
+    ) -> Vec<crate::achievement_badge::AchievementBadge> {
+        achievement_badge::get_owner_badges(&env, &owner)
+    }
+
+    /// Atomically consume a buyer-scoped key and purchase one ticket.
+    /// A failed purchase rolls back the key along with all contract writes.
+    pub fn purchase_ticket_idempotent(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        amount: i128,
+        idempotency_key: BytesN<32>,
+    ) -> Result<u64, LumentixError> {
+        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
+        Self::purchase_ticket(env, buyer, event_id, amount)
+    }
+
+    /// Replay-protected group purchase; retries cannot mint another batch.
+    pub fn batch_purchase_idempotent(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        buyer: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<Vec<u64>, LumentixError> {
+        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
+        Self::batch_purchase_tickets(env, event_id, quantity, buyer)
+    }
+
+    /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
+    /// network-retried or replayed call carrying the same `idempotency_key`
+    /// is rejected instead of transferring the ticket a second time.
+    pub fn transfer_ticket_idempotent(
+        env: Env,
+        ticket_id: u64,
+        from: Address,
+        to: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+        Self::consume_replay_key(&env, &from, &idempotency_key)?;
 
         let mut ticket = storage::get_ticket(&env, ticket_id)?;
         Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
@@ -1135,6 +1341,9 @@ impl LumentixContract {
         event.tickets_sold = event.tickets_sold.saturating_sub(1);
         storage::set_event(&env, ticket.event_id, &event);
 
+        // Return the seat to the on-chain venue capacity (Issue #1245).
+        crate::venue_capacity::decrement_attendance_counter(&env, ticket.event_id, 1);
+
         if event.status == EventStatus::Cancelled {
             // Cancelled events do not issue waitlist offers.
         } else {
@@ -1372,8 +1581,15 @@ impl LumentixContract {
         storage::get_event(&env, event_id)
     }
 
-    /// Calculate dynamic ticket price from time window and demand velocity.
-    /// Uses organizer pricing schedule when configured, otherwise platform defaults.
+    /// Calculate dynamic ticket price from time window, demand velocity and
+    /// remaining inventory. Uses the organizer pricing schedule for the
+    /// time-based tier, and the organizer pricing curve (when configured) for
+    /// demand and scarcity adjustments. Falls back to platform defaults.
+    ///
+    /// `recent_purchases` / `window_seconds` let a caller supply an explicit
+    /// demand sample; when `recent_purchases` is 0 the contract's own rolling
+    /// one-hour sales window is used instead, so purchases made through
+    /// [`Self::purchase_ticket`] feed real-time demand automatically.
     pub fn calculate_dynamic_price(
         env: Env,
         event_id: u64,
@@ -1381,7 +1597,11 @@ impl LumentixContract {
         window_seconds: u64,
     ) -> Result<i128, LumentixError> {
         let event = storage::get_event(&env, event_id)?;
-        if !storage::has_pricing_schedule(&env, event_id) {
+        let curve = storage::get_pricing_curve(&env, event_id);
+        let has_schedule = storage::has_pricing_schedule(&env, event_id);
+
+        // No schedule and no curve: static base price, as before.
+        if !has_schedule && curve.is_none() {
             return Ok(event.ticket_price);
         }
 
@@ -1397,25 +1617,73 @@ impl LumentixContract {
         };
 
         let mut price = (event.ticket_price * multiplier_bps as i128) / 10000;
-        if recent_purchases > 0 {
+
+        // ── Demand velocity ────────────────────────────────────────────────
+        let velocity_per_hour = if recent_purchases > 0 {
             let window = if window_seconds == 0 {
                 1
             } else {
                 window_seconds
             };
-            let velocity_per_hour = (recent_purchases as u64).saturating_mul(3600) / window;
+            (recent_purchases as u64).saturating_mul(3600) / window
+        } else if curve.is_some() {
+            storage::get_demand_velocity_per_hour(&env, event_id)
+        } else {
+            0
+        };
 
-            let demand_multiplier_bps = if velocity_per_hour >= 50 {
-                13000
-            } else if velocity_per_hour >= 20 {
-                11500
-            } else if velocity_per_hour >= 10 {
-                10500
+        let demand_multiplier_bps: u32 = if let Some(curve) = curve.as_ref() {
+            let steps = if curve.demand_step_threshold == 0 {
+                0
             } else {
-                10000
+                (velocity_per_hour / curve.demand_step_threshold as u64).min(
+                    curve.max_demand_steps as u64,
+                ) as u32
             };
+            10000u32.saturating_add(steps.saturating_mul(curve.demand_step_bps))
+        } else if velocity_per_hour >= 50 {
+            13000
+        } else if velocity_per_hour >= 20 {
+            11500
+        } else if velocity_per_hour >= 10 {
+            10500
+        } else {
+            10000
+        };
+        price = (price * demand_multiplier_bps as i128) / 10000;
 
-            price = (price * demand_multiplier_bps as i128) / 10000;
+        // ── Inventory scarcity ─────────────────────────────────────────────
+        // Only the organizer-configured curve drives scarcity; the platform
+        // default stays time-and-demand-only so no event is repriced just
+        // because its inventory is thin.
+        if let Some(curve) = curve.as_ref() {
+            let remaining = event.max_tickets.saturating_sub(event.tickets_sold);
+            if event.max_tickets > 0 && curve.scarcity_threshold_pct > 0 {
+                let remaining_pct = (remaining as u64).saturating_mul(100) / event.max_tickets as u64;
+                if remaining_pct <= curve.scarcity_threshold_pct as u64 {
+                    // Steps of `scarcity_threshold_pct` percentage points of
+                    // remaining inventory below the threshold, one step per
+                    // such band (floor: one step once at or below threshold).
+                    let band = curve.scarcity_threshold_pct as u64;
+                    let below = curve.scarcity_threshold_pct as u64 - remaining_pct;
+                    let steps = (below / band).saturating_add(1);
+                    let scarcity_multiplier_bps =
+                        10000u32.saturating_add((steps as u32).saturating_mul(curve.scarcity_step_bps));
+                    price = (price * scarcity_multiplier_bps as i128) / 10000;
+                }
+            }
+        }
+
+        // ── Bounds ─────────────────────────────────────────────────────────
+        if let Some(curve) = curve.as_ref() {
+            let floor = (event.ticket_price * curve.min_price_bps as i128) / 10000;
+            let cap = (event.ticket_price * curve.max_price_bps as i128) / 10000;
+            if price < floor {
+                price = floor;
+            }
+            if price > cap {
+                price = cap;
+            }
         }
 
         if price <= 0 {
@@ -1423,6 +1691,113 @@ impl LumentixContract {
         }
 
         Ok(price)
+    }
+
+    /// Configure the demand-and-scarcity pricing curve for an event and apply
+    /// it immediately against current live state (Issue #1451). Organizer only.
+    ///
+    /// Stores the curve, recomputes the price from the rolling demand window,
+    /// remaining inventory and time-to-event, records the decision, and
+    /// returns the new price.
+    pub fn apply_price_adjustment(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        curve: DynamicPricingCurve,
+    ) -> Result<i128, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Thresholds and step counts must be usable; a zero threshold would
+        // divide by zero, and a min above its max inverts the bounds.
+        if curve.demand_step_threshold == 0
+            || curve.scarcity_threshold_pct > 100
+            || curve.min_price_bps == 0
+            || curve.max_price_bps < curve.min_price_bps
+        {
+            return Err(LumentixError::InvalidPricingCurve);
+        }
+
+        storage::set_pricing_curve(&env, event_id, &curve);
+
+        let decision = Self::build_pricing_decision(&env, event_id)?;
+        storage::set_pricing_decision(&env, event_id, &decision);
+
+        PricingDecisionLogged::emit(
+            &env,
+            event_id,
+            decision.base_price,
+            decision.adjusted_price,
+            decision.price_tier.clone(),
+            decision.demand_velocity_per_hour,
+            decision.remaining_inventory,
+        );
+        DynamicPricingCurveSet::emit(
+            &env,
+            event_id,
+            organizer,
+            decision.adjusted_price,
+            decision.demand_velocity_per_hour,
+            decision.remaining_inventory,
+        );
+
+        Ok(decision.adjusted_price)
+    }
+
+    /// Recompute the current dynamic price, persist it as the event's latest
+    /// pricing decision, and emit it for indexers (Issue #1451). Organizer
+    /// only. Read-only counterpart is [`Self::get_pricing_decision`].
+    pub fn log_pricing_decision(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+    ) -> Result<PricingDecision, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let decision = Self::build_pricing_decision(&env, event_id)?;
+        storage::set_pricing_decision(&env, event_id, &decision);
+
+        PricingDecisionLogged::emit(
+            &env,
+            event_id,
+            decision.base_price,
+            decision.adjusted_price,
+            decision.price_tier.clone(),
+            decision.demand_velocity_per_hour,
+            decision.remaining_inventory,
+        );
+
+        Ok(decision)
+    }
+
+    /// Read the most recent persisted pricing decision for an event.
+    pub fn get_pricing_decision(env: Env, event_id: u64) -> Option<PricingDecision> {
+        storage::get_pricing_decision(&env, event_id)
+    }
+
+    /// Shared computation behind [`Self::apply_price_adjustment`] and
+    /// [`Self::log_pricing_decision`].
+    fn build_pricing_decision(env: &Env, event_id: u64) -> Result<PricingDecision, LumentixError> {
+        let event = storage::get_event(env, event_id)?;
+        let adjusted_price = Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
+        let tier = Self::resolve_price_tier(env, event_id, &event)?;
+
+        Ok(PricingDecision {
+            event_id,
+            base_price: event.ticket_price,
+            adjusted_price,
+            price_tier: tier,
+            demand_velocity_per_hour: storage::get_demand_velocity_per_hour(env, event_id),
+            remaining_inventory: event.max_tickets.saturating_sub(event.tickets_sold),
+            decided_at: env.ledger().timestamp(),
+        })
     }
 
     /// Configure time-based pricing multipliers for an event. Organizer only.
@@ -1533,6 +1908,253 @@ impl LumentixContract {
         storage::set_certification_standard_enabled(&env, &standard, enabled);
         CertificationStandardUpdated::emit(&env, standard, enabled);
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Biometric Authentication (Issue #649)
+    //
+    // The contract never stores or transmits raw biometric data. It only
+    // persists a public credential (a WebAuthn/passkey-style public key and
+    // credential ID) — the fingerprint or facial match itself happens on the
+    // user's device, off-chain. `user.require_auth()` is the on-chain
+    // cryptographic verification step: the calling Soroban account must
+    // already prove control of its signing key (backed, for a passkey-based
+    // smart wallet, by the device's biometric-gated key) before any of these
+    // functions execute.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Organizer-only: mark whether `event_id` requires biometric verification
+    /// (a "high-security event") before `authenticate_biometric` is meaningful.
+    pub fn set_event_biometric_requirement(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        required: bool,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+        storage::set_event_biometric_required(&env, event_id, required);
+        Ok(())
+    }
+
+    /// Returns whether `event_id` currently requires biometric verification.
+    pub fn is_biometric_required(env: Env, event_id: u64) -> Result<bool, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(storage::is_event_biometric_required(&env, event_id))
+    }
+
+    /// Enroll a biometric credential for `user` on `event_id`. Requires the
+    /// user to have already granted consent via `manage_biometric_privacy`.
+    /// Only ever stores the public credential — never raw biometric data.
+    pub fn register_biometric_data(
+        env: Env,
+        user: Address,
+        event_id: u64,
+        credential_id: BytesN<32>,
+        public_key: BytesN<32>,
+        biometric_type: BiometricType,
+    ) -> Result<(), LumentixError> {
+        user.require_auth();
+        let _ = storage::get_event(&env, event_id)?;
+
+        if !storage::has_biometric_consent(&env, &user) {
+            return Err(LumentixError::BiometricConsentRequired);
+        }
+        if storage::has_biometric_credential(&env, &user, event_id) {
+            return Err(LumentixError::BiometricCredentialAlreadyExists);
+        }
+
+        let credential = BiometricCredential {
+            user: user.clone(),
+            event_id,
+            credential_id,
+            public_key,
+            biometric_type: biometric_type.clone(),
+            registered_at: env.ledger().timestamp(),
+            enabled: true,
+            revoked: false,
+        };
+        storage::set_biometric_credential(&env, &credential);
+        BiometricCredentialRegistered::emit(&env, user, event_id, biometric_type);
+        Ok(())
+    }
+
+    /// Verify `user` for entry into `event_id` using their registered
+    /// biometric credential. Rejects disabled, revoked, or missing
+    /// credentials, and requires standing consent. If accepted, the caller
+    /// (e.g. the check-in flow) may proceed to grant entry; a secure
+    /// fallback (PIN/QR code) should be offered by the application layer
+    /// whenever this call returns an error.
+    pub fn authenticate_biometric(env: Env, user: Address, event_id: u64) -> Result<bool, LumentixError> {
+        user.require_auth();
+        if !storage::has_biometric_consent(&env, &user) {
+            return Err(LumentixError::BiometricConsentRequired);
+        }
+        let credential = storage::get_biometric_credential(&env, &user, event_id)?;
+        if credential.revoked {
+            return Err(LumentixError::BiometricCredentialRevoked);
+        }
+        if !credential.enabled {
+            return Err(LumentixError::BiometricCredentialDisabled);
+        }
+
+        BiometricAuthenticated::emit(&env, user, event_id);
+        Ok(true)
+    }
+
+    /// Manage consent, enable/disable, and deletion for a user's biometric
+    /// credential on `event_id`. Withdrawing consent immediately disables any
+    /// existing credential. Deletion permanently removes the stored public
+    /// credential data.
+    pub fn manage_biometric_privacy(
+        env: Env,
+        user: Address,
+        event_id: u64,
+        action: BiometricPrivacyAction,
+    ) -> Result<(), LumentixError> {
+        user.require_auth();
+
+        match action.clone() {
+            BiometricPrivacyAction::GrantConsent => {
+                storage::set_biometric_consent(&env, &user, true);
+            }
+            BiometricPrivacyAction::RevokeConsent => {
+                storage::set_biometric_consent(&env, &user, false);
+                if let Ok(mut credential) = storage::get_biometric_credential(&env, &user, event_id) {
+                    credential.enabled = false;
+                    storage::set_biometric_credential(&env, &credential);
+                }
+            }
+            BiometricPrivacyAction::Enable => {
+                if !storage::has_biometric_consent(&env, &user) {
+                    return Err(LumentixError::BiometricConsentRequired);
+                }
+                let mut credential = storage::get_biometric_credential(&env, &user, event_id)?;
+                if credential.revoked {
+                    return Err(LumentixError::BiometricCredentialRevoked);
+                }
+                credential.enabled = true;
+                storage::set_biometric_credential(&env, &credential);
+            }
+            BiometricPrivacyAction::Disable => {
+                let mut credential = storage::get_biometric_credential(&env, &user, event_id)?;
+                credential.enabled = false;
+                storage::set_biometric_credential(&env, &credential);
+            }
+            BiometricPrivacyAction::Delete => {
+                let mut credential = storage::get_biometric_credential(&env, &user, event_id)?;
+                credential.enabled = false;
+                credential.revoked = true;
+                storage::set_biometric_credential(&env, &credential);
+                storage::remove_biometric_credential(&env, &user, event_id);
+            }
+        }
+
+        BiometricPrivacyUpdated::emit(&env, user, event_id, action);
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages (Issue #906)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Create a package deal granting `owner` entry into any `total_allowance`
+    /// of the events listed in `eligible_events` (e.g. "any 3 of 10 events").
+    /// Organizer-only, and every eligible event must belong to that organizer.
+    pub fn create_pass_package(
+        env: Env,
+        organizer: Address,
+        owner: Address,
+        eligible_events: Vec<u64>,
+        total_allowance: u32,
+        expires_at: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+
+        if eligible_events.is_empty() || total_allowance == 0 {
+            return Err(LumentixError::InvalidPassPackageConfig);
+        }
+        for event_id in eligible_events.iter() {
+            let event = storage::get_event(&env, event_id)?;
+            if event.organizer != organizer {
+                return Err(LumentixError::Unauthorized);
+            }
+        }
+
+        let package_id = storage::get_next_pass_package_id(&env);
+        storage::increment_pass_package_id(&env);
+
+        let package = PassPackage {
+            package_id,
+            owner: owner.clone(),
+            organizer,
+            eligible_events,
+            total_allowance,
+            remaining_allowance: total_allowance,
+            created_at: env.ledger().timestamp(),
+            expires_at,
+            active: true,
+        };
+        storage::set_pass_package(&env, package_id, &package);
+
+        PassPackageCreated::emit(&env, package_id, owner, total_allowance);
+        Ok(package_id)
+    }
+
+    /// Returns the remaining allowance and eligible event list for a pass package.
+    pub fn check_pass_balance(env: Env, package_id: u64) -> Result<(u32, Vec<u64>), LumentixError> {
+        let package = storage::get_pass_package(&env, package_id)?;
+        Ok((package.remaining_allowance, package.eligible_events))
+    }
+
+    /// Atomically consume one allowance from `package_id` for entry into
+    /// `event_id`. Fails if the package is expired/inactive, the event is not
+    /// part of the package, or the allowance is exhausted. Each Soroban
+    /// invocation executes as a single atomic read-modify-write against
+    /// ledger state, so concurrent entry attempts cannot overspend the
+    /// remaining balance.
+    pub fn deduct_pass_allowance(
+        env: Env,
+        holder: Address,
+        package_id: u64,
+        event_id: u64,
+    ) -> Result<u32, LumentixError> {
+        holder.require_auth();
+        let mut package = storage::get_pass_package(&env, package_id)?;
+
+        if package.owner != holder {
+            return Err(LumentixError::Unauthorized);
+        }
+        if !package.active || env.ledger().timestamp() > package.expires_at {
+            if package.active {
+                package.active = false;
+                storage::set_pass_package(&env, package_id, &package);
+            }
+            return Err(LumentixError::PassPackageExpired);
+        }
+
+        let mut eligible = false;
+        for eligible_event_id in package.eligible_events.iter() {
+            if eligible_event_id == event_id {
+                eligible = true;
+                break;
+            }
+        }
+        if !eligible {
+            return Err(LumentixError::PassPackageEventNotEligible);
+        }
+        if package.remaining_allowance == 0 {
+            return Err(LumentixError::PassPackageExhausted);
+        }
+
+        package.remaining_allowance -= 1;
+        storage::set_pass_package(&env, package_id, &package);
+
+        PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
+        Ok(package.remaining_allowance)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1952,8 +2574,19 @@ impl LumentixContract {
         cancelled_events
     }
 
-    /// Implement batch_transfer_tickets write function for transferring multiple tickets in one call.
-    /// Iterate and enforce auth on from once, verifying from owns all tickets, updating paths to to.
+    /// Transfer multiple tickets from `from` to `to` in a single call (issue
+    /// #1203). Reduces per-ticket gas versus calling `transfer_ticket` once
+    /// per ticket, and gives group-booking transfers all-or-nothing
+    /// semantics: `validate_batch_recipients` checks every ticket in the
+    /// batch *before* any of them are written, so a single invalid ticket
+    /// (wrong owner, used, revoked, wrong event status, blackout window)
+    /// rejects the whole batch instead of leaving it partially applied.
+    ///
+    /// # Errors
+    /// Returns `InvalidAmount` if `ticket_ids` is empty or contains the
+    /// same ticket ID more than once. Otherwise returns whatever
+    /// `validate_ticket_transfer` would return for the first ticket that
+    /// fails validation.
     pub fn batch_transfer_tickets(
         env: Env,
         ticket_ids: Vec<u64>,
@@ -1962,9 +2595,9 @@ impl LumentixContract {
     ) -> Result<(), LumentixError> {
         from.require_auth();
 
-        for ticket_id in ticket_ids.iter() {
-            let mut ticket = storage::get_ticket(&env, ticket_id)?;
-            Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &to, &from)?;
+
+        for (ticket_id, mut ticket) in ticket_ids.iter().zip(tickets.iter()) {
             Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from.clone(), to.clone());
         }
 
@@ -1975,27 +2608,49 @@ impl LumentixContract {
         Ok(())
     }
 
-    /// Validate batch recipients before transfer
-    pub fn validate_batch_recipients(
-        env: Env,
-        ticket_ids: Vec<u64>,
-        from: Address,
-    ) -> Result<(), LumentixError> {
-        from.require_auth();
-        for ticket_id in ticket_ids.iter() {
-            let ticket = storage::get_ticket(&env, ticket_id)?;
-            Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
+    /// Validates a proposed batch transfer before any ticket is written:
+    /// the ticket-ID list is non-empty and has no duplicates, the
+    /// recipient isn't the sender itself, and every ticket individually
+    /// passes the same ownership/status checks `transfer_ticket` applies.
+    /// Returns the loaded `Ticket` records (in `ticket_ids` order) so the
+    /// caller doesn't have to fetch them from storage a second time.
+    ///
+    /// Previously this function existed but was never called from
+    /// `batch_transfer_tickets` — it duplicated the per-ticket ownership
+    /// check without validating the recipient at all (despite the name),
+    /// and its being unused meant a batch with a duplicate ticket ID, an
+    /// empty list, or a self-transfer was never actually rejected.
+    fn validate_batch_recipients(
+        env: &Env,
+        ticket_ids: &Vec<u64>,
+        to: &Address,
+        from: &Address,
+    ) -> Result<Vec<Ticket>, LumentixError> {
+        if ticket_ids.is_empty() {
+            return Err(LumentixError::InvalidAmount);
         }
-        Ok(())
+        if to == from {
+            return Err(LumentixError::InvalidAddress);
+        }
+
+        let mut seen: Vec<u64> = Vec::new(env);
+        let mut tickets: Vec<Ticket> = Vec::new(env);
+        for ticket_id in ticket_ids.iter() {
+            if seen.contains(&ticket_id) {
+                return Err(LumentixError::InvalidAmount);
+            }
+            seen.push_back(ticket_id);
+
+            let ticket = storage::get_ticket(env, ticket_id)?;
+            Self::validate_ticket_transfer(env, &ticket, from, true)?;
+            tickets.push_back(ticket);
+        }
+
+        Ok(tickets)
     }
 
     /// Emit batch transfer events
-    pub fn emit_batch_transfer_events(
-        env: &Env,
-        from: Address,
-        to: Address,
-        ticket_ids: Vec<u64>,
-    ) {
+    fn emit_batch_transfer_events(env: &Env, from: Address, to: Address, ticket_ids: Vec<u64>) {
         BatchTicketsTransferred::emit(env, from, to, ticket_ids);
     }
 
@@ -6426,6 +7081,82 @@ impl LumentixContract {
         Ok(())
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // ON-CHAIN ROYALTY SPLITS FOR MULTI-ARTIST EVENTS (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Configure the royalty split map for an event.
+    ///
+    /// `splits` maps each `artist_address` to a basis-point share; the shares
+    /// must sum to 10 000 (100 %). Only the event's organizer (or the platform
+    /// admin) may configure splits. Calling again replaces the previous map.
+    pub fn set_royalty_splits(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        splits: Map<Address, u32>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::royalty::set_royalty_splits(&env, event_id, splits)
+    }
+
+    /// Execute a royalty distribution of `total_amount` escrow revenue for an
+    /// event, paying each configured artist their share through the contract's
+    /// settlement token.
+    ///
+    /// Only the event's organizer (or the platform admin) may trigger a
+    /// distribution, and the event must not be cancelled. The distribution
+    /// settles against the event's escrow balance, so it fails with
+    /// `InsufficientEscrow` if the escrow cannot cover `total_amount`.
+    /// Cumulative paid amounts can be inspected via `query_royalty_ledger`.
+    pub fn distribute_royalties(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        total_amount: i128,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        crate::royalty::distribute_royalties(&env, event_id, total_amount)
+    }
+
+    /// Read the cumulative royalties already paid to each artist for an event.
+    /// Returns an empty map when no splits or distributions exist yet.
+    pub fn query_royalty_ledger(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        Ok(crate::royalty::query_royalty_ledger(&env, event_id))
+    }
+
     // Issue #651: Automated compliance checking
     pub fn check_regulatory_compliance(env: Env, event_id: u64) -> Result<bool, LumentixError> {
         let _event = storage::get_event(&env, event_id)?;
@@ -7118,6 +7849,169 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // GEOGRAPHIC PURCHASE RESTRICTIONS (Issue #1448)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Set (or replace) the geo-fence rules for an event. Organizer only.
+    ///
+    /// Regions are ISO 3166-1 alpha-2 country codes; lowercase input is
+    /// normalized to uppercase. When `enabled` is true the region list must
+    /// be non-empty and every entry well-formed. Disabling keeps the stored
+    /// list so an organizer can turn restrictions off without re-entering
+    /// them later.
+    pub fn set_geo_fence_rules(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        rules: GeoFenceRules,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if rules.regions.is_empty() {
+            return Err(LumentixError::InvalidGeoFenceRules);
+        }
+
+        // Normalize first so "us" is accepted wherever "US" is, then validate.
+        let mut normalized_regions = Vec::new(&env);
+        for region in rules.regions.iter() {
+            let normalized = validation::normalize_country_code(&env, &region);
+            validation::validate_country_code(&normalized)?;
+            normalized_regions.push_back(normalized);
+        }
+
+        let normalized = GeoFenceRules {
+            enabled: rules.enabled,
+            mode: rules.mode.clone(),
+            regions: normalized_regions,
+        };
+        let region_count = normalized.regions.len();
+        storage::set_geo_fence_rules(&env, event_id, &normalized);
+
+        GeoFenceRulesSet::emit(
+            &env,
+            event_id,
+            organizer,
+            normalized.enabled,
+            normalized.mode,
+            region_count,
+        );
+
+        Ok(())
+    }
+
+    /// Read the geo-fence rules for an event, if any.
+    pub fn get_geo_fence_rules(env: Env, event_id: u64) -> Option<GeoFenceRules> {
+        storage::get_geo_fence_rules(&env, event_id)
+    }
+
+    /// Check a country code against the event's geo-fence without recording
+    /// anything. Returns `Ok(true)` when purchases from that region are
+    /// allowed, `Ok(false)` when blocked, and `Ok(true)` when no rules are
+    /// configured. Empty or malformed codes are rejected outright so a
+    /// caller cannot bypass a fence by passing garbage.
+    pub fn validate_buyer_location(
+        env: Env,
+        event_id: u64,
+        country_code: String,
+    ) -> Result<bool, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+
+        let normalized = validation::normalize_country_code(&env, &country_code);
+        validation::validate_country_code(&normalized)?;
+
+        match storage::get_geo_fence_rules(&env, event_id) {
+            Some(rules) if rules.enabled => Ok(Self::region_permitted(&rules, &normalized)),
+            _ => Ok(true),
+        }
+    }
+
+    /// Attest and record the buyer's region for an event, enforcing the
+    /// event's geo-fence in the same step (Issue #1448). The buyer must sign,
+    /// since the attestation is what later gates [`Self::purchase_ticket`].
+    /// Allowed regions are persisted per buyer so the purchase flow can check
+    /// them without the buyer re-supplying a country code.
+    pub fn enforce_geo_restriction(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        country_code: String,
+    ) -> Result<(), LumentixError> {
+        buyer.require_auth();
+        let _ = storage::get_event(&env, event_id)?;
+
+        let normalized = validation::normalize_country_code(&env, &country_code);
+        validation::validate_country_code(&normalized)?;
+
+        match storage::get_geo_fence_rules(&env, event_id) {
+            Some(rules) if rules.enabled => {
+                if !Self::region_permitted(&rules, &normalized) {
+                    BuyerGeoRejected::emit(&env, event_id, buyer, normalized);
+                    return Err(LumentixError::BuyerLocationNotAllowed);
+                }
+                storage::set_buyer_geo_location(&env, event_id, &buyer, &normalized);
+                BuyerGeoVerified::emit(&env, event_id, buyer, normalized);
+                Ok(())
+            }
+            // No active fence: record the attestation anyway so organizers
+            // retain an audit trail, but nothing is blocked.
+            _ => {
+                storage::set_buyer_geo_location(&env, event_id, &buyer, &normalized);
+                BuyerGeoVerified::emit(&env, event_id, buyer, normalized);
+                Ok(())
+            }
+        }
+    }
+
+    /// Read a buyer's recorded region for an event, if any.
+    pub fn get_buyer_location(env: Env, event_id: u64, buyer: Address) -> Option<String> {
+        storage::get_buyer_geo_location(&env, event_id, &buyer)
+    }
+
+    /// Gate a purchase against the event's geo-fence using the buyer's
+    /// previously recorded attestation. Called from the purchase flows.
+    fn check_purchase_geo(
+        env: &Env,
+        buyer: &Address,
+        event_id: u64,
+    ) -> Result<(), LumentixError> {
+        let rules = match storage::get_geo_fence_rules(env, event_id) {
+            Some(rules) if rules.enabled => rules,
+            _ => return Ok(()),
+        };
+
+        let country = match storage::get_buyer_geo_location(env, event_id, buyer) {
+            Some(country) => country,
+            None => return Err(LumentixError::BuyerLocationRequired),
+        };
+
+        if Self::region_permitted(&rules, &country) {
+            Ok(())
+        } else {
+            BuyerGeoRejected::emit(env, event_id, buyer.clone(), country);
+            Err(LumentixError::BuyerLocationNotAllowed)
+        }
+    }
+
+    /// Apply allowlist/blocklist semantics to one normalized country code.
+    fn region_permitted(rules: &GeoFenceRules, country_code: &String) -> bool {
+        let mut listed = false;
+        for region in rules.regions.iter() {
+            if region == *country_code {
+                listed = true;
+                break;
+            }
+        }
+        match rules.mode {
+            GeoRestrictionMode::Allowlist => listed,
+            GeoRestrictionMode::Blocklist => !listed,
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // Offline Ticket Validation (#984)
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -7388,5 +8282,181 @@ impl LumentixContract {
         storage::set_offline_scan_synced(env, ticket_id, scan);
 
         None
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VENUE CAPACITY (Issue #1245)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configure the maximum venue capacity for an event.
+    ///
+    /// Only the event's organizer or the contract admin may set it. The first
+    /// configuration seeds the on-chain counter from the tickets already sold,
+    /// so setting a limit after sales have begun still counts them; later
+    /// changes keep the live counter and are rejected when the new limit is
+    /// below the number of tickets already minted.
+    pub fn set_venue_capacity(
+        env: Env,
+        event_id: u64,
+        max_capacity: u32,
+        organizer: Address,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::venue_capacity::set_venue_capacity(&env, event_id, max_capacity)
+    }
+
+    /// Read the venue capacity and live attendance counter for an event.
+    pub fn get_venue_capacity(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::venue_capacity::VenueCapacity, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::venue_capacity::get_venue_capacity(&env, event_id)
+    }
+
+    /// Seats still available under the configured venue capacity.
+    ///
+    /// Returns `None` when no capacity is configured, which reads as unlimited.
+    pub fn get_remaining_venue_capacity(env: Env, event_id: u64) -> Result<Option<u32>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::venue_capacity::remaining_capacity(&env, event_id))
+    }
+
+    /// Advance an event's on-chain attendance counter by `quantity`.
+    ///
+    /// Fails with `VenueCapacityExceeded` when the counter would pass the
+    /// configured maximum, leaving the counter untouched.
+    pub fn increment_attendance_counter(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        organizer: Address,
+    ) -> Result<u32, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::venue_capacity::increment_attendance_counter(&env, event_id, quantity)
+    }
+
+    /// Check whether minting `quantity` more tickets would breach the venue
+    /// capacity, without touching the counter.
+    ///
+    /// Every ticket-minting path runs this guard internally; it is exposed so a
+    /// client can grey out a purchase button before the buyer signs anything.
+    pub fn reject_over_capacity_mint(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+    ) -> Result<(), LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::venue_capacity::reject_over_capacity_mint(&env, event_id, quantity)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ESCROW PAYMENT SPLITS (Issue #1247)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Register a pre-agreed basis-point split of an event's held escrow among
+    /// its co-organizers.
+    ///
+    /// `splits` maps each co-organizer wallet to their share in basis points and
+    /// must sum to 10 000. Only the event's organizer or the contract admin may
+    /// register a split. Registering a split replaces any previous one for the
+    /// event, so an agreement that was never acted on can still be corrected.
+    pub fn create_escrow_split(
+        env: Env,
+        event_id: u64,
+        splits: Map<Address, u32>,
+        organizer: Address,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::escrow_split::create_escrow_split(&env, event_id, splits)
+    }
+
+    /// Pay an event's held escrow out to every co-organizer in its split.
+    ///
+    /// The whole current pool is released in one call, each co-organizer taking
+    /// their basis-point share. Only the event's organizer or the contract admin
+    /// may release, the event must have concluded, and a split under dispute is
+    /// frozen until the disagreement is resolved. Returns each co-organizer and
+    /// the amount they received.
+    pub fn release_escrow_funds(
+        env: Env,
+        event_id: u64,
+        split_id: u64,
+        organizer: Address,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(&env, event_id)?;
+        let admin = storage::get_admin(&env);
+        if event.organizer != organizer && admin != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        crate::escrow_split::release_escrow_funds(&env, event_id, split_id)
+    }
+
+    /// Freeze an event's escrow split pending a resolution between organizers.
+    ///
+    /// Any co-organizer named in the split may dispute it, which prevents the
+    /// pool from being released. A released split is too late to dispute.
+    pub fn dispute_escrow_split(
+        env: Env,
+        event_id: u64,
+        split_id: u64,
+        disputer: Address,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        disputer.require_auth();
+
+        if !storage::is_initialized(&env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        crate::escrow_split::dispute_escrow_split(&env, event_id, split_id, &disputer)
+    }
+
+    /// Read the escrow split currently registered for an event.
+    pub fn get_escrow_split(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::escrow_split::EscrowSplit, LumentixError> {
+        crate::escrow_split::get_event_escrow_split(&env, event_id)
+            .ok_or(LumentixError::EscrowSplitNotFound)
     }
 }

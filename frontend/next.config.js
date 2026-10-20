@@ -1,31 +1,9 @@
 const createNextIntlPlugin = require("next-intl/plugin");
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
-const withPWA = require("next-pwa")({
-  dest: "public",
-  disable: process.env.NODE_ENV === "development",
-  fallbacks: {
-    document: "/offline",
-  },
-  runtimeCaching: [
-    {
-      urlPattern: /^https?.*\/events.*$/i,
-      handler: "StaleWhileRevalidate",
-      options: {
-        cacheName: "lumentix-api-events",
-        expiration: { maxEntries: 64, maxAgeSeconds: 60 * 60 },
-      },
-    },
-    {
-      urlPattern: /\.(?:js|css|woff2|svg|png|jpg|jpeg|webp)$/i,
-      handler: "CacheFirst",
-      options: {
-        cacheName: "lumentix-static-assets",
-        expiration: { maxEntries: 128, maxAgeSeconds: 30 * 24 * 60 * 60 },
-      },
-    },
-  ],
-});
+// Offline support is provided by the hand-written public/sw.js (app shell cache, event/ticket
+// data cache, push notifications and background sync), registered by app/ServiceWorkerRegister.tsx.
+// next-pwa is intentionally not used: it would generate its own public/sw.js and overwrite that file.
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -42,4 +20,4 @@ const nextConfig = {
   },
 };
 
-module.exports = withNextIntl(withPWA(nextConfig));
+module.exports = withNextIntl(nextConfig);

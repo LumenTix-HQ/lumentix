@@ -12,7 +12,7 @@ pub struct Tier {
     pub sponsor_count: u32,
 }
 
-// Register a sponsor tier for an event.
+
 #[contract]
 pub struct SponsorsContract;
 
@@ -33,7 +33,7 @@ impl SponsorsContract {
         };
         env.storage().persistent().set(&key, &tier);
 
-        // Emit SponsorTierRegistered event
+        
         #[allow(deprecated)]
         env.events().publish(
             (symbol_short!("sponstier"),),
@@ -222,6 +222,7 @@ mod sponsor_tests {
 
 pub mod contract;
 pub mod error;
+pub mod escrow_split;
 pub mod events;
 pub mod lumentix_contract;
 pub mod models;
@@ -229,6 +230,8 @@ pub mod royalty;
 pub mod storage;
 pub mod types;
 pub mod validation;
+pub mod venue_capacity;
+pub mod achievement_badge;
 
 #[cfg(test)]
 pub mod test;
@@ -253,6 +256,21 @@ mod merchandise_nft_tests;
 
 #[cfg(test)]
 mod certification_analytics_tests;
+
+#[cfg(test)]
+mod biometric_pass_package_tests;
+
+#[cfg(test)]
+mod wallet_connect_tests;
+
+#[cfg(test)]
+mod governance_upgrade_tests;
+
+#[cfg(test)]
+mod dynamic_pricing_tests;
+
+#[cfg(test)]
+mod geo_fence_tests;
 
 pub use contract::TicketContract;
 pub use error::LumentixError;
@@ -280,7 +298,14 @@ pub use events::{
     UserExperiencePersonalized, EventRecommendationsCustomized, UserJourneyOptimized,
     WaitlistOfferExpired, WaitlistSpotReleased,
     EventCertificateIssued, CertificationStandardUpdated,
+    BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
+    PassPackageCreated, PassAllowanceDeducted,
     AgeProofIssued, AgeProofVerified, UnderagePurchaseRejected,
+    AchievementBadgeMinted, AchievementBadgeRevoked,
+    VenueCapacitySet, AttendanceCounterIncremented, OverCapacityMintRejected,
+    EscrowSplitCreated, EscrowSplitReleased, EscrowSplitDisputed,
+    DynamicPricingCurveSet, PricingDecisionLogged,
+    GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -296,5 +321,10 @@ pub use types::{
     RarityTier, ResalePriceCeiling, SeatUpgradeBid, Ticket as LumentixTicket, TicketDidAssociation,
     UpgradeGovernanceConfig, UpgradeProposal, UpgradeState,
     UpgradeVote, VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident,
-    UserPreferences, CertificationStandard, EventCertificate, AgeProof,
+    UserPreferences, CertificationStandard, EventCertificate,
+    BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
+    AgeProof,
+    ServiceHealthStatus, SystemHealthStatus, MetricDatapoint, TelemetryStatus,
+    TokenGateConfig, TokenGateEligibility,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
 };

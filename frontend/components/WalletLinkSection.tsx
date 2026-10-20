@@ -2,15 +2,20 @@
 
 import React, { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
+import { getNetworkPassphrase } from '@/lib/stellar/wallet-utils';
+import { NetworkType } from '@/types/wallet';
 
 interface WalletLinkSectionProps {
   linkedAddress: string | null;
-  token: string | null;
   onLinked: (address: string) => void;
   onToast: (msg: string, type: 'success' | 'error') => void;
 }
 
 type LinkStep = 'idle' | 'fetching-challenge' | 'awaiting-sign' | 'verifying' | 'done';
+
+const NETWORK: NetworkType =
+  (process.env.NEXT_PUBLIC_STELLAR_NETWORK as NetworkType) ?? NetworkType.TESTNET;
 
 function truncateAddress(addr: string): string {
   return `${addr.slice(0, 8)}…${addr.slice(-8)}`;
@@ -18,25 +23,31 @@ function truncateAddress(addr: string): string {
 
 export default function WalletLinkSection({
   linkedAddress,
-  token,
   onLinked,
   onToast,
 }: WalletLinkSectionProps) {
+  const { isAuthenticated } = useAuth();
   const [step, setStep] = useState<LinkStep>('idle');
   const [challenge, setChallenge] = useState<string | null>(null);
+  const [publicKey, setPublicKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function handleLink() {
-    if (!token) {
+    if (!isAuthenticated) {
       onToast('You must be signed in to link a wallet.', 'error');
       return;
     }
     setErr(null);
     setStep('fetching-challenge');
     try {
-      const res = await apiClient.walletChallenge(token);
-      setChallenge(res.challenge);
+      const freighter = await import('@stellar/freighter-api');
+      const { address, error: addrErr } = await freighter.requestAccess();
+      if (addrErr || !address) throw new Error('Could not access Freighter wallet');
+
+      const res = await apiClient.walletChallenge(address);
+      setPublicKey(address);
+      setChallenge(res.nonce);
       setStep('awaiting-sign');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to fetch challenge');
@@ -45,34 +56,35 @@ export default function WalletLinkSection({
   }
 
   async function handleSign() {
-    if (!challenge || !token) return;
+    if (!challenge || !publicKey) return;
     setErr(null);
     setStep('verifying');
     try {
       const freighter = await import('@stellar/freighter-api');
 
-      // Get the user's public key
-      const { address, error: addrErr } = await freighter.requestAccess();
-      if (addrErr || !address) throw new Error('Could not access Freighter wallet');
-
-      // Sign the challenge text as a personal message (base64-encoded XDR equivalent)
-      const encoder = new TextEncoder();
-      const challengeBytes = encoder.encode(challenge);
-      const { signedXdr, signerPublicKey, error: signErr } =
-        await (freighter as any).signTransaction(
-          Buffer.from(challengeBytes).toString('base64'),
-          { networkPassphrase: 'Test SDF Network ; September 2015', address },
-        );
+      // Sign the challenge nonce as a plain message. The backend verifies the
+      // signature over the raw nonce, so this is a message signature (not a
+      // transaction) — but it is still bound to the configured network.
+      const { signedMessage, signerAddress, error: signErr } = await freighter.signMessage(
+        challenge,
+        {
+          networkPassphrase: getNetworkPassphrase(NETWORK),
+          address: publicKey,
+        },
+      );
       if (signErr) throw new Error(signErr?.message ?? 'Freighter signing failed');
 
-      const result = await apiClient.walletVerify(
-        { signedXdr: signedXdr ?? '', publicKey: signerPublicKey ?? address },
-        token,
-      );
-      onLinked(result.walletAddress);
+      const signature = typeof signedMessage === 'string' ? signedMessage : '';
+      const result = await apiClient.walletVerify({
+        nonce: challenge,
+        signature,
+        publicKey: signerAddress ?? publicKey,
+      });
+      onLinked(result.walletAddress ?? publicKey);
       onToast('Wallet linked successfully!', 'success');
       setStep('done');
       setChallenge(null);
+      setPublicKey(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Signing failed';
       setErr(msg);
@@ -83,6 +95,7 @@ export default function WalletLinkSection({
 
   function handleCancel() {
     setChallenge(null);
+    setPublicKey(null);
     setErr(null);
     setStep('idle');
   }

@@ -22,16 +22,55 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 });
 
-// Mock localStorage
-const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
-};
+// In-memory localStorage that really stores values, so code that round-trips
+// through storage can be tested. The methods are spied so tests can still
+// assert on calls.
+class MemoryStorage implements Storage {
+  private store = new Map<string, string>();
+
+  get length(): number {
+    return this.store.size;
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+
+  getItem(key: string): string | null {
+    return this.store.has(key) ? (this.store.get(key) as string) : null;
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(key, String(value));
+  }
+}
+
+const memoryLocalStorage = new MemoryStorage();
+for (const method of ['getItem', 'setItem', 'removeItem', 'clear', 'key'] as const) {
+  vi.spyOn(memoryLocalStorage, method);
+}
 
 Object.defineProperty(window, 'localStorage', {
-  value: localStorageMock,
+  value: memoryLocalStorage,
+  configurable: true,
+  writable: true,
+});
+
+// Start every test with empty storage and fresh call history. (Some tests call
+// vi.restoreAllMocks(), which un-spies the methods, hence the optional calls.)
+afterEach(() => {
+  memoryLocalStorage.clear();
+  for (const method of ['getItem', 'setItem', 'removeItem', 'clear', 'key'] as const) {
+    (memoryLocalStorage[method] as unknown as { mockClear?: () => void }).mockClear?.();
+  }
 });
 
 // Mock Next.js router
@@ -52,12 +91,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 // Mock @stellar/freighter-api
-vi.mock('@stellar/freighter-api', () => ({
-  isConnected: vi.fn(),
-  requestAccess: vi.fn(),
-  getNetworkDetails: vi.fn(),
-  signTransaction: vi.fn(),
-}));
+vi.mock('@stellar/freighter-api', async () => (await import('./mocks/freighter')).freighterModule);
 
 // Mock @stellar/stellar-sdk
 vi.mock('@stellar/stellar-sdk', () => ({

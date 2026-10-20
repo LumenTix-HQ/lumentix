@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -183,8 +184,12 @@ export class TicketsController {
   @ApiResponse({ status: 400, description: 'Invalid QR data' })
   @ApiResponse({ status: 401, description: 'Unauthorized or invalid signature' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
-  verifyQr(@Body('qrData') qrData: string) {
-    return this.ticketsService.verifyQrCheckIn(qrData);
+  verifyQr(
+    @Body('qrData') qrData: string,
+    @Body('eventId') eventId: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.verifyQrCheckIn(qrData, req.user, eventId);
   }
 }
 

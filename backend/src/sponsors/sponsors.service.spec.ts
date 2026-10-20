@@ -6,7 +6,7 @@ import { SponsorTier } from './entities/sponsor-tier.entity';
 import { SponsorContribution } from './entities/sponsor-contribution.entity';
 import { Event, EventStatus } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
-import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException, BadRequestException, ConflictException } from '@nestjs/common';
 import { ContributionsService } from './contributions.service';
 import { EscrowService } from '../payments/services/escrow.service';
 import { StellarService } from '../stellar/stellar.service';
@@ -142,10 +142,19 @@ describe('SponsorsService — funding progress and escrow distribution', () => {
     getRawOne: jest.fn(),
   });
 
+  /** Fake conditional UPDATE used for the atomic escrow claim. */
+  const claimQb = (affected: number) => ({
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    execute: jest.fn().mockResolvedValue({ affected }),
+  });
+
   beforeEach(async () => {
     eventsService = { getEventById: jest.fn() };
     contributionRepo = { createQueryBuilder: jest.fn(), findOne: jest.fn(), save: jest.fn() };
-    eventRepo = { findOne: jest.fn() };
+    eventRepo = { findOne: jest.fn(), update: jest.fn(), createQueryBuilder: jest.fn() };
     usersRepo = { findOne: jest.fn() };
     escrowService = { decryptEscrowSecret: jest.fn() };
     stellarService = { sendPayment: jest.fn() };
@@ -264,6 +273,7 @@ describe('SponsorsService — funding progress and escrow distribution', () => {
       const qb = mockQb();
       qb.getRawOne.mockResolvedValue({ total: '500' });
       contributionRepo.createQueryBuilder.mockReturnValue(qb);
+      eventRepo.createQueryBuilder.mockReturnValue(claimQb(1));
       escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
       stellarService.sendPayment.mockResolvedValue({ hash: 'tx-distribute' });
 
@@ -276,6 +286,34 @@ describe('SponsorsService — funding progress and escrow distribution', () => {
       expect(auditService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'ESCROW_RELEASED' }),
       );
+      // Escrow secret is cleared after a successful distribution.
+      expect(eventRepo.update).toHaveBeenCalledWith('e1', {
+        escrowSecretEncrypted: null,
+      });
+    });
+
+    it('rejects a second distribution of the same escrow without paying again', async () => {
+      eventsService.getEventById.mockResolvedValue(COMPLETED_EVENT);
+      eventRepo.findOne.mockResolvedValue({ ...COMPLETED_EVENT, escrowSecretEncrypted: 'iv:tag:cipher' });
+      usersRepo.findOne.mockResolvedValue({ id: 'org-1', stellarPublicKey: 'GORG_PUB' });
+      const qb = mockQb();
+      qb.getRawOne.mockResolvedValue({ total: '500' });
+      contributionRepo.createQueryBuilder.mockReturnValue(qb);
+      // First claim wins, second claim finds nothing left to flip.
+      eventRepo.createQueryBuilder
+        .mockReturnValueOnce(claimQb(1))
+        .mockReturnValueOnce(claimQb(0));
+      escrowService.decryptEscrowSecret.mockResolvedValue('raw-secret');
+      stellarService.sendPayment.mockResolvedValue({ hash: 'tx-distribute' });
+
+      await service.distributeEscrow('e1', 'org-1', 'organizer' as any);
+
+      await expect(
+        service.distributeEscrow('e1', 'org-1', 'organizer' as any),
+      ).rejects.toThrow(ConflictException);
+
+      // The on-chain payout only ever happens once.
+      expect(stellarService.sendPayment).toHaveBeenCalledTimes(1);
     });
   });
 });

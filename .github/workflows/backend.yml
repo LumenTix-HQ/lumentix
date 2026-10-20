@@ -39,6 +39,25 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
 
+  source-integrity:
+    name: Source Integrity
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # Fails fast, and by name, on imports that don't resolve (e.g. a spec
+      # whose source was deleted) and on *.module.ts files never wired into
+      # AppModule. `npm test` also runs it, but there it is easy to miss.
+      - run: npm run test:integrity
+
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -111,12 +130,8 @@ jobs:
       DB_NAME: lumentix_test
       REDIS_HOST: localhost
       REDIS_PORT: 6379
-      JWT_SECRET: test-secret-for-e2e
-      SMTP_HOST: localhost
-      SMTP_PORT: 1025
-      SMTP_USER: test
-      SMTP_PASS: test
-      MAIL_FROM: noreply@lumentix.test
+      # Every other required variable (JWT_SECRET >= 32 chars, Stellar, SMTP, webhook,
+      # Google OAuth, escrow encryption, ...) comes from backend/.env.test via test/jest-setup.ts.
     defaults:
       run:
         working-directory: backend

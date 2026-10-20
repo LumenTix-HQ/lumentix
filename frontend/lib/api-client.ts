@@ -1,5 +1,139 @@
 import type { Event, PaginatedResponse } from "@/types/event";
 import type { CreateEventFormValues } from "@/lib/schemas/create-event.schema";
+import type { SponsorTier } from "@/components/SponsorTierCard";
+import type {
+  Achievement,
+  ActivityResult,
+  Challenge,
+  ChallengeParticipation,
+  GamificationProfile,
+  LeaderboardEntry,
+  LeaderboardPeriod,
+  UserAchievement,
+  ActivityType,
+} from "@/types/gamification";
+import type {
+  CancellationReason,
+  InsuranceClaimResult,
+  InsurancePolicy,
+  InsurancePool,
+} from "@/types/insurance";
+import type {
+  GiftTicketInput,
+  GiftWrapResult,
+  UnwrapAnimation,
+} from "@/types/gifting";
+
+export interface SponsorEventSummary {
+  id: string;
+  title: string;
+  sponsorTiers?: SponsorTier[];
+}
+
+export interface InitiateSponsorshipResult {
+  xdr: string;
+  contributionId: string;
+}
+
+export interface ConfirmSponsorshipResult {
+  rank?: number;
+  transactionHash?: string;
+}
+
+export interface InitiateSponsorshipInput {
+  tierId: string;
+  amount: number;
+  displayName?: string;
+  logoUrl?: string;
+  sponsorPublicKey: string;
+}
+import type {
+  BuyResaleTicketDto,
+  ListTicketForResaleDto,
+  ResaleMarketplaceResponse,
+  ResalePurchaseResult,
+} from "@/types/resale";
+
+export interface BatchTransferEntry {
+  ticketId: string;
+  recipientUserId: string;
+}
+
+export interface BatchTransferResult {
+  success: boolean;
+  transferredCount: number;
+  errors?: string[];
+}
+
+import type {
+  NotificationPreferences,
+  SaveNotificationPreferences,
+} from "@/types/notification-preference";
+
+
+export interface EventTos {
+  id: string;
+  eventId: string;
+  termsContent: string;
+  liabilityDisclaimers?: string | null;
+  customAgreements?: string | null;
+  version: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveEventTosInput {
+  termsContent: string;
+  liabilityDisclaimers?: string;
+  customAgreements?: string;
+}
+
+export interface TosTemplate {
+  id: string;
+  name: string;
+  category: 'general' | 'liability' | 'media' | 'refund';
+  description: string;
+  defaultTerms: string;
+  defaultDisclaimers: string;
+  defaultAgreements: string;
+}
+
+export interface ScanVelocityResult {
+  eventId: string;
+  gateId: string | null;
+  scansPerMinute: number;
+}
+
+export interface GateThroughputStats {
+  gateId: string | null;
+  scanVelocity: number;
+  avgScanTimeMs: number;
+  totalScans: number;
+  failedScans: number;
+  errorRate: number;
+}
+
+export interface ScanMetricData {
+  id: string;
+  eventId: string;
+  gateId: string | null;
+  scansPerMinute: number;
+  avgScanTimeMs: number;
+  totalScansInWindow: number;
+  failedScans: number;
+  errorRate: number;
+  recordedAt: string;
+}
+
+export interface StaffingRecommendation {
+  eventId: string;
+  gateId: string | null;
+  currentVelocity: number;
+  recommendedGates: number;
+  queueStatus: 'low' | 'optimal' | 'congested' | 'critical';
+  recommendationText: string;
+}
 
 const PROXY_BASE = "/api/proxy";
 
@@ -72,11 +206,13 @@ async function request<T>(
   const url = `${PROXY_BASE}/${path}`;
 
   const res = await fetchWithRetry(url, {
+    ...options,
+    // Spread options first so the merged headers below are not replaced by the
+    // caller's headers object (which would drop the default Content-Type).
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
     },
-    ...options,
   });
 
   if (res.status === 401 && !isRetry) {
@@ -105,6 +241,9 @@ async function request<T>(
   return res.json();
 }
 
+/** Low-level proxied request, exposed so callers (and tests) can pass custom options. */
+export const apiRequest = request;
+
 export async function apiGet<T>(path: string): Promise<T> {
   return request<T>(path, { method: "GET" });
 }
@@ -127,20 +266,25 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return request<T>(path, { method: "DELETE" });
 }
 
-export async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
-  const response = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ accessToken, refreshToken }),
-  });
-  if (!response.ok) {
-    throw new ApiProxyError(response.status, "Unable to create authenticated session");
-  }
-}
-
 export const apiClient = {
   login: (body: { email: string; password: string }) =>
     request<{ ok: boolean }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  walletChallenge: (publicKey: string) =>
+    request<{ nonce: string; accountAddress: string }>("/auth/wallet-challenge", {
+      method: "POST",
+      body: JSON.stringify({ publicKey }),
+    }),
+
+  walletVerify: (body: { nonce: string; signature: string; publicKey: string }) =>
+    request<{
+      walletAddress?: string;
+      access_token?: string;
+      refresh_token?: string;
+    }>("/auth/wallet-verify", {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -161,8 +305,6 @@ export const apiClient = {
       body: JSON.stringify(body),
     }),
 
-  getMyPayments: () => request<any>("/payments/my-payments"),
-
   getTransactions: (params?: Record<string, string>) => {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
     return request<any>(`/transactions${qs}`);
@@ -178,9 +320,55 @@ export const apiClient = {
       email: string;
       displayName: string | null;
       walletAddress: string | null;
+      stellarPublicKey?: string | null;
       emailOptOut: boolean;
       createdAt: string;
     }>("/users/me"),
+
+  getResaleMarketplace: (params?: Record<string, string>) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return request<ResaleMarketplaceResponse>(`/resale/marketplace${qs}`);
+  },
+  listTicketForResale: (ticketId, dto: ListTicketForResaleDto) =>
+    request(`/resale/list/${ticketId}`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+  buyResaleTicket: (ticketId, dto: BuyResaleTicketDto) =>
+    request<ResalePurchaseResult>(`/resale/buy/${ticketId}`, {
+      method: "POST",
+      body: JSON.stringify(dto),
+    }),
+  cancelResaleListing: (ticketId: string) =>
+    request(`/resale/cancel/${ticketId}`, { method: "POST" }),
+
+  batchTransferTickets: (transfers: BatchTransferEntry[]) =>
+    request<BatchTransferResult>("/tickets/batch-transfer", {
+      method: "POST",
+      body: JSON.stringify({ transfers }),
+    }),
+
+  giftTicket: (ticketId: string, body: GiftTicketInput) =>
+    request<GiftWrapResult>(`/tickets/${ticketId}/gift`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  rescheduleGift: (giftId: string, scheduledFor: string) =>
+    request<GiftWrapResult>(`/tickets/gifts/${giftId}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ scheduledFor }),
+    }),
+
+  unwrapGift: (giftId: string) =>
+    request<UnwrapAnimation>(`/tickets/gifts/${giftId}/unwrap`, {
+      method: "POST",
+    }),
+
+  cancelGift: (giftId: string) =>
+    request<GiftWrapResult>(`/tickets/gifts/${giftId}/cancel`, {
+      method: "POST",
+    }),
 
   patchMe: (body: { displayName?: string }) =>
     request<{ id: string; displayName: string | null }>("/users/me", {
@@ -188,5 +376,155 @@ export const apiClient = {
       body: JSON.stringify(body),
     }),
 
-  logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  patchPreferences: (body: { emailOptOut?: boolean }) =>
+    request<{ emailOptOut: boolean }>("/users/me/notification-preferences", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  deactivateAccount: () =>
+    request<void>("/users/me", {
+      method: "DELETE",
+    }),
+
+  getNotificationPreferences: () =>
+    request<NotificationPreferences>("/notifications/preferences"),
+
+  saveNotificationPreferences: (body: SaveNotificationPreferences) =>
+    request<NotificationPreferences>("/notifications/preferences", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  logout: async () => {
+    // Hit the Next.js route directly — routing it through `request()` would
+    // prepend PROXY_BASE and resolve to the wrong backend path.
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    return { ok: true };
+  },
+
+  // Gamification — auth is attached by /api/proxy from the session cookie
+  getMyGamificationProfile: () => request<GamificationProfile>("/gamification/profile/me"),
+  getAllAchievements: () => request<Achievement[]>("/gamification/achievements"),
+  getMyAchievements: () => request<UserAchievement[]>("/gamification/achievements/mine"),
+  getLeaderboard: (period: LeaderboardPeriod, limit = 50) =>
+    request<LeaderboardEntry[]>(
+      `/gamification/leaderboard?${new URLSearchParams({ period, limit: String(limit) }).toString()}`,
+    ),
+  getActiveChallenges: () => request<Challenge[]>("/gamification/challenges"),
+  getMyChallenges: () => request<ChallengeParticipation[]>("/gamification/challenges/mine"),
+  joinChallenge: (challengeId: string) =>
+    request<ChallengeParticipation>(`/gamification/challenges/${challengeId}/join`, {
+      method: "POST",
+    }),
+  recordActivity: (body: { activityType: ActivityType; metadata?: Record<string, unknown> }) =>
+    request<ActivityResult>("/gamification/activity", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // Ticket insurance
+  getMyInsurancePolicies: () => request<InsurancePolicy[]>("/insurance/me"),
+  getInsurancePool: () => request<InsurancePool>("/insurance/pool"),
+  purchaseInsurance: (body: { ticketId: string }) =>
+    request<InsurancePolicy>("/insurance/purchase", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  fileInsuranceClaim: (body: { ticketId: string; cancellationReason: CancellationReason }) =>
+    request<InsuranceClaimResult>("/insurance/claim", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getSponsorEvent: (id: string) => request<SponsorEventSummary>(`/events/${id}`),
+  initiateSponsorship: (eventId: string, body: InitiateSponsorshipInput) =>
+    request<InitiateSponsorshipResult>(`/events/${eventId}/sponsors`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  confirmSponsorship: (contributionId: string, signedXdr: string) =>
+    request<ConfirmSponsorshipResult>(`/sponsors/contributions/${contributionId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ signedXdr }),
+    }),
+  submitReview: (body: { eventId: string; ticketId: string; rating: number; comment?: string }) =>
+    request<any>("/reviews", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getMyReviews: () =>
+    request<any>("/reviews/me"),
+
+  getOrganizerReputation: (organizerId: string) =>
+    request<any>(`/reviews/reputation/${organizerId}`),
+
+  getEventSentiment: (eventId: string) =>
+    request<any>(`/reviews/events/${eventId}/sentiment`),
+
+  getRecommendations: (userId: string, limit?: number) =>
+    request<any>(`/recommendations/${userId}${limit ? `?limit=${limit}` : ""}`),
+
+  updateUserPreferences: (
+    userId: string,
+    body: { preferences: Array<{ category?: string | null; location?: string | null; weight: number }> },
+  ) =>
+    request<any>(`/recommendations/${userId}/preferences`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  // Terms of Service (Issue #1191) — auth is attached by /api/proxy
+  saveEventTos: (eventId: string, body: SaveEventTosInput) =>
+    request<EventTos>(`/events/${eventId}/terms-of-service`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  validateTosAgreement: (eventId: string, version: number) =>
+    request<boolean>(`/events/${eventId}/terms-of-service/validate/${version}`, {
+      method: "POST",
+    }),
+
+  fetchTosForCheckout: (eventId: string) =>
+    request<EventTos>(`/events/${eventId}/terms-of-service`),
+
+  getTosTemplates: (eventId: string = "default") =>
+    request<TosTemplate[]>(`/events/${eventId}/terms-of-service/templates`),
+
+  applyTosTemplate: (
+    eventId: string,
+    templateId: string,
+    customOverrides?: Partial<SaveEventTosInput>,
+  ) =>
+    request<EventTos>(`/events/${eventId}/terms-of-service/apply-template/${templateId}`, {
+      method: "POST",
+      body: JSON.stringify(customOverrides ?? {}),
+    }),
+
+  // Scan Velocity & Gate Throughput (Issue #1195)
+  calculateScanVelocity: (eventId: string, gateId?: string) =>
+    request<ScanVelocityResult>(
+      `/events/${eventId}/scan-analytics/scan-velocity${gateId ? `?gateId=${encodeURIComponent(gateId)}` : ""}`,
+    ),
+
+  trackGateThroughput: (eventId: string, gateId?: string) =>
+    request<GateThroughputStats>(
+      `/events/${eventId}/scan-analytics/throughput${gateId ? `?gateId=${encodeURIComponent(gateId)}` : ""}`,
+    ),
+
+  fetchRealtimeScanSpeed: (eventId: string, gateId?: string, minutesBack: number = 5) => {
+    const params = new URLSearchParams();
+    if (gateId) params.set("gateId", gateId);
+    if (minutesBack) params.set("minutesBack", minutesBack.toString());
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return request<ScanMetricData[]>(`/events/${eventId}/scan-analytics/realtime-speed${qs}`);
+  },
+
+  getStaffingRecommendation: (eventId: string, gateId?: string) =>
+    request<StaffingRecommendation>(
+      `/events/${eventId}/scan-analytics/staffing-recommendation${gateId ? `?gateId=${encodeURIComponent(gateId)}` : ""}`,
+    ),
 };

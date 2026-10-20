@@ -6,6 +6,7 @@ import { Event, EventStatus } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { Registration } from '../registrations/entities/registration.entity';
+import { Venue } from '../venues/entities/venue.entity';
 
 /**
  * Conflict detection for issue #987. All dates are pushed into the future
@@ -20,6 +21,11 @@ describe('SchedulingService — venue conflicts', () => {
     findOne: jest.fn(),
     count: jest.fn(),
     createQueryBuilder: jest.fn(),
+  };
+
+  // Venue repo mock — default returns null (no registered Venue record)
+  const mockVenueRepository = {
+    findOne: jest.fn().mockResolvedValue(null),
   };
 
   const VENUE = 'Moscone Center';
@@ -49,6 +55,7 @@ describe('SchedulingService — venue conflicts', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockVenueRepository.findOne.mockResolvedValue(null); // reset between tests
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SchedulingService,
@@ -59,6 +66,7 @@ describe('SchedulingService — venue conflicts', () => {
           useValue: { find: jest.fn(), createQueryBuilder: jest.fn() },
         },
         { provide: getRepositoryToken(Registration), useValue: { find: jest.fn() } },
+        { provide: getRepositoryToken(Venue), useValue: mockVenueRepository },
       ],
     }).compile();
 

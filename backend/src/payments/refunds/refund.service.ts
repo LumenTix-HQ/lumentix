@@ -722,6 +722,7 @@ export class RefundService {
     }
 
     if (startDate) {
+      // Cutoff: no refund if the event (or first event of a season pass) starts within REFUND_CUTOFF_HOURS
       const cutoff = Number(process.env.REFUND_CUTOFF_HOURS ?? 24);
       const hoursToEvent = (new Date(startDate).getTime() - Date.now()) / 3_600_000;
       if (hoursToEvent < cutoff) {
@@ -730,14 +731,8 @@ export class RefundService {
           reason: `Too close to event start`,
           refundAmount: 0,
         };
-    // Check cutoff: no refund if event starts within REFUND_CUTOFF_HOURS
-    const event = await this.eventsRepository.findOne({
-      where: { id: payment.eventId },
-      select: ['id', 'startDate'],
-    });
+      }
 
-    if (event?.startDate) {
-      const hoursToEvent = (new Date(event.startDate).getTime() - Date.now()) / 3_600_000;
       const proximityResult = this.refundCalculator.calculateRefundByEventProximity(
         hoursToEvent,
         Number(payment.amount),

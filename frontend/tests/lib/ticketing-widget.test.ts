@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import {
-  initialize_widget_payment,
-  render_ticketing_widget,
-  track_widget_referrals,
+  initializeWidgetPayment,
+  renderTicketingWidget,
+  trackWidgetReferrals,
 } from "@/lib/ticketing-widget";
 
 describe("ticketing widget", () => {
@@ -14,7 +14,7 @@ describe("ticketing widget", () => {
   it("renders an embeddable widget and starts payment with referral tracking", () => {
     const onPaymentStart = vi.fn();
 
-    render_ticketing_widget({
+    renderTicketingWidget({
       container: "#widget",
       partnerId: "Partner Blog",
       referralSource: "article-42",
@@ -46,7 +46,7 @@ describe("ticketing widget", () => {
   });
 
   it("returns a checkout URL when initializing widget payment", () => {
-    const payload = initialize_widget_payment({
+    const payload = initializeWidgetPayment({
       eventId: "event-9",
       partnerId: "Partner",
       quantity: 3,
@@ -57,7 +57,7 @@ describe("ticketing widget", () => {
   });
 
   it("disables the widget when an event is sold out", () => {
-    render_ticketing_widget({
+    renderTicketingWidget({
       container: "#widget",
       partnerId: "partner",
       event: {
@@ -74,7 +74,7 @@ describe("ticketing widget", () => {
   });
 
   it("tracks referral records independently", () => {
-    const record = track_widget_referrals("event-1", "Partner Site", "sidebar");
+    const record = trackWidgetReferrals("event-1", "Partner Site", "sidebar");
 
     expect(record.referralCode).toBe("partner-site-event-1-sidebar");
     expect(JSON.parse(localStorage.getItem("lumentix_widget_referrals") || "[]")).toHaveLength(1);

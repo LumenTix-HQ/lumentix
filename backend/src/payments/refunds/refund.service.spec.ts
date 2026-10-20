@@ -91,6 +91,8 @@ describe('RefundService', () => {
             calculateRefundAmount: jest.fn(),
             isRefundEligible: jest.fn(),
             generateVoucherCode: jest.fn(),
+          },
+        },
         RefundCalculatorService,
         {
           provide: ConfigService,
@@ -544,6 +546,63 @@ describe('RefundService', () => {
 
       expect(result.eligible).toBe(true);
       expect(result.refundAmount).toBeGreaterThan(0);
+    });
+
+    it('uses the first event of the series for season passes (ineligible when it is within 24h)', async () => {
+      paymentsRepo.findOne.mockResolvedValue({
+        ...RECENT_PAYMENT,
+        isSeasonPass: true,
+        seriesId: 'series-1',
+      } as any);
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+      eventsRepo.find.mockResolvedValue([
+        { id: 'event-a', startDate: new Date(Date.now() + 12 * 60 * 60 * 1000) },
+        { id: 'event-b', startDate: new Date(Date.now() + 100 * 60 * 60 * 1000) },
+      ] as any);
+
+      const result = await service.checkRefundEligibility('pay-1');
+
+      expect(eventsRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { seriesId: 'series-1' } }),
+      );
+      expect(result.eligible).toBe(false);
+      expect(result.reason).toBe('Too close to event start');
+    });
+
+    it('is eligible for a season pass whose first event is more than 24h away', async () => {
+      paymentsRepo.findOne.mockResolvedValue({
+        ...RECENT_PAYMENT,
+        isSeasonPass: true,
+        seriesId: 'series-1',
+      } as any);
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+      eventsRepo.find.mockResolvedValue([
+        { id: 'event-a', startDate: new Date(Date.now() + 72 * 60 * 60 * 1000) },
+      ] as any);
+
+      const result = await service.checkRefundEligibility('pay-1');
+
+      expect(result.eligible).toBe(true);
+    });
+
+    it('treats the 24h cutoff as a boundary: 1 minute inside is refused, 1 minute outside is allowed', async () => {
+      paymentsRepo.findOne.mockResolvedValue(RECENT_PAYMENT);
+      usersRepo.findOne.mockResolvedValue(USER_WITH_KEY);
+
+      eventsRepo.findOne.mockResolvedValueOnce({
+        id: 'event-1',
+        startDate: new Date(Date.now() + (24 * 60 - 1) * 60 * 1000),
+      } as any);
+      const inside = await service.checkRefundEligibility('pay-1');
+
+      eventsRepo.findOne.mockResolvedValueOnce({
+        id: 'event-1',
+        startDate: new Date(Date.now() + (24 * 60 + 1) * 60 * 1000),
+      } as any);
+      const outside = await service.checkRefundEligibility('pay-1');
+
+      expect(inside.eligible).toBe(false);
+      expect(outside.eligible).toBe(true);
     });
   });
 });

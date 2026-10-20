@@ -6,6 +6,8 @@ import {
   IsString,
   IsUrl,
   Min,
+  Max,
+  IsNumber,
 } from 'class-validator';
 
 export class ManageContentDeliveryDto {
@@ -82,4 +84,9 @@ export class StreamPerformanceResponseDto {
 
   @ApiProperty()
   lastMeasuredAt: Date;
+}
+
+export class BufferingEventDto {
+  @ApiProperty() @IsNumber() @Min(0) @Max(3_600_000) durationMs: number;
+  @ApiProperty() @IsNumber() @Min(0) @Max(10_000_000) bandwidthKbps: number;
 }

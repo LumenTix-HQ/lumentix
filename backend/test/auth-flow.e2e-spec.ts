@@ -90,6 +90,33 @@ describe('Auth Flow (e2e)', () => {
     });
   });
 
+  describe('POST /auth/verify-email', () => {
+    it('rejects a request without a userId (400)', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/verify-email')
+        .send({ token: 'abc' })
+        .expect(400);
+    });
+
+    it('rejects an unknown user', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/verify-email')
+        .send({ userId: '00000000-0000-4000-8000-000000000000', token: 'abc' })
+        .expect(400);
+    });
+  });
+
+  describe('POST /auth/resend-verification', () => {
+    it('answers generically for an unknown address', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/auth/resend-verification')
+        .send({ email: 'nobody-e2e@example.com' })
+        .expect(200);
+
+      expect(res.body).toHaveProperty('message');
+    });
+  });
+
   describe('POST /auth/refresh', () => {
     it('returns new tokens on valid refresh token', async () => {
       const res = await request(app.getHttpServer())

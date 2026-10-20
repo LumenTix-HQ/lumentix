@@ -6,7 +6,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * This enforces the database-level duplicate-registration prevention that
  * complements the application-level ConflictException check.
  */
-export class AddUniqueRegistrationConstraint1748476800000
+export class AddUniqueRegistrationConstraint1748476800001
   implements MigrationInterface
 {
   public async up(queryRunner: QueryRunner): Promise<void> {

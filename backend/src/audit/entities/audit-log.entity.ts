@@ -28,6 +28,8 @@ export enum AuditAction {
   EVENT_PUBLISHED = 'EVENT_PUBLISHED',
   EVENT_CANCELLED = 'EVENT_CANCELLED',
   EVENT_COMPLETED = 'EVENT_COMPLETED',
+  EVENT_ARCHIVED = 'EVENT_ARCHIVED',
+  EVENT_HISTORY_PRESERVED = 'EVENT_HISTORY_PRESERVED',
   EVENT_CANCELLED_ON_CHAIN = 'EVENT_CANCELLED_ON_CHAIN',
   MASS_REFUND_EXECUTED_ON_CHAIN = 'MASS_REFUND_EXECUTED_ON_CHAIN',
 
@@ -35,10 +37,18 @@ export enum AuditAction {
   AGE_VERIFIED = 'AGE_VERIFIED',
   AGE_RESTRICTION_SET = 'AGE_RESTRICTION_SET',
 
+  // Tickets
+  TICKET_TRANSFERRED = 'TICKET_TRANSFERRED',
+
   // Resale Marketplace
   RESALE_LISTED = 'RESALE_LISTED',
   RESALE_BOUGHT = 'RESALE_BOUGHT',
   RESALE_CANCELLED = 'RESALE_CANCELLED',
+
+  // Fraud Detection (secondary market)
+  TRADE_FLAGGED_FRAUD = 'TRADE_FLAGGED_FRAUD',
+  TRADE_HELD_FOR_REVIEW = 'TRADE_HELD_FOR_REVIEW',
+  TRADE_HOLD_RELEASED = 'TRADE_HOLD_RELEASED',
 
   // Recommendations
   PREFERENCES_UPDATED = 'PREFERENCES_UPDATED',
@@ -85,6 +95,8 @@ export enum AuditAction {
 }
 
 @Index(['userId', 'action'])
+@Index(['createdAt'])
+@Index(['userId', 'createdAt'])
 @Entity('audit_logs')
 export class AuditLog {
   @PrimaryGeneratedColumn('uuid')
@@ -104,6 +116,7 @@ export class AuditLog {
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, unknown> | null;
 
+  @Index()
   @CreateDateColumn()
   createdAt: Date;
 }

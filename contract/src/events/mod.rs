@@ -1559,6 +1559,68 @@ impl CertificationStandardUpdated {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Biometric Authentication (Issue #649)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct BiometricCredentialRegistered;
+impl BiometricCredentialRegistered {
+    pub fn emit(
+        env: &Env,
+        user: Address,
+        event_id: u64,
+        biometric_type: crate::types::BiometricType,
+    ) {
+        env.events()
+            .publish((symbol_short!("bioreg"),), (user, event_id, biometric_type));
+    }
+}
+
+pub struct BiometricAuthenticated;
+impl BiometricAuthenticated {
+    pub fn emit(env: &Env, user: Address, event_id: u64) {
+        env.events()
+            .publish((symbol_short!("bioauth"),), (user, event_id));
+    }
+}
+
+pub struct BiometricPrivacyUpdated;
+impl BiometricPrivacyUpdated {
+    pub fn emit(
+        env: &Env,
+        user: Address,
+        event_id: u64,
+        action: crate::types::BiometricPrivacyAction,
+    ) {
+        env.events()
+            .publish((symbol_short!("bioprivy"),), (user, event_id, action));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Event Pass Packages (Issue #906)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct PassPackageCreated;
+impl PassPackageCreated {
+    pub fn emit(env: &Env, package_id: u64, owner: Address, total_allowance: u32) {
+        env.events().publish(
+            (symbol_short!("ppkgnew"),),
+            (package_id, owner, total_allowance),
+        );
+    }
+}
+
+pub struct PassAllowanceDeducted;
+impl PassAllowanceDeducted {
+    pub fn emit(env: &Env, package_id: u64, event_id: u64, remaining_allowance: u32) {
+        env.events().publish(
+            (symbol_short!("ppkguse"),),
+            (package_id, event_id, remaining_allowance),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Anonymous Event Feedback Surveys
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1749,5 +1811,230 @@ impl OfflineScansSyncCompleted {
             (symbol_short!("offdone"),),
             (event_id, validator, accepted, rejected),
         );
+    }
+}
+
+/// Event emitted when an age proof is registered for an event subject
+pub struct AgeProofIssued;
+impl AgeProofIssued {
+    pub fn emit(env: &Env, subject: Address, min_age: u32, expires_at: u64) {
+        env.events()
+            .publish((symbol_short!("ageiss"),), (subject, min_age, expires_at));
+    }
+}
+
+/// Event emitted when an event age proof is verified
+pub struct AgeProofVerified;
+impl AgeProofVerified {
+    pub fn emit(env: &Env, subject: Address, min_age_required: u32, valid: bool) {
+        env.events()
+            .publish((symbol_short!("agever"),), (subject, min_age_required, valid));
+    }
+}
+
+/// Event emitted when an underage purchase is rejected
+pub struct UnderagePurchaseRejected;
+impl UnderagePurchaseRejected {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, min_age_required: u32) {
+        env.events()
+            .publish((symbol_short!("ageund"),), (event_id, buyer, min_age_required));
+    }
+}
+
+/// Event emitted when the royalty split map for an event is configured
+pub struct RoyaltySplitsSet;
+impl RoyaltySplitsSet {
+    pub fn emit(env: &Env, event_id: u64, total_bps: u32) {
+        env.events()
+            .publish((symbol_short!("royset"),), (event_id, total_bps));
+    }
+}
+
+/// Event emitted when royalties are distributed from an event's escrow
+pub struct RoyaltiesDistributed;
+impl RoyaltiesDistributed {
+    pub fn emit(env: &Env, event_id: u64, total_amount: i128) {
+        env.events()
+            .publish((symbol_short!("roydis"),), (event_id, total_amount));
+    }
+}
+
+/// Event emitted when a gamification achievement badge is minted (Issue #1208)
+pub struct AchievementBadgeMinted;
+impl AchievementBadgeMinted {
+    pub fn emit(env: &Env, badge_id: u64, owner: Address, milestone: String) {
+        env.events()
+            .publish((symbol_short!("badgmint"),), (badge_id, owner, milestone));
+    }
+}
+
+/// Event emitted when an achievement badge is revoked (Issue #1208)
+pub struct AchievementBadgeRevoked;
+impl AchievementBadgeRevoked {
+    pub fn emit(env: &Env, badge_id: u64, owner: Address) {
+        env.events()
+            .publish((symbol_short!("badgrev"),), (badge_id, owner));
+    }
+}
+
+/// Event emitted when an organizer configures the venue capacity (Issue #1245)
+pub struct VenueCapacitySet;
+impl VenueCapacitySet {
+    pub fn emit(env: &Env, event_id: u64, max_capacity: u32, minted_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "venue_capacity_set"),),
+            (event_id, max_capacity, minted_count),
+        );
+    }
+}
+
+/// Event emitted when the on-chain attendance counter advances (Issue #1245)
+pub struct AttendanceCounterIncremented;
+impl AttendanceCounterIncremented {
+    pub fn emit(env: &Env, event_id: u64, minted_count: u32, max_capacity: u32) {
+        env.events().publish(
+            (Symbol::new(env, "attendance_counter_incremented"),),
+            (event_id, minted_count, max_capacity),
+        );
+    }
+}
+
+/// Event emitted when a mint is turned away for want of venue capacity (Issue #1245)
+pub struct OverCapacityMintRejected;
+impl OverCapacityMintRejected {
+    pub fn emit(env: &Env, event_id: u64, requested: u32, max_capacity: u32) {
+        env.events().publish(
+            (Symbol::new(env, "over_capacity_mint_rejected"),),
+            (event_id, requested, max_capacity),
+        );
+    }
+}
+
+/// Event emitted when a payment split over an event's escrow is registered (Issue #1247)
+pub struct EscrowSplitCreated;
+impl EscrowSplitCreated {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128, organizers: u32) {
+        env.events().publish(
+            (Symbol::new(env, "escrow_split_created"),),
+            (split_id, event_id, total_amount, organizers),
+        );
+    }
+}
+
+/// Event emitted when escrow funds are paid out to the co-organizers (Issue #1247)
+pub struct EscrowSplitReleased;
+impl EscrowSplitReleased {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "escrow_split_released"),),
+            (split_id, event_id, total_amount),
+        );
+    }
+}
+
+/// Event emitted when a co-organizer freezes an escrow split (Issue #1247)
+pub struct EscrowSplitDisputed;
+impl EscrowSplitDisputed {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, disputer: Address) {
+        env.events().publish(
+            (Symbol::new(env, "escrow_split_disputed"),),
+            (split_id, event_id, disputer),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dynamic pricing curve events (Issue #1451)
+// ═══════════════════════════════════════════════════════════════════════════
+
+use crate::types::{GeoRestrictionMode, PriceTier};
+
+/// Emitted whenever an organizer applies a dynamic pricing curve adjustment.
+pub struct DynamicPricingCurveSet;
+impl DynamicPricingCurveSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        new_price: i128,
+        demand_velocity_per_hour: u64,
+        remaining_inventory: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("pricecrv"),),
+            (
+                event_id,
+                organizer,
+                new_price,
+                demand_velocity_per_hour,
+                remaining_inventory,
+            ),
+        );
+    }
+}
+
+/// Emitted every time a dynamic price decision is computed and recorded.
+pub struct PricingDecisionLogged;
+impl PricingDecisionLogged {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        base_price: i128,
+        adjusted_price: i128,
+        price_tier: PriceTier,
+        demand_velocity_per_hour: u64,
+        remaining_inventory: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("pricedec"),),
+            (
+                event_id,
+                base_price,
+                adjusted_price,
+                price_tier,
+                demand_velocity_per_hour,
+                remaining_inventory,
+            ),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Geographic purchase restriction events (Issue #1448)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer sets or replaces an event's geo-fence rules.
+pub struct GeoFenceRulesSet;
+impl GeoFenceRulesSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        enabled: bool,
+        mode: GeoRestrictionMode,
+        region_count: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("geofence"),),
+            (event_id, organizer, enabled, mode, region_count),
+        );
+    }
+}
+
+/// Emitted when a buyer's attested region passes the event's geo-fence.
+pub struct BuyerGeoVerified;
+impl BuyerGeoVerified {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, country_code: String) {
+        env.events()
+            .publish((symbol_short!("geook"),), (event_id, buyer, country_code));
+    }
+}
+
+/// Emitted when a buyer's attested region is blocked by the event's geo-fence.
+pub struct BuyerGeoRejected;
+impl BuyerGeoRejected {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, country_code: String) {
+        env.events()
+            .publish((symbol_short!("georej"),), (event_id, buyer, country_code));
     }
 }

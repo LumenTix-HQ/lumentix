@@ -7,7 +7,6 @@ import { UsersModule } from '../users/users.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { User } from '../users/entities/user.entity';
 import { UserWallet } from './entities/user-wallet.entity';
-import { RedisProvider } from '../common/redis/redis.provider';
 
 @Module({
   imports: [
@@ -16,7 +15,7 @@ import { RedisProvider } from '../common/redis/redis.provider';
     UsersModule,
     StellarModule,
   ],
-  providers: [WalletService, RedisProvider],
+  providers: [WalletService],
   controllers: [WalletController],
 })
 export class WalletModule {}

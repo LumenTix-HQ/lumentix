@@ -150,7 +150,7 @@ export class NotificationService {
         });
         break;
 
-      case EventStatus.CANCELLED:
+      case EventStatus.CANCELLED: {
         // Fetch all ticket holders and email each one
         // This is a batch operation — queue one job per ticket holder
         const ticketHolderIds = await this.getTicketHolderIds(event.id);
@@ -162,6 +162,7 @@ export class NotificationService {
           });
         }
         break;
+      }
 
       case EventStatus.COMPLETED:
         // Email to organizer: "Your event has completed"

@@ -1,6 +1,5 @@
 import {
   Controller,
-  ForbiddenException,
   Get,
   Post,
   Put,
@@ -48,7 +47,6 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { TicketsService } from '../tickets/tickets.service';
-import { WebhooksService } from '../webhooks/webhooks.service';
 import { Event } from './entities/event.entity';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 
@@ -65,7 +63,6 @@ export class EventsController {
     private readonly eventsService: EventsService,
     @Inject(forwardRef(() => TicketsService))
     private readonly ticketsService: TicketsService,
-    private readonly webhooksService: WebhooksService,
   ) {}
 
   @Post()
@@ -571,26 +568,5 @@ export class EventsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.eventsService.deleteEventImage(id, imageId, req.user.id);
-  }
-
-  @Get(':id/webhooks/deliveries')
-  @Roles(Role.ORGANIZER)
-  @ApiOperation({
-    summary: 'Get webhook delivery history',
-    description: 'Organizer-only. Returns the last 50 outbound webhook deliveries for this event.',
-  })
-  @ApiParam({ name: 'id', description: 'Event UUID' })
-  @ApiResponse({ status: 200, description: 'Webhook delivery records' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  @ApiResponse({ status: 404, description: 'Event not found' })
-  async getWebhookDeliveries(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    const event = await this.eventsService.getEventById(id);
-    if (event.organizerId !== req.user.id) {
-      throw new ForbiddenException();
-    }
-    return this.webhooksService.getDeliveries(id);
   }
 }
