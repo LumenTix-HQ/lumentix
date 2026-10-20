@@ -593,4 +593,46 @@ pub enum LumentixError {
     InvalidIdempotencyKey = 278,
     /// Nonce is not greater than the last consumed nonce for the account
     NonceOutOfOrder = 279,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Attendee heatmap errors (Issue #1499)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No heatmap grid has been configured for the event
+    HeatmapNotConfigured = 280,
+    /// Heatmap grid has a zero or oversized dimension, tile size or threshold
+    InvalidHeatmapConfig = 281,
+    /// A scanned position falls outside the configured heatmap grid
+    ScanPositionOutOfBounds = 282,
+    /// Scan batch is empty or larger than the per-call limit
+    InvalidScanBatch = 283,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Checkout currency conversion errors (Issue #1500)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// An oracle price backing the exchange rate is older than the allowed age
+    StaleExchangeRate = 284,
+    /// No exchange-rate lock matches the given ID, event and currency
+    ExchangeRateLockNotFound = 285,
+    /// The exchange-rate lock's window has passed
+    ExchangeRateLockExpired = 286,
+    /// The exchange-rate lock has already been used for a checkout
+    ExchangeRateLockConsumed = 287,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Livestream chat moderation errors (Issue #1501)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Slow-mode interval is above the one-hour maximum
+    InvalidSlowModeInterval = 288,
+    /// Chat message is empty or longer than the maximum length
+    InvalidChatMessage = 289,
+    /// Word filter list is too long, or holds an empty or oversized word
+    InvalidChatWordFilter = 290,
+    /// The user is already banned from this event's chat
+    ChatUserAlreadyBanned = 291,
+    /// The user is not banned from this event's chat
+    ChatUserNotBanned = 292,
+    /// The event's organizer and the contract admin cannot be banned or muted
+    CannotModerateOrganizer = 293,
+    /// Mute duration is above the seven-day maximum
+    InvalidMuteDuration = 294,
 }

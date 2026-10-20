@@ -233,6 +233,9 @@ pub mod validation;
 pub mod venue_capacity;
 pub mod achievement_badge;
 pub mod replay_protection;
+pub mod heatmap;
+pub mod currency_conversion;
+pub mod chat_moderation;
 
 #[cfg(test)]
 pub mod test;
@@ -273,6 +276,15 @@ mod dynamic_pricing_tests;
 #[cfg(test)]
 mod geo_fence_tests;
 
+#[cfg(test)]
+mod heatmap_tests;
+
+#[cfg(test)]
+mod currency_conversion_tests;
+
+#[cfg(test)]
+mod chat_moderation_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
@@ -308,6 +320,11 @@ pub use events::{
     DynamicPricingCurveSet, PricingDecisionLogged,
     GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
     ReplayAttemptRejected, IdempotencyKeyRegistered,
+    HeatmapConfigured, ScanPositionsAggregated, HeatmapCongestionDetected,
+    ExchangeRateLocked, CheckoutCurrencyConverted,
+    RoyaltySplitsSet, RoyaltiesDistributed,
+    ChatMessageModerated, ChatSlowModeSet, ChatWordFiltersUpdated, ChatUserBanned,
+    ChatUserUnbanned, ChatUserMuted,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -330,6 +347,9 @@ pub use types::{
     TokenGateConfig, TokenGateEligibility,
     DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
 };
+pub use chat_moderation::{ChatSettings, ChatUserState, ModerationVerdict};
+pub use currency_conversion::{CheckoutConversion, ExchangeRate, RateLock};
+pub use heatmap::{HeatmapConfig, HeatmapTile, HeatmapUpdate, ScanPosition};
 pub use replay_protection::{
     generate_transaction_nonce, validate_idempotency_key, reject_replay_attempt,
     ReplayProtectionConfig, TransactionNonce, IdempotencyKeyRecord,

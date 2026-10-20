@@ -8531,4 +8531,373 @@ impl LumentixContract {
         crate::escrow_split::get_event_escrow_split(&env, event_id)
             .ok_or(LumentixError::EscrowSplitNotFound)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ATTENDEE HEATMAP (Issue #1499)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configure the heatmap grid laid over an event's venue map.
+    ///
+    /// `tile_size` is the edge of one tile in venue-map units, the grid is
+    /// `grid_width` x `grid_height` tiles, and a tile holding
+    /// `congestion_threshold` attendees reads as congested. Only the event's
+    /// organizer or the contract admin may configure it. Reconfiguring clears
+    /// the stored tiles.
+    pub fn configure_heatmap(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        tile_size: u32,
+        grid_width: u32,
+        grid_height: u32,
+        congestion_threshold: u32,
+    ) -> Result<crate::heatmap::HeatmapConfig, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::heatmap::configure_heatmap(
+            &env,
+            event_id,
+            tile_size,
+            grid_width,
+            grid_height,
+            congestion_threshold,
+        )
+    }
+
+    /// Read the heatmap grid configuration for an event.
+    pub fn get_heatmap_config(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::heatmap::HeatmapConfig, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::get_heatmap_config(&env, event_id)
+    }
+
+    /// Fold a batch of scanner positions into the event's heatmap.
+    ///
+    /// With `reset` true the batch is a full snapshot of current attendee
+    /// positions and replaces the counts; otherwise it is added to them.
+    /// Returns the new heatmap sequence number. Only the event's organizer or
+    /// the contract admin may report positions.
+    pub fn aggregate_scan_positions(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        positions: Vec<crate::heatmap::ScanPosition>,
+        reset: bool,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::heatmap::aggregate_scan_positions(&env, event_id, positions, reset)
+    }
+
+    /// Density overlay tiles for the event's interactive venue map.
+    pub fn generate_heatmap_tiles(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<crate::heatmap::HeatmapTile>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::generate_heatmap_tiles(&env, event_id)
+    }
+
+    /// Tiles changed since `since_sequence`, for keeping the overlay live.
+    ///
+    /// Start from 0, then pass the returned `to_sequence` on the next poll.
+    pub fn stream_heatmap_updates(
+        env: Env,
+        event_id: u64,
+        since_sequence: u64,
+    ) -> Result<crate::heatmap::HeatmapUpdate, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::stream_heatmap_updates(&env, event_id, since_sequence)
+    }
+
+    /// Shared guard: contract initialised, event exists, caller is its
+    /// organizer or the contract admin.
+    fn require_event_organizer_or_admin(
+        env: &Env,
+        event_id: u64,
+        caller: &Address,
+    ) -> Result<Event, LumentixError> {
+        if !storage::is_initialized(env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(env, event_id)?;
+        if event.organizer != *caller && storage::get_admin(env) != *caller {
+            return Err(LumentixError::Unauthorized);
+        }
+        Ok(event)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CHECKOUT CURRENCY CONVERSION (Issue #1500)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Current exchange rate from `from_currency` to `to_currency`, as units of
+    /// the latter per unit of the former scaled by 10^7.
+    ///
+    /// Both currencies must be registered through `set_currency_oracle` with a
+    /// price no older than an hour.
+    pub fn fetch_live_exchange_rate(
+        env: Env,
+        from_currency: String,
+        to_currency: String,
+    ) -> Result<crate::currency_conversion::ExchangeRate, LumentixError> {
+        crate::currency_conversion::fetch_live_exchange_rate(&env, &from_currency, &to_currency)
+    }
+
+    /// Pin the rate between an event's currency and the buyer's chosen
+    /// currency for five minutes, so the price the buyer confirms is the price
+    /// they are charged. Returns the lock to hand to `convert_checkout_currency`.
+    pub fn lock_exchange_rate(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        buyer_currency: String,
+    ) -> Result<crate::currency_conversion::RateLock, LumentixError> {
+        buyer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        validation::validate_currency_code(&buyer_currency)?;
+
+        crate::currency_conversion::lock_exchange_rate(
+            &env,
+            &buyer,
+            event_id,
+            &event.currency,
+            &buyer_currency,
+        )
+    }
+
+    /// Price a ticket checkout in the buyer's preferred currency while the
+    /// organizer stays settled in the event's currency.
+    ///
+    /// The settlement amount is the event's current ticket price. Pass the
+    /// `lock_id` from `lock_exchange_rate` to charge the locked rate, or
+    /// `None` to use the live one. The returned `settlement_amount` is what
+    /// the organizer receives and what `purchase_ticket` takes; `buyer_amount`
+    /// is what the buyer pays in their own currency.
+    pub fn convert_checkout_currency(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        buyer_currency: String,
+        lock_id: Option<u64>,
+    ) -> Result<crate::currency_conversion::CheckoutConversion, LumentixError> {
+        buyer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        validation::validate_currency_code(&buyer_currency)?;
+
+        let settlement_amount =
+            Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
+
+        crate::currency_conversion::convert_checkout_currency(
+            &env,
+            &buyer,
+            event_id,
+            &event.currency,
+            &buyer_currency,
+            settlement_amount,
+            lock_id,
+        )
+    }
+
+    /// Read an exchange-rate lock.
+    pub fn get_exchange_rate_lock(
+        env: Env,
+        lock_id: u64,
+    ) -> Result<crate::currency_conversion::RateLock, LumentixError> {
+        crate::currency_conversion::get_rate_lock(&env, lock_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ON-CHAIN ROYALTY SPLITS (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configure how an event's revenue is split between its artists.
+    ///
+    /// `splits` maps each artist wallet to a share in basis points and must sum
+    /// to 10 000. Only the event's organizer or the contract admin may set it;
+    /// setting it again replaces the previous splits.
+    pub fn set_royalty_splits(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        splits: Map<Address, u32>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::royalty::set_royalty_splits(&env, event_id, splits)
+    }
+
+    /// Read the royalty splits configured for an event.
+    pub fn get_royalty_splits(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Map<Address, u32>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::royalty::get_royalty_splits(&env, event_id)
+    }
+
+    /// Pay `total_amount` of an event's escrow out to its artists according to
+    /// the configured splits.
+    ///
+    /// Only the event's organizer or the contract admin may distribute, and a
+    /// cancelled event's escrow is reserved for refunds. Returns the amount each
+    /// artist received; the amounts always add up to `total_amount`.
+    pub fn distribute_royalties(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        total_amount: i128,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        crate::royalty::distribute_royalties(&env, event_id, total_amount)
+    }
+
+    /// Cumulative royalties paid to each artist of an event.
+    pub fn query_royalty_ledger(env: Env, event_id: u64) -> Map<Address, i128> {
+        crate::royalty::query_royalty_ledger(&env, event_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // LIVESTREAM CHAT MODERATION (Issue #1501)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Run a livestream chat message through the event's moderation rules.
+    ///
+    /// Returns a verdict instead of failing, so the violation a filtered
+    /// message records is kept. The organizer and contract admin are never
+    /// moderated. Rules apply in order: ban, mute, word filter, slow mode.
+    pub fn moderate_chat_message(
+        env: Env,
+        sender: Address,
+        event_id: u64,
+        message: String,
+    ) -> Result<crate::chat_moderation::ModerationVerdict, LumentixError> {
+        sender.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        let exempt = event.organizer == sender || storage::get_admin(&env) == sender;
+
+        crate::chat_moderation::moderate_chat_message(&env, event_id, &sender, &message, exempt)
+    }
+
+    /// Set the minimum seconds between one user's chat messages; 0 turns slow
+    /// mode off. Organizer or admin only.
+    pub fn set_slow_mode(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        seconds: u32,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::set_slow_mode(&env, event_id, seconds)
+    }
+
+    /// Replace the event chat's filtered words. Matching ignores case and
+    /// applies anywhere inside a message. Organizer or admin only.
+    pub fn set_chat_word_filters(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        words: Vec<String>,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::set_word_filters(&env, event_id, words)
+    }
+
+    /// Ban a user from the event's livestream chat. Organizer or admin only;
+    /// neither can be banned.
+    pub fn ban_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+        reason: String,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+        Self::reject_moderating_staff(&env, &event, &user)?;
+
+        crate::chat_moderation::ban_chat_user(&env, event_id, &user, reason)
+    }
+
+    /// Lift a user's chat ban. Organizer or admin only.
+    pub fn unban_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::unban_chat_user(&env, event_id, &user)
+    }
+
+    /// Mute a user in the event's chat for `duration_seconds` (0 lifts the
+    /// mute). Organizer or admin only; neither can be muted.
+    pub fn mute_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+        duration_seconds: u64,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+        Self::reject_moderating_staff(&env, &event, &user)?;
+
+        crate::chat_moderation::mute_chat_user(&env, event_id, &user, duration_seconds)
+    }
+
+    /// Read the event chat's slow-mode and word-filter settings.
+    pub fn get_chat_settings(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::chat_moderation::get_chat_settings(&env, event_id))
+    }
+
+    /// Read a user's moderation state in the event's chat.
+    pub fn get_chat_user_state(
+        env: Env,
+        event_id: u64,
+        user: Address,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::chat_moderation::get_chat_user_state(
+            &env, event_id, &user,
+        ))
+    }
+
+    /// The organizer and the contract admin run the chat, so they are not
+    /// valid targets for a ban or mute.
+    fn reject_moderating_staff(
+        env: &Env,
+        event: &Event,
+        target: &Address,
+    ) -> Result<(), LumentixError> {
+        if event.organizer == *target || storage::get_admin(env) == *target {
+            return Err(LumentixError::CannotModerateOrganizer);
+        }
+        Ok(())
+    }
 }
