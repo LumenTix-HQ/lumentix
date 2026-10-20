@@ -260,6 +260,18 @@ mod certification_analytics_tests;
 #[cfg(test)]
 mod biometric_pass_package_tests;
 
+#[cfg(test)]
+mod wallet_connect_tests;
+
+#[cfg(test)]
+mod governance_upgrade_tests;
+
+#[cfg(test)]
+mod dynamic_pricing_tests;
+
+#[cfg(test)]
+mod geo_fence_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
@@ -292,6 +304,8 @@ pub use events::{
     AchievementBadgeMinted, AchievementBadgeRevoked,
     VenueCapacitySet, AttendanceCounterIncremented, OverCapacityMintRejected,
     EscrowSplitCreated, EscrowSplitReleased, EscrowSplitDisputed,
+    DynamicPricingCurveSet, PricingDecisionLogged,
+    GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -312,4 +326,5 @@ pub use types::{
     AgeProof,
     ServiceHealthStatus, SystemHealthStatus, MetricDatapoint, TelemetryStatus,
     TokenGateConfig, TokenGateEligibility,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
 };

@@ -565,4 +565,22 @@ pub enum LumentixError {
     BadgeNotExpired = 270,
     /// Badge expiry must be 0 (no expiry) or a future ledger timestamp
     InvalidBadgeExpiry = 271,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Dynamic pricing curve errors (Issue #1451)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Pricing curve has zero thresholds, a min above its max, or out-of-range bounds
+    InvalidPricingCurve = 272,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Geographic purchase restrictions errors (Issue #1448)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Geo-fence rules are enabled but the region list is empty or malformed
+    InvalidGeoFenceRules = 273,
+    /// Buyer location must be a 2-letter uppercase ISO 3166-1 alpha-2 code
+    InvalidCountryCode = 274,
+    /// Geo-fenced event, but the buyer has no attested location on record
+    BuyerLocationRequired = 275,
+    /// Buyer's region is not permitted by the event's geo-fence rules
+    BuyerLocationNotAllowed = 276,
 }

@@ -13,8 +13,9 @@ use crate::types::{
     VenueSpaceAllocation, SubscriptionPlan, SubscriptionStatus, SecurityIncident, UserPreferences,
     CertificationStandard, EventCertificate, BiometricCredential, PassPackage,
     WalletSession, ValidationProof, OfflineScanRecord,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules,
 };
-use soroban_sdk::{Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
 
 // Storage keys
 const INITIALIZED: &str = "INIT";
@@ -87,6 +88,7 @@ const AGE_PROOF_PREFIX: &str = "AGEPF_";
 const EVENT_MIN_AGE_PREFIX: &str = "MINAGE_";
 const TELEMETRY_STATUS: &str = "TELEMETRY_STATUS";
 const METRIC_DATAPOINT_PREFIX: &str = "METRIC_";
+const METRIC_LATEST_PREFIX: &str = "METRCLT_";
 const TOKEN_GATE_PREFIX: &str = "TGATE_";
 
 /// Check if contract is initialized
@@ -1032,6 +1034,174 @@ pub fn get_pricing_schedule(env: &Env, event_id: u64) -> Option<PricingSchedule>
 pub fn has_pricing_schedule(env: &Env, event_id: u64) -> bool {
     let key = (PRICING_SCHEDULE_PREFIX, event_id);
     env.storage().persistent().has(&key)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DYNAMIC PRICING CURVE / DEMAND WINDOW / DECISION LOG (Issue #1451)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PRICING_CURVE_PREFIX: &str = "PRCCURVE_";
+const PRICING_DECISION_PREFIX: &str = "PRCDEC_";
+const DEMAND_WINDOW_PREFIX: &str = "DEMANDW_";
+
+/// Length of the rolling window used to derive real-time demand velocity.
+pub const DEMAND_WINDOW_SECONDS: u64 = 3_600;
+
+/// Rolling one-hour sales window backing real-time demand velocity.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DemandWindow {
+    pub window_start: u64,
+    pub purchases_in_window: u32,
+}
+
+/// Persist the organizer's configurable pricing curve for an event.
+pub fn set_pricing_curve(env: &Env, event_id: u64, curve: &DynamicPricingCurve) {
+    let key = (PRICING_CURVE_PREFIX, event_id);
+    env.storage().persistent().set(&key, curve);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the organizer's configurable pricing curve for an event, if any.
+pub fn get_pricing_curve(env: &Env, event_id: u64) -> Option<DynamicPricingCurve> {
+    let key = (PRICING_CURVE_PREFIX, event_id);
+    let curve: Option<DynamicPricingCurve> = env.storage().persistent().get(&key);
+    if curve.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    curve
+}
+
+/// Persist the most recent pricing decision for an event.
+pub fn set_pricing_decision(env: &Env, event_id: u64, decision: &PricingDecision) {
+    let key = (PRICING_DECISION_PREFIX, event_id);
+    env.storage().persistent().set(&key, decision);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the most recent pricing decision for an event, if any.
+pub fn get_pricing_decision(env: &Env, event_id: u64) -> Option<PricingDecision> {
+    let key = (PRICING_DECISION_PREFIX, event_id);
+    let decision: Option<PricingDecision> = env.storage().persistent().get(&key);
+    if decision.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    decision
+}
+
+/// Read the current rolling demand window for an event (zeroed when absent).
+pub fn get_demand_window(env: &Env, event_id: u64) -> DemandWindow {
+    let key = (DEMAND_WINDOW_PREFIX, event_id);
+    let window: Option<DemandWindow> = env.storage().persistent().get(&key);
+    match window {
+        Some(w) => {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+            w
+        }
+        None => DemandWindow {
+            window_start: 0,
+            purchases_in_window: 0,
+        },
+    }
+}
+
+/// Roll `quantity` new sales into the event's demand window, resetting the
+/// window when it has aged past `DEMAND_WINDOW_SECONDS`.
+pub fn record_pricing_sale(env: &Env, event_id: u64, quantity: u32, now: u64) {
+    let key = (DEMAND_WINDOW_PREFIX, event_id);
+    let mut window = get_demand_window(env, event_id);
+
+    if window.purchases_in_window == 0
+        || now.saturating_sub(window.window_start) >= DEMAND_WINDOW_SECONDS
+    {
+        window = DemandWindow {
+            window_start: now,
+            purchases_in_window: quantity,
+        };
+    } else {
+        window.purchases_in_window = window.purchases_in_window.saturating_add(quantity);
+    }
+
+    env.storage().persistent().set(&key, &window);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Sales per hour represented by the current demand window.
+pub fn get_demand_velocity_per_hour(env: &Env, event_id: u64) -> u64 {
+    let window = get_demand_window(env, event_id);
+    if window.purchases_in_window == 0 {
+        return 0;
+    }
+
+    let now = env.ledger().timestamp();
+    let elapsed = now.saturating_sub(window.window_start).min(DEMAND_WINDOW_SECONDS);
+    if elapsed == 0 {
+        // Purchases recorded in the same ledger second as the caller: treat
+        // the window as full-length so early sales are not over-weighted.
+        return (window.purchases_in_window as u64 * 3_600) / DEMAND_WINDOW_SECONDS;
+    }
+    (window.purchases_in_window as u64 * 3_600) / elapsed
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GEO-FENCE STORAGE (Issue #1448)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GEO_FENCE_PREFIX: &str = "GEOFENCE_";
+const BUYER_GEO_PREFIX: &str = "BUYERGEO_";
+
+/// Persist the geo-fence rules for an event.
+pub fn set_geo_fence_rules(env: &Env, event_id: u64, rules: &GeoFenceRules) {
+    let key = (GEO_FENCE_PREFIX, event_id);
+    env.storage().persistent().set(&key, rules);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch the geo-fence rules for an event, if any.
+pub fn get_geo_fence_rules(env: &Env, event_id: u64) -> Option<GeoFenceRules> {
+    let key = (GEO_FENCE_PREFIX, event_id);
+    let rules: Option<GeoFenceRules> = env.storage().persistent().get(&key);
+    if rules.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    rules
+}
+
+/// Persist a buyer's attested region for an event.
+pub fn set_buyer_geo_location(env: &Env, event_id: u64, buyer: &Address, country_code: &String) {
+    let key = (BUYER_GEO_PREFIX, event_id, buyer.clone());
+    env.storage().persistent().set(&key, country_code);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Fetch a buyer's attested region for an event, if any.
+pub fn get_buyer_geo_location(env: &Env, event_id: u64, buyer: &Address) -> Option<String> {
+    let key = (BUYER_GEO_PREFIX, event_id, buyer.clone());
+    let country: Option<String> = env.storage().persistent().get(&key);
+    if country.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    country
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2550,14 +2720,14 @@ pub fn consume_idempotency_key(env: &Env, account: &Address, key: &BytesN<32>) {
 // Real-Time Health & Telemetry (Issue #1192)
 // ═══════════════════════════════════════════════════════════════════════════
 
-use crate::types::{MetricDatapoint, SystemHealthStatus, TelemetryStatus};
+use crate::types::{MetricDatapoint, TelemetryStatus};
 
 /// Persist the latest telemetry status snapshot.
 pub fn set_telemetry_status(env: &Env, status: &TelemetryStatus) {
     env.storage().instance().set(&TELEMETRY_STATUS, status);
     env.storage()
         .instance()
-        .extend_ttl(&TELEMETRY_STATUS, INSTANCE_LIFETIME, INSTANCE_LIFETIME);
+        .extend_ttl(INSTANCE_LIFETIME, INSTANCE_LIFETIME);
 }
 
 /// Fetch the latest telemetry status snapshot, if any.
@@ -2565,47 +2735,31 @@ pub fn get_telemetry_status(env: &Env) -> Option<TelemetryStatus> {
     env.storage().instance().get(&TELEMETRY_STATUS)
 }
 
-/// Record a metric datapoint (append-only log).
+/// Record a metric datapoint (append-only log) and refresh the per-metric
+/// latest pointer. Soroban persistent storage offers no key enumeration, so
+/// the pointer is what makes `get_latest_metric` a single lookup.
 pub fn record_metric_datapoint(env: &Env, datapoint: &MetricDatapoint) {
     let key = (METRIC_DATAPOINT_PREFIX, datapoint.metric_name.clone(), datapoint.recorded_at);
     env.storage().persistent().set(&key, datapoint);
     env.storage()
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+
+    let latest_key = (METRIC_LATEST_PREFIX, datapoint.metric_name.clone());
+    env.storage().persistent().set(&latest_key, datapoint);
+    env.storage()
+        .persistent()
+        .extend_ttl(&latest_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
 /// Fetch the most recent metric datapoint for a given metric name.
 pub fn get_latest_metric(env: &Env, metric_name: &String) -> Option<MetricDatapoint> {
-    let prefix = (METRIC_DATAPOINT_PREFIX, metric_name.clone());
-    let mut latest: Option<MetricDatapoint> = None;
-    let mut latest_ts: u64 = 0;
-
-    // Scan all datapoints for this metric name and keep the newest one.
-    // In production this would be replaced by an index, but Soroban does not
-    // support range scans, so we iterate the entire keyspace.
-    let keys = env.storage().persistent().keys();
-    for key in keys.iter() {
-        if let soroban_sdk::Val::Tuple(tuple) = key {
-            let elems = tuple.get_elements();
-            if elems.len() >= 3 {
-                if let soroban_sdk::Val::Symbol(sym) = &elems[0] {
-                    if sym.to_string() == METRIC_DATAPOINT_PREFIX {
-                        if let soroban_sdk::Val::String(name) = &elems[1] {
-                            if name == metric_name {
-                                if let soroban_sdk::Val::U64(ts) = &elems[2] {
-                                    if *ts > latest_ts {
-                                        if let Some(dp) = env.storage().persistent().get::<_, MetricDatapoint>(&key) {
-                                            latest = Some(dp);
-                                            latest_ts = *ts;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    let latest_key = (METRIC_LATEST_PREFIX, metric_name.clone());
+    let latest: Option<MetricDatapoint> = env.storage().persistent().get(&latest_key);
+    if latest.is_some() {
+        env.storage()
+            .persistent()
+            .extend_ttl(&latest_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     }
     latest
 }

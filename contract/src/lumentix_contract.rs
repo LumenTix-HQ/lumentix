@@ -41,6 +41,8 @@ use crate::events::{
     AgeProofIssued, AgeProofVerified,
     BiometricCredentialRegistered, BiometricAuthenticated, BiometricPrivacyUpdated,
     PassPackageCreated, PassAllowanceDeducted,
+    DynamicPricingCurveSet, PricingDecisionLogged,
+    GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
 };
 use crate::achievement_badge;
 use crate::storage;
@@ -60,6 +62,7 @@ use crate::types::{
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
     PricingSchedule, MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
@@ -446,6 +449,10 @@ impl LumentixContract {
 
         Self::reject_underage_purchase(env.clone(), event_id, buyer.clone())?;
 
+        // Enforce the event's geo-fence against the buyer's attested region
+        // (Issue #1448). No-op for events without active rules.
+        Self::check_purchase_geo(&env, &buyer, event_id)?;
+
         let now = env.ledger().timestamp();
         Self::cleanup_expired_waitlist_offers(&env, event_id, now);
         let reserved_for_waitlist = storage::get_waitlist_reserved(&env, event_id);
@@ -497,6 +504,10 @@ impl LumentixContract {
         // Increment tickets_sold counter
         event.tickets_sold += 1;
         storage::set_event(&env, event_id, &event);
+
+        // Roll the sale into the rolling demand window so dynamic pricing
+        // sees real-time velocity (Issue #1451).
+        storage::record_pricing_sale(&env, event_id, 1, now);
 
         // Record the seat against the on-chain venue capacity (Issue #1245).
         // No-ops for events that never had a capacity configured.
@@ -583,6 +594,10 @@ impl LumentixContract {
 
         Self::reject_underage_purchase(env.clone(), event_id, buyer.clone())?;
 
+        // Enforce the event's geo-fence against the buyer's attested region
+        // (Issue #1448). No-op for events without active rules.
+        Self::check_purchase_geo(&env, &buyer, event_id)?;
+
         let now = env.ledger().timestamp();
         Self::cleanup_expired_waitlist_offers(&env, event_id, now);
         let reserved_for_waitlist = storage::get_waitlist_reserved(&env, event_id);
@@ -625,6 +640,9 @@ impl LumentixContract {
         // Update tickets_sold counter
         event.tickets_sold += quantity;
         storage::set_event(&env, event_id, &event);
+
+        // Roll the batch into the rolling demand window (Issue #1451).
+        storage::record_pricing_sale(&env, event_id, quantity, now);
 
         // Record the seats against the on-chain venue capacity (Issue #1245).
         // No-ops for events that never had a capacity configured.
@@ -1563,8 +1581,15 @@ impl LumentixContract {
         storage::get_event(&env, event_id)
     }
 
-    /// Calculate dynamic ticket price from time window and demand velocity.
-    /// Uses organizer pricing schedule when configured, otherwise platform defaults.
+    /// Calculate dynamic ticket price from time window, demand velocity and
+    /// remaining inventory. Uses the organizer pricing schedule for the
+    /// time-based tier, and the organizer pricing curve (when configured) for
+    /// demand and scarcity adjustments. Falls back to platform defaults.
+    ///
+    /// `recent_purchases` / `window_seconds` let a caller supply an explicit
+    /// demand sample; when `recent_purchases` is 0 the contract's own rolling
+    /// one-hour sales window is used instead, so purchases made through
+    /// [`Self::purchase_ticket`] feed real-time demand automatically.
     pub fn calculate_dynamic_price(
         env: Env,
         event_id: u64,
@@ -1572,7 +1597,11 @@ impl LumentixContract {
         window_seconds: u64,
     ) -> Result<i128, LumentixError> {
         let event = storage::get_event(&env, event_id)?;
-        if !storage::has_pricing_schedule(&env, event_id) {
+        let curve = storage::get_pricing_curve(&env, event_id);
+        let has_schedule = storage::has_pricing_schedule(&env, event_id);
+
+        // No schedule and no curve: static base price, as before.
+        if !has_schedule && curve.is_none() {
             return Ok(event.ticket_price);
         }
 
@@ -1588,25 +1617,73 @@ impl LumentixContract {
         };
 
         let mut price = (event.ticket_price * multiplier_bps as i128) / 10000;
-        if recent_purchases > 0 {
+
+        // ── Demand velocity ────────────────────────────────────────────────
+        let velocity_per_hour = if recent_purchases > 0 {
             let window = if window_seconds == 0 {
                 1
             } else {
                 window_seconds
             };
-            let velocity_per_hour = (recent_purchases as u64).saturating_mul(3600) / window;
+            (recent_purchases as u64).saturating_mul(3600) / window
+        } else if curve.is_some() {
+            storage::get_demand_velocity_per_hour(&env, event_id)
+        } else {
+            0
+        };
 
-            let demand_multiplier_bps = if velocity_per_hour >= 50 {
-                13000
-            } else if velocity_per_hour >= 20 {
-                11500
-            } else if velocity_per_hour >= 10 {
-                10500
+        let demand_multiplier_bps: u32 = if let Some(curve) = curve.as_ref() {
+            let steps = if curve.demand_step_threshold == 0 {
+                0
             } else {
-                10000
+                (velocity_per_hour / curve.demand_step_threshold as u64).min(
+                    curve.max_demand_steps as u64,
+                ) as u32
             };
+            10000u32.saturating_add(steps.saturating_mul(curve.demand_step_bps))
+        } else if velocity_per_hour >= 50 {
+            13000
+        } else if velocity_per_hour >= 20 {
+            11500
+        } else if velocity_per_hour >= 10 {
+            10500
+        } else {
+            10000
+        };
+        price = (price * demand_multiplier_bps as i128) / 10000;
 
-            price = (price * demand_multiplier_bps as i128) / 10000;
+        // ── Inventory scarcity ─────────────────────────────────────────────
+        // Only the organizer-configured curve drives scarcity; the platform
+        // default stays time-and-demand-only so no event is repriced just
+        // because its inventory is thin.
+        if let Some(curve) = curve.as_ref() {
+            let remaining = event.max_tickets.saturating_sub(event.tickets_sold);
+            if event.max_tickets > 0 && curve.scarcity_threshold_pct > 0 {
+                let remaining_pct = (remaining as u64).saturating_mul(100) / event.max_tickets as u64;
+                if remaining_pct <= curve.scarcity_threshold_pct as u64 {
+                    // Steps of `scarcity_threshold_pct` percentage points of
+                    // remaining inventory below the threshold, one step per
+                    // such band (floor: one step once at or below threshold).
+                    let band = curve.scarcity_threshold_pct as u64;
+                    let below = curve.scarcity_threshold_pct as u64 - remaining_pct;
+                    let steps = (below / band).saturating_add(1);
+                    let scarcity_multiplier_bps =
+                        10000u32.saturating_add((steps as u32).saturating_mul(curve.scarcity_step_bps));
+                    price = (price * scarcity_multiplier_bps as i128) / 10000;
+                }
+            }
+        }
+
+        // ── Bounds ─────────────────────────────────────────────────────────
+        if let Some(curve) = curve.as_ref() {
+            let floor = (event.ticket_price * curve.min_price_bps as i128) / 10000;
+            let cap = (event.ticket_price * curve.max_price_bps as i128) / 10000;
+            if price < floor {
+                price = floor;
+            }
+            if price > cap {
+                price = cap;
+            }
         }
 
         if price <= 0 {
@@ -1614,6 +1691,113 @@ impl LumentixContract {
         }
 
         Ok(price)
+    }
+
+    /// Configure the demand-and-scarcity pricing curve for an event and apply
+    /// it immediately against current live state (Issue #1451). Organizer only.
+    ///
+    /// Stores the curve, recomputes the price from the rolling demand window,
+    /// remaining inventory and time-to-event, records the decision, and
+    /// returns the new price.
+    pub fn apply_price_adjustment(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        curve: DynamicPricingCurve,
+    ) -> Result<i128, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        // Thresholds and step counts must be usable; a zero threshold would
+        // divide by zero, and a min above its max inverts the bounds.
+        if curve.demand_step_threshold == 0
+            || curve.scarcity_threshold_pct > 100
+            || curve.min_price_bps == 0
+            || curve.max_price_bps < curve.min_price_bps
+        {
+            return Err(LumentixError::InvalidPricingCurve);
+        }
+
+        storage::set_pricing_curve(&env, event_id, &curve);
+
+        let decision = Self::build_pricing_decision(&env, event_id)?;
+        storage::set_pricing_decision(&env, event_id, &decision);
+
+        PricingDecisionLogged::emit(
+            &env,
+            event_id,
+            decision.base_price,
+            decision.adjusted_price,
+            decision.price_tier.clone(),
+            decision.demand_velocity_per_hour,
+            decision.remaining_inventory,
+        );
+        DynamicPricingCurveSet::emit(
+            &env,
+            event_id,
+            organizer,
+            decision.adjusted_price,
+            decision.demand_velocity_per_hour,
+            decision.remaining_inventory,
+        );
+
+        Ok(decision.adjusted_price)
+    }
+
+    /// Recompute the current dynamic price, persist it as the event's latest
+    /// pricing decision, and emit it for indexers (Issue #1451). Organizer
+    /// only. Read-only counterpart is [`Self::get_pricing_decision`].
+    pub fn log_pricing_decision(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+    ) -> Result<PricingDecision, LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let decision = Self::build_pricing_decision(&env, event_id)?;
+        storage::set_pricing_decision(&env, event_id, &decision);
+
+        PricingDecisionLogged::emit(
+            &env,
+            event_id,
+            decision.base_price,
+            decision.adjusted_price,
+            decision.price_tier.clone(),
+            decision.demand_velocity_per_hour,
+            decision.remaining_inventory,
+        );
+
+        Ok(decision)
+    }
+
+    /// Read the most recent persisted pricing decision for an event.
+    pub fn get_pricing_decision(env: Env, event_id: u64) -> Option<PricingDecision> {
+        storage::get_pricing_decision(&env, event_id)
+    }
+
+    /// Shared computation behind [`Self::apply_price_adjustment`] and
+    /// [`Self::log_pricing_decision`].
+    fn build_pricing_decision(env: &Env, event_id: u64) -> Result<PricingDecision, LumentixError> {
+        let event = storage::get_event(env, event_id)?;
+        let adjusted_price = Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
+        let tier = Self::resolve_price_tier(env, event_id, &event)?;
+
+        Ok(PricingDecision {
+            event_id,
+            base_price: event.ticket_price,
+            adjusted_price,
+            price_tier: tier,
+            demand_velocity_per_hour: storage::get_demand_velocity_per_hour(env, event_id),
+            remaining_inventory: event.max_tickets.saturating_sub(event.tickets_sold),
+            decided_at: env.ledger().timestamp(),
+        })
     }
 
     /// Configure time-based pricing multipliers for an event. Organizer only.
@@ -7665,6 +7849,169 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // GEOGRAPHIC PURCHASE RESTRICTIONS (Issue #1448)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// Set (or replace) the geo-fence rules for an event. Organizer only.
+    ///
+    /// Regions are ISO 3166-1 alpha-2 country codes; lowercase input is
+    /// normalized to uppercase. When `enabled` is true the region list must
+    /// be non-empty and every entry well-formed. Disabling keeps the stored
+    /// list so an organizer can turn restrictions off without re-entering
+    /// them later.
+    pub fn set_geo_fence_rules(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        rules: GeoFenceRules,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        let event = storage::get_event(&env, event_id)?;
+        if event.organizer != organizer {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        if rules.regions.is_empty() {
+            return Err(LumentixError::InvalidGeoFenceRules);
+        }
+
+        // Normalize first so "us" is accepted wherever "US" is, then validate.
+        let mut normalized_regions = Vec::new(&env);
+        for region in rules.regions.iter() {
+            let normalized = validation::normalize_country_code(&env, &region);
+            validation::validate_country_code(&normalized)?;
+            normalized_regions.push_back(normalized);
+        }
+
+        let normalized = GeoFenceRules {
+            enabled: rules.enabled,
+            mode: rules.mode.clone(),
+            regions: normalized_regions,
+        };
+        let region_count = normalized.regions.len();
+        storage::set_geo_fence_rules(&env, event_id, &normalized);
+
+        GeoFenceRulesSet::emit(
+            &env,
+            event_id,
+            organizer,
+            normalized.enabled,
+            normalized.mode,
+            region_count,
+        );
+
+        Ok(())
+    }
+
+    /// Read the geo-fence rules for an event, if any.
+    pub fn get_geo_fence_rules(env: Env, event_id: u64) -> Option<GeoFenceRules> {
+        storage::get_geo_fence_rules(&env, event_id)
+    }
+
+    /// Check a country code against the event's geo-fence without recording
+    /// anything. Returns `Ok(true)` when purchases from that region are
+    /// allowed, `Ok(false)` when blocked, and `Ok(true)` when no rules are
+    /// configured. Empty or malformed codes are rejected outright so a
+    /// caller cannot bypass a fence by passing garbage.
+    pub fn validate_buyer_location(
+        env: Env,
+        event_id: u64,
+        country_code: String,
+    ) -> Result<bool, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+
+        let normalized = validation::normalize_country_code(&env, &country_code);
+        validation::validate_country_code(&normalized)?;
+
+        match storage::get_geo_fence_rules(&env, event_id) {
+            Some(rules) if rules.enabled => Ok(Self::region_permitted(&rules, &normalized)),
+            _ => Ok(true),
+        }
+    }
+
+    /// Attest and record the buyer's region for an event, enforcing the
+    /// event's geo-fence in the same step (Issue #1448). The buyer must sign,
+    /// since the attestation is what later gates [`Self::purchase_ticket`].
+    /// Allowed regions are persisted per buyer so the purchase flow can check
+    /// them without the buyer re-supplying a country code.
+    pub fn enforce_geo_restriction(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        country_code: String,
+    ) -> Result<(), LumentixError> {
+        buyer.require_auth();
+        let _ = storage::get_event(&env, event_id)?;
+
+        let normalized = validation::normalize_country_code(&env, &country_code);
+        validation::validate_country_code(&normalized)?;
+
+        match storage::get_geo_fence_rules(&env, event_id) {
+            Some(rules) if rules.enabled => {
+                if !Self::region_permitted(&rules, &normalized) {
+                    BuyerGeoRejected::emit(&env, event_id, buyer, normalized);
+                    return Err(LumentixError::BuyerLocationNotAllowed);
+                }
+                storage::set_buyer_geo_location(&env, event_id, &buyer, &normalized);
+                BuyerGeoVerified::emit(&env, event_id, buyer, normalized);
+                Ok(())
+            }
+            // No active fence: record the attestation anyway so organizers
+            // retain an audit trail, but nothing is blocked.
+            _ => {
+                storage::set_buyer_geo_location(&env, event_id, &buyer, &normalized);
+                BuyerGeoVerified::emit(&env, event_id, buyer, normalized);
+                Ok(())
+            }
+        }
+    }
+
+    /// Read a buyer's recorded region for an event, if any.
+    pub fn get_buyer_location(env: Env, event_id: u64, buyer: Address) -> Option<String> {
+        storage::get_buyer_geo_location(&env, event_id, &buyer)
+    }
+
+    /// Gate a purchase against the event's geo-fence using the buyer's
+    /// previously recorded attestation. Called from the purchase flows.
+    fn check_purchase_geo(
+        env: &Env,
+        buyer: &Address,
+        event_id: u64,
+    ) -> Result<(), LumentixError> {
+        let rules = match storage::get_geo_fence_rules(env, event_id) {
+            Some(rules) if rules.enabled => rules,
+            _ => return Ok(()),
+        };
+
+        let country = match storage::get_buyer_geo_location(env, event_id, buyer) {
+            Some(country) => country,
+            None => return Err(LumentixError::BuyerLocationRequired),
+        };
+
+        if Self::region_permitted(&rules, &country) {
+            Ok(())
+        } else {
+            BuyerGeoRejected::emit(env, event_id, buyer.clone(), country);
+            Err(LumentixError::BuyerLocationNotAllowed)
+        }
+    }
+
+    /// Apply allowlist/blocklist semantics to one normalized country code.
+    fn region_permitted(rules: &GeoFenceRules, country_code: &String) -> bool {
+        let mut listed = false;
+        for region in rules.regions.iter() {
+            if region == *country_code {
+                listed = true;
+                break;
+            }
+        }
+        match rules.mode {
+            GeoRestrictionMode::Allowlist => listed,
+            GeoRestrictionMode::Blocklist => !listed,
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // Offline Ticket Validation (#984)
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -7882,117 +8229,6 @@ impl LumentixContract {
         buf.append(&owner.to_xdr(env));
         buf.extend_from_array(&issued_at.to_be_bytes());
         env.crypto().sha256(&buf).to_bytes()
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CROSS-EVENT PASS PACKAGES (Issue #1198)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// Create a new cross-event pass package granting the `owner` entry into
-    /// any `total_allowance` of the listed `eligible_event_ids`.
-    ///
-    /// Only the organizer can create packages, and every listed event must
-    /// belong to that organizer. The package is active from creation until
-    /// `expires_at` (a ledger timestamp).
-    ///
-    /// Returns the new `package_id`.
-    pub fn create_pass_package(
-        env: Env,
-        organizer: Address,
-        owner: Address,
-        eligible_event_ids: Vec<u64>,
-        total_allowance: u32,
-        expires_at: u64,
-    ) -> Result<u64, LumentixError> {
-        organizer.require_auth();
-
-        if eligible_event_ids.len() == 0 || total_allowance == 0 {
-            return Err(LumentixError::InvalidPassPackageConfig);
-        }
-
-        // Verify all events belong to this organizer.
-        for event_id in eligible_event_ids.iter() {
-            let event = storage::get_event(&env, event_id)?;
-            if event.organizer != organizer {
-                return Err(LumentixError::Unauthorized);
-            }
-        }
-
-        let package_id = storage::get_next_pass_package_id(&env);
-        storage::increment_pass_package_id(&env);
-
-        let now = env.ledger().timestamp();
-        let package = PassPackage {
-            package_id,
-            owner: owner.clone(),
-            organizer,
-            eligible_events: eligible_event_ids,
-            total_allowance,
-            remaining_allowance: total_allowance,
-            created_at: now,
-            expires_at,
-            active: true,
-        };
-
-        storage::set_pass_package(&env, package_id, &package);
-        PassPackageCreated::emit(&env, package_id, owner, total_allowance);
-
-        Ok(package_id)
-    }
-
-    /// Deduct one allowance from `package_id` to grant `owner` entry into
-    /// `event_id`. Enforces: ownership, expiry, eligibility, and exhaustion
-    /// checks. Returns the updated `remaining_allowance`.
-    pub fn deduct_pass_allowance(
-        env: Env,
-        owner: Address,
-        package_id: u64,
-        event_id: u64,
-    ) -> Result<u32, LumentixError> {
-        owner.require_auth();
-
-        let mut package = storage::get_pass_package(&env, package_id)?;
-
-        if package.owner != owner {
-            return Err(LumentixError::Unauthorized);
-        }
-
-        let now = env.ledger().timestamp();
-        if !package.active || now > package.expires_at {
-            return Err(LumentixError::PassPackageExpired);
-        }
-
-        if package.remaining_allowance == 0 {
-            return Err(LumentixError::PassPackageExhausted);
-        }
-
-        // Verify the event is part of this package.
-        let mut eligible = false;
-        for eid in package.eligible_events.iter() {
-            if eid == event_id {
-                eligible = true;
-                break;
-            }
-        }
-        if !eligible {
-            return Err(LumentixError::PassPackageEventNotEligible);
-        }
-
-        package.remaining_allowance = package.remaining_allowance.saturating_sub(1);
-        storage::set_pass_package(&env, package_id, &package);
-
-        PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
-
-        Ok(package.remaining_allowance)
-    }
-
-    /// Return `(remaining_allowance, eligible_events)` for `package_id`.
-    pub fn check_pass_balance(
-        env: Env,
-        package_id: u64,
-    ) -> Result<(u32, Vec<u64>), LumentixError> {
-        let package = storage::get_pass_package(&env, package_id)?;
-        Ok((package.remaining_allowance, package.eligible_events))
     }
 
     /// Validate and apply one offline scan.

@@ -293,6 +293,67 @@ pub struct PricingSchedule {
     pub last_minute_hours: u32,
 }
 
+/// Organizer-configurable demand and scarcity curve for dynamic pricing
+/// (Issue #1451). All multipliers are basis points applied on top of the
+/// time-based tier multiplier; `min_price_bps` / `max_price_bps` bound the
+/// final price relative to the event's base price.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DynamicPricingCurve {
+    /// Extra basis points added per demand step.
+    pub demand_step_bps: u32,
+    /// Sales-per-hour that constitutes one demand step.
+    pub demand_step_threshold: u32,
+    /// Upper bound on how many demand steps may stack.
+    pub max_demand_steps: u32,
+    /// Extra basis points added per scarcity step.
+    pub scarcity_step_bps: u32,
+    /// Remaining-inventory percentage at or below which scarcity pricing
+    /// starts to apply (e.g. 20 means the top 20% of inventory).
+    pub scarcity_threshold_pct: u32,
+    /// Floor for the adjusted price, as basis points of the base price.
+    pub min_price_bps: u32,
+    /// Cap for the adjusted price, as basis points of the base price.
+    pub max_price_bps: u32,
+}
+
+/// The most recent dynamic-pricing outcome for an event, recorded whenever a
+/// price adjustment is applied or a decision is logged (Issue #1451).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PricingDecision {
+    pub event_id: u64,
+    pub base_price: i128,
+    pub adjusted_price: i128,
+    pub price_tier: PriceTier,
+    pub demand_velocity_per_hour: u64,
+    pub remaining_inventory: u32,
+    pub decided_at: u64,
+}
+
+// ── Geo-fencing ────────────────────────────────────────────────────────────
+
+/// Whether listed regions are the only ones allowed or the only ones blocked
+/// (Issue #1448).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GeoRestrictionMode {
+    /// Only buyers in the listed regions may purchase.
+    Allowlist,
+    /// Buyers in the listed regions may not purchase.
+    Blocklist,
+}
+
+/// Per-event geographic purchase restrictions (Issue #1448). Regions are
+/// ISO 3166-1 alpha-2 country codes in uppercase (e.g. "US", "NG", "GB").
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GeoFenceRules {
+    pub enabled: bool,
+    pub mode: GeoRestrictionMode,
+    pub regions: Vec<String>,
+}
+
 /// Rolling batch-mint resource usage snapshot for fee optimization.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

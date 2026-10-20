@@ -1942,3 +1942,99 @@ impl EscrowSplitDisputed {
         );
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dynamic pricing curve events (Issue #1451)
+// ═══════════════════════════════════════════════════════════════════════════
+
+use crate::types::{GeoRestrictionMode, PriceTier};
+
+/// Emitted whenever an organizer applies a dynamic pricing curve adjustment.
+pub struct DynamicPricingCurveSet;
+impl DynamicPricingCurveSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        new_price: i128,
+        demand_velocity_per_hour: u64,
+        remaining_inventory: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("pricecrv"),),
+            (
+                event_id,
+                organizer,
+                new_price,
+                demand_velocity_per_hour,
+                remaining_inventory,
+            ),
+        );
+    }
+}
+
+/// Emitted every time a dynamic price decision is computed and recorded.
+pub struct PricingDecisionLogged;
+impl PricingDecisionLogged {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        base_price: i128,
+        adjusted_price: i128,
+        price_tier: PriceTier,
+        demand_velocity_per_hour: u64,
+        remaining_inventory: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("pricedec"),),
+            (
+                event_id,
+                base_price,
+                adjusted_price,
+                price_tier,
+                demand_velocity_per_hour,
+                remaining_inventory,
+            ),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Geographic purchase restriction events (Issue #1448)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer sets or replaces an event's geo-fence rules.
+pub struct GeoFenceRulesSet;
+impl GeoFenceRulesSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        enabled: bool,
+        mode: GeoRestrictionMode,
+        region_count: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("geofence"),),
+            (event_id, organizer, enabled, mode, region_count),
+        );
+    }
+}
+
+/// Emitted when a buyer's attested region passes the event's geo-fence.
+pub struct BuyerGeoVerified;
+impl BuyerGeoVerified {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, country_code: String) {
+        env.events()
+            .publish((symbol_short!("geook"),), (event_id, buyer, country_code));
+    }
+}
+
+/// Emitted when a buyer's attested region is blocked by the event's geo-fence.
+pub struct BuyerGeoRejected;
+impl BuyerGeoRejected {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, country_code: String) {
+        env.events()
+            .publish((symbol_short!("georej"),), (event_id, buyer, country_code));
+    }
+}
