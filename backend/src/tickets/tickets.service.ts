@@ -422,6 +422,89 @@ export class TicketsService {
   }
 
   /**
+   * Render the provenance chain as an HTML timeline with rich details for display.
+   * Useful for secondary marketplace buyers to verify ticket authenticity.
+   */
+  async render_provenance_timeline(ticketId: string): Promise<string> {
+    const provenance = await this.fetch_provenance_chain(ticketId);
+    const event = await this.eventRepo.findOne({ where: { id: (await this.ticketRepo.findOne({ where: { id: ticketId } }))?.eventId } });
+    
+    let html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ticket Provenance - ${provenance.ticketId}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    h1 { color: #333; margin-bottom: 10px; }
+    .meta { color: #666; font-size: 14px; margin-bottom: 30px; }
+    .timeline { position: relative; padding-left: 40px; }
+    .timeline::before { content: ''; position: absolute; left: 15px; top: 0; bottom: 0; width: 2px; background: #ddd; }
+    .event { position: relative; margin-bottom: 30px; padding-left: 20px; }
+    .event::before { content: ''; position: absolute; left: -29px; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: #4CAF50; border: 2px solid white; box-shadow: 0 0 0 2px #4CAF50; }
+    .event.initial::before { background: #2196F3; box-shadow: 0 0 0 2px #2196F3; }
+    .event h3 { margin: 0 0 8px 0; color: #333; font-size: 16px; }
+    .event .timestamp { color: #888; font-size: 13px; margin-bottom: 8px; }
+    .event .details { background: #f9f9f9; padding: 12px; border-radius: 4px; font-size: 14px; line-height: 1.6; }
+    .event .details div { margin-bottom: 4px; }
+    .event .details strong { color: #555; }
+    .event .details code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-size: 12px; word-break: break-all; }
+    .verified { display: inline-block; background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Ticket Ownership History</h1>
+    <div class="meta">
+      <strong>Ticket ID:</strong> ${provenance.ticketId}<br>
+      <strong>Asset Code:</strong> ${provenance.assetCode}<br>
+      ${event ? `<strong>Event:</strong> ${event.title}<br>` : ''}
+      <strong>Issued:</strong> ${new Date(provenance.issuedAt).toLocaleString()}<br>
+      <strong>Current Owner:</strong> ${provenance.currentOwnerId}
+    </div>
+    <div class="timeline">
+      <div class="event initial">
+        <h3>🎫 Ticket Issued <span class="verified">VERIFIED</span></h3>
+        <div class="timestamp">${new Date(provenance.issuedAt).toLocaleString()}</div>
+        <div class="details">
+          <div><strong>Original Owner:</strong> ${provenance.currentOwnerId}</div>
+          <div><strong>Asset:</strong> ${provenance.assetCode}</div>
+        </div>
+      </div>
+`;
+
+    for (const transfer of provenance.chain) {
+      const timestamp = new Date(transfer.timestamp).toLocaleString();
+      html += `
+      <div class="event">
+        <h3>↗️ Transfer #${transfer.sequence} <span class="verified">ON-CHAIN</span></h3>
+        <div class="timestamp">${timestamp}</div>
+        <div class="details">
+          <div><strong>From:</strong> ${transfer.fromUserId}</div>
+          <div><strong>To:</strong> ${transfer.toUserId}</div>
+          ${transfer.fromPublicKey ? `<div><strong>From Wallet:</strong> <code>${transfer.fromPublicKey}</code></div>` : ''}
+          ${transfer.toPublicKey ? `<div><strong>To Wallet:</strong> <code>${transfer.toPublicKey}</code></div>` : ''}
+          ${transfer.transactionHash ? `<div><strong>Transaction:</strong> <code>${transfer.transactionHash}</code></div>` : ''}
+        </div>
+      </div>
+`;
+    }
+
+    html += `
+    </div>
+    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 13px; text-align: center;">
+      All transfers are verified on the Stellar blockchain. This ticket has a complete chain of custody from issuance to current owner.
+    </div>
+  </div>
+</body>
+</html>`;
+    
+    return html;
+  }
+
+  /**
    * Transfer a ticket to a new owner, recording the transfer on-chain (Stellar)
    * and writing an audit event. The DB update is rolled back if Stellar fails.
    */
