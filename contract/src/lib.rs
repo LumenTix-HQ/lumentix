@@ -318,6 +318,7 @@ pub use events::{
     ReplayAttemptRejected, IdempotencyKeyRegistered,
     HeatmapConfigured, ScanPositionsAggregated, HeatmapCongestionDetected,
     ExchangeRateLocked, CheckoutCurrencyConverted,
+    RoyaltySplitsSet, RoyaltiesDistributed,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};

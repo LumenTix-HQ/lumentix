@@ -8713,4 +8713,61 @@ impl LumentixContract {
     ) -> Result<crate::currency_conversion::RateLock, LumentixError> {
         crate::currency_conversion::get_rate_lock(&env, lock_id)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ON-CHAIN ROYALTY SPLITS (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configure how an event's revenue is split between its artists.
+    ///
+    /// `splits` maps each artist wallet to a share in basis points and must sum
+    /// to 10 000. Only the event's organizer or the contract admin may set it;
+    /// setting it again replaces the previous splits.
+    pub fn set_royalty_splits(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        splits: Map<Address, u32>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::royalty::set_royalty_splits(&env, event_id, splits)
+    }
+
+    /// Read the royalty splits configured for an event.
+    pub fn get_royalty_splits(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Map<Address, u32>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::royalty::get_royalty_splits(&env, event_id)
+    }
+
+    /// Pay `total_amount` of an event's escrow out to its artists according to
+    /// the configured splits.
+    ///
+    /// Only the event's organizer or the contract admin may distribute, and a
+    /// cancelled event's escrow is reserved for refunds. Returns the amount each
+    /// artist received; the amounts always add up to `total_amount`.
+    pub fn distribute_royalties(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        total_amount: i128,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        crate::royalty::distribute_royalties(&env, event_id, total_amount)
+    }
+
+    /// Cumulative royalties paid to each artist of an event.
+    pub fn query_royalty_ledger(env: Env, event_id: u64) -> Map<Address, i128> {
+        crate::royalty::query_royalty_ledger(&env, event_id)
+    }
 }

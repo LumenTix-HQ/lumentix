@@ -2109,3 +2109,23 @@ impl CheckoutCurrencyConverted {
         );
     }
 }
+
+/// Emitted when an organizer sets or replaces an event's royalty splits (Issue #1206).
+pub struct RoyaltySplitsSet;
+impl RoyaltySplitsSet {
+    pub fn emit(env: &Env, event_id: u64, total_bps: u32) {
+        env.events()
+            .publish((Symbol::new(env, "royalty_splits_set"),), (event_id, total_bps));
+    }
+}
+
+/// Emitted when escrow revenue is paid out to an event's artists (Issue #1206).
+pub struct RoyaltiesDistributed;
+impl RoyaltiesDistributed {
+    pub fn emit(env: &Env, event_id: u64, total_amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "royalties_distributed"),),
+            (event_id, total_amount),
+        );
+    }
+}
