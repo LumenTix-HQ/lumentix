@@ -593,4 +593,16 @@ pub enum LumentixError {
     InvalidIdempotencyKey = 278,
     /// Nonce is not greater than the last consumed nonce for the account
     NonceOutOfOrder = 279,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Attendee heatmap errors (Issue #1499)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No heatmap grid has been configured for the event
+    HeatmapNotConfigured = 280,
+    /// Heatmap grid has a zero or oversized dimension, tile size or threshold
+    InvalidHeatmapConfig = 281,
+    /// A scanned position falls outside the configured heatmap grid
+    ScanPositionOutOfBounds = 282,
+    /// Scan batch is empty or larger than the per-call limit
+    InvalidScanBatch = 283,
 }

@@ -2038,3 +2038,37 @@ impl BuyerGeoRejected {
             .publish((symbol_short!("georej"),), (event_id, buyer, country_code));
     }
 }
+
+/// Emitted when an organizer configures an event's attendee heatmap grid (Issue #1499).
+pub struct HeatmapConfigured;
+impl HeatmapConfigured {
+    pub fn emit(env: &Env, event_id: u64, grid_width: u32, grid_height: u32, tile_size: u32) {
+        env.events().publish(
+            (Symbol::new(env, "heatmap_configured"),),
+            (event_id, grid_width, grid_height, tile_size),
+        );
+    }
+}
+
+/// Emitted when a batch of scan positions is folded into the heatmap (Issue #1499).
+/// Subscribers poll `stream_heatmap_updates` with the previous sequence on seeing it.
+pub struct ScanPositionsAggregated;
+impl ScanPositionsAggregated {
+    pub fn emit(env: &Env, event_id: u64, sequence: u64, positions: u32, tiles_touched: u32) {
+        env.events().publish(
+            (Symbol::new(env, "scan_positions_aggregated"),),
+            (event_id, sequence, positions, tiles_touched),
+        );
+    }
+}
+
+/// Emitted when a heatmap tile crosses its congestion threshold (Issue #1499).
+pub struct HeatmapCongestionDetected;
+impl HeatmapCongestionDetected {
+    pub fn emit(env: &Env, event_id: u64, tile_x: u32, tile_y: u32, count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "heatmap_congestion"),),
+            (event_id, tile_x, tile_y, count),
+        );
+    }
+}

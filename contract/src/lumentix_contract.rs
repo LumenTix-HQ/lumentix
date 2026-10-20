@@ -8531,4 +8531,104 @@ impl LumentixContract {
         crate::escrow_split::get_event_escrow_split(&env, event_id)
             .ok_or(LumentixError::EscrowSplitNotFound)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ATTENDEE HEATMAP (Issue #1499)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configure the heatmap grid laid over an event's venue map.
+    ///
+    /// `tile_size` is the edge of one tile in venue-map units, the grid is
+    /// `grid_width` x `grid_height` tiles, and a tile holding
+    /// `congestion_threshold` attendees reads as congested. Only the event's
+    /// organizer or the contract admin may configure it. Reconfiguring clears
+    /// the stored tiles.
+    pub fn configure_heatmap(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        tile_size: u32,
+        grid_width: u32,
+        grid_height: u32,
+        congestion_threshold: u32,
+    ) -> Result<crate::heatmap::HeatmapConfig, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::heatmap::configure_heatmap(
+            &env,
+            event_id,
+            tile_size,
+            grid_width,
+            grid_height,
+            congestion_threshold,
+        )
+    }
+
+    /// Read the heatmap grid configuration for an event.
+    pub fn get_heatmap_config(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::heatmap::HeatmapConfig, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::get_heatmap_config(&env, event_id)
+    }
+
+    /// Fold a batch of scanner positions into the event's heatmap.
+    ///
+    /// With `reset` true the batch is a full snapshot of current attendee
+    /// positions and replaces the counts; otherwise it is added to them.
+    /// Returns the new heatmap sequence number. Only the event's organizer or
+    /// the contract admin may report positions.
+    pub fn aggregate_scan_positions(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        positions: Vec<crate::heatmap::ScanPosition>,
+        reset: bool,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::heatmap::aggregate_scan_positions(&env, event_id, positions, reset)
+    }
+
+    /// Density overlay tiles for the event's interactive venue map.
+    pub fn generate_heatmap_tiles(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<crate::heatmap::HeatmapTile>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::generate_heatmap_tiles(&env, event_id)
+    }
+
+    /// Tiles changed since `since_sequence`, for keeping the overlay live.
+    ///
+    /// Start from 0, then pass the returned `to_sequence` on the next poll.
+    pub fn stream_heatmap_updates(
+        env: Env,
+        event_id: u64,
+        since_sequence: u64,
+    ) -> Result<crate::heatmap::HeatmapUpdate, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::stream_heatmap_updates(&env, event_id, since_sequence)
+    }
+
+    /// Shared guard: contract initialised, event exists, caller is its
+    /// organizer or the contract admin.
+    fn require_event_organizer_or_admin(
+        env: &Env,
+        event_id: u64,
+        caller: &Address,
+    ) -> Result<Event, LumentixError> {
+        if !storage::is_initialized(env) {
+            return Err(LumentixError::NotInitialized);
+        }
+
+        let event = storage::get_event(env, event_id)?;
+        if event.organizer != *caller && storage::get_admin(env) != *caller {
+            return Err(LumentixError::Unauthorized);
+        }
+        Ok(event)
+    }
 }
