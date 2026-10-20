@@ -2072,3 +2072,40 @@ impl HeatmapCongestionDetected {
         );
     }
 }
+
+/// Emitted when a buyer pins an exchange rate for checkout (Issue #1500).
+pub struct ExchangeRateLocked;
+impl ExchangeRateLocked {
+    pub fn emit(
+        env: &Env,
+        lock_id: u64,
+        event_id: u64,
+        buyer: Address,
+        buyer_currency: String,
+        rate: i128,
+        expires_at: u64,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "exchange_rate_locked"),),
+            (lock_id, event_id, buyer, buyer_currency, rate, expires_at),
+        );
+    }
+}
+
+/// Emitted when a checkout is priced in the buyer's currency (Issue #1500).
+pub struct CheckoutCurrencyConverted;
+impl CheckoutCurrencyConverted {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        buyer: Address,
+        buyer_currency: String,
+        buyer_amount: i128,
+        settlement_amount: i128,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "checkout_currency_converted"),),
+            (event_id, buyer, buyer_currency, buyer_amount, settlement_amount),
+        );
+    }
+}

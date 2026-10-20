@@ -605,4 +605,16 @@ pub enum LumentixError {
     ScanPositionOutOfBounds = 282,
     /// Scan batch is empty or larger than the per-call limit
     InvalidScanBatch = 283,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Checkout currency conversion errors (Issue #1500)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// An oracle price backing the exchange rate is older than the allowed age
+    StaleExchangeRate = 284,
+    /// No exchange-rate lock matches the given ID, event and currency
+    ExchangeRateLockNotFound = 285,
+    /// The exchange-rate lock's window has passed
+    ExchangeRateLockExpired = 286,
+    /// The exchange-rate lock has already been used for a checkout
+    ExchangeRateLockConsumed = 287,
 }

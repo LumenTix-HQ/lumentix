@@ -234,6 +234,7 @@ pub mod venue_capacity;
 pub mod achievement_badge;
 pub mod replay_protection;
 pub mod heatmap;
+pub mod currency_conversion;
 
 #[cfg(test)]
 pub mod test;
@@ -277,6 +278,9 @@ mod geo_fence_tests;
 #[cfg(test)]
 mod heatmap_tests;
 
+#[cfg(test)]
+mod currency_conversion_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
@@ -313,6 +317,7 @@ pub use events::{
     GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
     ReplayAttemptRejected, IdempotencyKeyRegistered,
     HeatmapConfigured, ScanPositionsAggregated, HeatmapCongestionDetected,
+    ExchangeRateLocked, CheckoutCurrencyConverted,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -335,6 +340,7 @@ pub use types::{
     TokenGateConfig, TokenGateEligibility,
     DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
 };
+pub use currency_conversion::{CheckoutConversion, ExchangeRate, RateLock};
 pub use heatmap::{HeatmapConfig, HeatmapTile, HeatmapUpdate, ScanPosition};
 pub use replay_protection::{
     generate_transaction_nonce, validate_idempotency_key, reject_replay_attempt,

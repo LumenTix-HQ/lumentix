@@ -8631,4 +8631,86 @@ impl LumentixContract {
         }
         Ok(event)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CHECKOUT CURRENCY CONVERSION (Issue #1500)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Current exchange rate from `from_currency` to `to_currency`, as units of
+    /// the latter per unit of the former scaled by 10^7.
+    ///
+    /// Both currencies must be registered through `set_currency_oracle` with a
+    /// price no older than an hour.
+    pub fn fetch_live_exchange_rate(
+        env: Env,
+        from_currency: String,
+        to_currency: String,
+    ) -> Result<crate::currency_conversion::ExchangeRate, LumentixError> {
+        crate::currency_conversion::fetch_live_exchange_rate(&env, &from_currency, &to_currency)
+    }
+
+    /// Pin the rate between an event's currency and the buyer's chosen
+    /// currency for five minutes, so the price the buyer confirms is the price
+    /// they are charged. Returns the lock to hand to `convert_checkout_currency`.
+    pub fn lock_exchange_rate(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        buyer_currency: String,
+    ) -> Result<crate::currency_conversion::RateLock, LumentixError> {
+        buyer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        validation::validate_currency_code(&buyer_currency)?;
+
+        crate::currency_conversion::lock_exchange_rate(
+            &env,
+            &buyer,
+            event_id,
+            &event.currency,
+            &buyer_currency,
+        )
+    }
+
+    /// Price a ticket checkout in the buyer's preferred currency while the
+    /// organizer stays settled in the event's currency.
+    ///
+    /// The settlement amount is the event's current ticket price. Pass the
+    /// `lock_id` from `lock_exchange_rate` to charge the locked rate, or
+    /// `None` to use the live one. The returned `settlement_amount` is what
+    /// the organizer receives and what `purchase_ticket` takes; `buyer_amount`
+    /// is what the buyer pays in their own currency.
+    pub fn convert_checkout_currency(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        buyer_currency: String,
+        lock_id: Option<u64>,
+    ) -> Result<crate::currency_conversion::CheckoutConversion, LumentixError> {
+        buyer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        validation::validate_currency_code(&buyer_currency)?;
+
+        let settlement_amount =
+            Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
+
+        crate::currency_conversion::convert_checkout_currency(
+            &env,
+            &buyer,
+            event_id,
+            &event.currency,
+            &buyer_currency,
+            settlement_amount,
+            lock_id,
+        )
+    }
+
+    /// Read an exchange-rate lock.
+    pub fn get_exchange_rate_lock(
+        env: Env,
+        lock_id: u64,
+    ) -> Result<crate::currency_conversion::RateLock, LumentixError> {
+        crate::currency_conversion::get_rate_lock(&env, lock_id)
+    }
 }
