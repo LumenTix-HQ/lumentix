@@ -355,3 +355,9 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
+
+// ── Issue #1462 snake_case function exports / aliases ───────────────────────
+self.precache_event_data = precacheEventData;
+self.serve_offline_listing = serveOfflineListing;
+self.queue_background_sync = queueBackgroundSync;
+
