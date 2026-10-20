@@ -300,6 +300,36 @@ export class GiftingService {
     };
   }
 
+  // ── Issue #1466 aliases ────────────────────────────────────────────────────
+
+  async wrap_ticket_gift(
+    ticketId: string,
+    senderId: string,
+    input: {
+      recipientId: string;
+      message?: string;
+      wrapStyle?: GiftWrapStyle;
+      scheduledFor?: Date;
+    },
+  ): Promise<GiftWrapResult> {
+    return this.wrapTicketGift(ticketId, senderId, input);
+  }
+
+  async schedule_gift_delivery(
+    giftId: string,
+    senderId: string,
+    scheduledFor: Date,
+  ): Promise<GiftWrapResult> {
+    return this.scheduleGiftDelivery(giftId, senderId, scheduledFor);
+  }
+
+  async unwrap_gift_animation(
+    giftId: string,
+    userId: string,
+  ): Promise<UnwrapAnimation> {
+    return this.unwrapGiftAnimation(giftId, userId);
+  }
+
   /**
    * Cancel a gift that has not landed yet. The ticket never left the sender,
    * so there is nothing to reverse.
