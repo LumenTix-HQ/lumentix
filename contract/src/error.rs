@@ -583,4 +583,14 @@ pub enum LumentixError {
     BuyerLocationRequired = 275,
     /// Buyer's region is not permitted by the event's geo-fence rules
     BuyerLocationNotAllowed = 276,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Smart contract event replay protection errors (Issue #1473)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Duplicate transaction detected: nonce already consumed or idempotency key reused
+    ReplayAttempt = 277,
+    /// Idempotency key is malformed or empty
+    InvalidIdempotencyKey = 278,
+    /// Nonce is not greater than the last consumed nonce for the account
+    NonceOutOfOrder = 279,
 }

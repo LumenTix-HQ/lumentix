@@ -2676,6 +2676,8 @@ pub fn has_offline_scan_synced(env: &Env, ticket_id: u64) -> bool {
 
 const TX_NONCE_PREFIX: &str = "TXNONCE_";
 const IDEMPOTENCY_KEY_PREFIX: &str = "IDEMKEY_";
+const TX_NONCE_SYMBOL: &str = "tx_nonce";
+const IDEM_KEY_SYMBOL: &str = "idem_key";
 
 /// Returns the next nonce that would be issued to `account`, without
 /// consuming it. Useful for a client to preview the value it should embed
@@ -2710,6 +2712,53 @@ pub fn is_idempotency_key_used(env: &Env, account: &Address, key: &BytesN<32>) -
 /// a replay. Callers should check `is_idempotency_key_used` first.
 pub fn consume_idempotency_key(env: &Env, account: &Address, key: &BytesN<32>) {
     let storage_key = (IDEMPOTENCY_KEY_PREFIX, account.clone(), key.clone());
+    env.storage().persistent().set(&storage_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Replay protection: per-account nonce & idempotency key (Issue #1473)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Read the current nonce for `account` (0 when the account has never
+/// submitted a nonce-protected transaction).
+pub fn get_account_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_SYMBOL, account.clone());
+    let nonce: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    nonce
+}
+
+/// Persist the next nonce for `account`.
+pub fn set_account_nonce(env: &Env, account: &Address, nonce: u64) {
+    let key = (TX_NONCE_SYMBOL, account.clone());
+    env.storage().persistent().set(&key, &nonce);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether an idempotency key has already been consumed.
+pub fn has_idempotency_key(env: &Env, key: &String) -> bool {
+    let storage_key = (IDEM_KEY_SYMBOL, key.clone());
+    let has = env.storage().persistent().has(&storage_key);
+    if has {
+        env.storage()
+            .persistent()
+            .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    has
+}
+
+/// Mark an idempotency key as consumed so a later replay is rejected.
+pub fn consume_idempotency_key_str(env: &Env, key: &String) {
+    let storage_key = (IDEM_KEY_SYMBOL, key.clone());
     env.storage().persistent().set(&storage_key, &true);
     env.storage()
         .persistent()

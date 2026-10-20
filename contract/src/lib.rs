@@ -232,6 +232,7 @@ pub mod types;
 pub mod validation;
 pub mod venue_capacity;
 pub mod achievement_badge;
+pub mod replay_protection;
 
 #[cfg(test)]
 pub mod test;
@@ -306,6 +307,7 @@ pub use events::{
     EscrowSplitCreated, EscrowSplitReleased, EscrowSplitDisputed,
     DynamicPricingCurveSet, PricingDecisionLogged,
     GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
+    ReplayAttemptRejected, IdempotencyKeyRegistered,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -327,4 +329,8 @@ pub use types::{
     ServiceHealthStatus, SystemHealthStatus, MetricDatapoint, TelemetryStatus,
     TokenGateConfig, TokenGateEligibility,
     DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
+};
+pub use replay_protection::{
+    generate_transaction_nonce, validate_idempotency_key, reject_replay_attempt,
+    ReplayProtectionConfig, TransactionNonce, IdempotencyKeyRecord,
 };
