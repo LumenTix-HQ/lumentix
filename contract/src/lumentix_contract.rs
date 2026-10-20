@@ -8770,4 +8770,134 @@ impl LumentixContract {
     pub fn query_royalty_ledger(env: Env, event_id: u64) -> Map<Address, i128> {
         crate::royalty::query_royalty_ledger(&env, event_id)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // LIVESTREAM CHAT MODERATION (Issue #1501)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Run a livestream chat message through the event's moderation rules.
+    ///
+    /// Returns a verdict instead of failing, so the violation a filtered
+    /// message records is kept. The organizer and contract admin are never
+    /// moderated. Rules apply in order: ban, mute, word filter, slow mode.
+    pub fn moderate_chat_message(
+        env: Env,
+        sender: Address,
+        event_id: u64,
+        message: String,
+    ) -> Result<crate::chat_moderation::ModerationVerdict, LumentixError> {
+        sender.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        let exempt = event.organizer == sender || storage::get_admin(&env) == sender;
+
+        crate::chat_moderation::moderate_chat_message(&env, event_id, &sender, &message, exempt)
+    }
+
+    /// Set the minimum seconds between one user's chat messages; 0 turns slow
+    /// mode off. Organizer or admin only.
+    pub fn set_slow_mode(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        seconds: u32,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::set_slow_mode(&env, event_id, seconds)
+    }
+
+    /// Replace the event chat's filtered words. Matching ignores case and
+    /// applies anywhere inside a message. Organizer or admin only.
+    pub fn set_chat_word_filters(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        words: Vec<String>,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::set_word_filters(&env, event_id, words)
+    }
+
+    /// Ban a user from the event's livestream chat. Organizer or admin only;
+    /// neither can be banned.
+    pub fn ban_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+        reason: String,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+        Self::reject_moderating_staff(&env, &event, &user)?;
+
+        crate::chat_moderation::ban_chat_user(&env, event_id, &user, reason)
+    }
+
+    /// Lift a user's chat ban. Organizer or admin only.
+    pub fn unban_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::unban_chat_user(&env, event_id, &user)
+    }
+
+    /// Mute a user in the event's chat for `duration_seconds` (0 lifts the
+    /// mute). Organizer or admin only; neither can be muted.
+    pub fn mute_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+        duration_seconds: u64,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+        Self::reject_moderating_staff(&env, &event, &user)?;
+
+        crate::chat_moderation::mute_chat_user(&env, event_id, &user, duration_seconds)
+    }
+
+    /// Read the event chat's slow-mode and word-filter settings.
+    pub fn get_chat_settings(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::chat_moderation::get_chat_settings(&env, event_id))
+    }
+
+    /// Read a user's moderation state in the event's chat.
+    pub fn get_chat_user_state(
+        env: Env,
+        event_id: u64,
+        user: Address,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::chat_moderation::get_chat_user_state(
+            &env, event_id, &user,
+        ))
+    }
+
+    /// The organizer and the contract admin run the chat, so they are not
+    /// valid targets for a ban or mute.
+    fn reject_moderating_staff(
+        env: &Env,
+        event: &Event,
+        target: &Address,
+    ) -> Result<(), LumentixError> {
+        if event.organizer == *target || storage::get_admin(env) == *target {
+            return Err(LumentixError::CannotModerateOrganizer);
+        }
+        Ok(())
+    }
 }

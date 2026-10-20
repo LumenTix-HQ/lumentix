@@ -2129,3 +2129,64 @@ impl RoyaltiesDistributed {
         );
     }
 }
+
+/// Emitted when a chat message is turned away by moderation (Issue #1501).
+/// `verdict` is 1 banned, 2 muted, 3 slow mode, 4 filtered word.
+pub struct ChatMessageModerated;
+impl ChatMessageModerated {
+    pub fn emit(env: &Env, event_id: u64, user: Address, verdict: u32) {
+        env.events().publish(
+            (Symbol::new(env, "chat_message_moderated"),),
+            (event_id, user, verdict),
+        );
+    }
+}
+
+/// Emitted when an event's chat slow-mode interval changes (Issue #1501).
+pub struct ChatSlowModeSet;
+impl ChatSlowModeSet {
+    pub fn emit(env: &Env, event_id: u64, seconds: u32) {
+        env.events()
+            .publish((Symbol::new(env, "chat_slow_mode_set"),), (event_id, seconds));
+    }
+}
+
+/// Emitted when an event's chat word filters are replaced (Issue #1501).
+pub struct ChatWordFiltersUpdated;
+impl ChatWordFiltersUpdated {
+    pub fn emit(env: &Env, event_id: u64, word_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "chat_filters_updated"),),
+            (event_id, word_count),
+        );
+    }
+}
+
+/// Emitted when a user is banned from an event's chat (Issue #1501).
+pub struct ChatUserBanned;
+impl ChatUserBanned {
+    pub fn emit(env: &Env, event_id: u64, user: Address, reason: String) {
+        env.events()
+            .publish((Symbol::new(env, "chat_user_banned"),), (event_id, user, reason));
+    }
+}
+
+/// Emitted when a user's chat ban is lifted (Issue #1501).
+pub struct ChatUserUnbanned;
+impl ChatUserUnbanned {
+    pub fn emit(env: &Env, event_id: u64, user: Address) {
+        env.events()
+            .publish((Symbol::new(env, "chat_user_unbanned"),), (event_id, user));
+    }
+}
+
+/// Emitted when a user is muted, or unmuted with `muted_until` 0 (Issue #1501).
+pub struct ChatUserMuted;
+impl ChatUserMuted {
+    pub fn emit(env: &Env, event_id: u64, user: Address, muted_until: u64) {
+        env.events().publish(
+            (Symbol::new(env, "chat_user_muted"),),
+            (event_id, user, muted_until),
+        );
+    }
+}

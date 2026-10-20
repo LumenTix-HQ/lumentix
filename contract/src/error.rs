@@ -617,4 +617,22 @@ pub enum LumentixError {
     ExchangeRateLockExpired = 286,
     /// The exchange-rate lock has already been used for a checkout
     ExchangeRateLockConsumed = 287,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Livestream chat moderation errors (Issue #1501)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Slow-mode interval is above the one-hour maximum
+    InvalidSlowModeInterval = 288,
+    /// Chat message is empty or longer than the maximum length
+    InvalidChatMessage = 289,
+    /// Word filter list is too long, or holds an empty or oversized word
+    InvalidChatWordFilter = 290,
+    /// The user is already banned from this event's chat
+    ChatUserAlreadyBanned = 291,
+    /// The user is not banned from this event's chat
+    ChatUserNotBanned = 292,
+    /// The event's organizer and the contract admin cannot be banned or muted
+    CannotModerateOrganizer = 293,
+    /// Mute duration is above the seven-day maximum
+    InvalidMuteDuration = 294,
 }
