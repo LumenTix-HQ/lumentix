@@ -7,7 +7,7 @@ use crate::events::{
     AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AnonymousSurveySubmitted,
     AttendanceMemorabiliaMinted,
     AttendanceVerificationFailed,
-    AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
+    AttendanceVerified, BatchTicketsDistributed, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
     CarbonOffsetPurchased, CheckinProofValidated, CollectibleInventoryUpdated,
     CrossChainTransferCompleted,
@@ -2667,7 +2667,11 @@ impl LumentixContract {
     ) -> Result<(), LumentixError> {
         from.require_auth();
 
-        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &to, &from)?;
+        let mut recipients: Vec<Address> = Vec::new(&env);
+        for _ in ticket_ids.iter() {
+            recipients.push_back(to.clone());
+        }
+        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &recipients, &from)?;
 
         for (ticket_id, mut ticket) in ticket_ids.iter().zip(tickets.iter()) {
             Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from.clone(), to.clone());
@@ -2680,9 +2684,42 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Transfer multiple tickets from `from` to *different* recipients in a
+    /// single call (issue #1425). `recipients[i]` receives `ticket_ids[i]`,
+    /// so a group-booking organizer can hand each guest their own ticket
+    /// without paying for one transaction per guest. Validation is
+    /// all-or-nothing, exactly as in `batch_transfer_tickets`.
+    ///
+    /// # Errors
+    /// Returns `InvalidAmount` if `ticket_ids` is empty, contains a
+    /// duplicate, or differs in length from `recipients`; `InvalidAddress`
+    /// if any recipient is `from` itself. Otherwise returns whatever
+    /// `validate_ticket_transfer` would return for the first bad ticket.
+    pub fn batch_transfer_tickets_to_recipients(
+        env: Env,
+        ticket_ids: Vec<u64>,
+        recipients: Vec<Address>,
+        from: Address,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+
+        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &recipients, &from)?;
+
+        for ((ticket_id, to), mut ticket) in
+            ticket_ids.iter().zip(recipients.iter()).zip(tickets.iter())
+        {
+            Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from.clone(), to);
+        }
+
+        BatchTicketsDistributed::emit(&env, from, ticket_ids, recipients);
+
+        Ok(())
+    }
+
     /// Validates a proposed batch transfer before any ticket is written:
-    /// the ticket-ID list is non-empty and has no duplicates, the
-    /// recipient isn't the sender itself, and every ticket individually
+    /// the ticket-ID list is non-empty and has no duplicates, there is
+    /// exactly one recipient per ticket, no recipient is the sender
+    /// itself, and every ticket individually
     /// passes the same ownership/status checks `transfer_ticket` applies.
     /// Returns the loaded `Ticket` records (in `ticket_ids` order) so the
     /// caller doesn't have to fetch them from storage a second time.
@@ -2695,13 +2732,13 @@ impl LumentixContract {
     fn validate_batch_recipients(
         env: &Env,
         ticket_ids: &Vec<u64>,
-        to: &Address,
+        recipients: &Vec<Address>,
         from: &Address,
     ) -> Result<Vec<Ticket>, LumentixError> {
-        if ticket_ids.is_empty() {
+        if ticket_ids.is_empty() || ticket_ids.len() != recipients.len() {
             return Err(LumentixError::InvalidAmount);
         }
-        if to == from {
+        if recipients.contains(from) {
             return Err(LumentixError::InvalidAddress);
         }
 
