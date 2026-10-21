@@ -255,6 +255,18 @@ impl BatchTicketsTransferred {
     }
 }
 
+/// Event emitted by
+/// [`crate::lumentix_contract::LumentixContract::batch_transfer_tickets_to_recipients`].
+/// `recipients[i]` is the new owner of `ticket_ids[i]`.
+pub struct BatchTicketsDistributed;
+
+impl BatchTicketsDistributed {
+    pub fn emit(env: &Env, from: Address, ticket_ids: Vec<u64>, recipients: Vec<Address>) {
+        env.events()
+            .publish((symbol_short!("batchdst"),), (from, ticket_ids, recipients));
+    }
+}
+
 /// Event emitted when organizers update a transfer blackout window.
 pub struct TransferBlackoutUpdated;
 

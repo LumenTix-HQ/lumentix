@@ -4496,6 +4496,79 @@ fn test_batch_transfer_tickets_require_auth_once_for_sender() {
 }
 
 #[test]
+fn test_batch_transfer_tickets_to_recipients_gives_each_guest_their_ticket() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let booker = Address::generate(&env);
+    let guest_a = Address::generate(&env);
+    let guest_b = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &3u32, &booker);
+
+    let mut recipients = soroban_sdk::Vec::new(&env);
+    recipients.push_back(guest_a.clone());
+    recipients.push_back(guest_b.clone());
+    recipients.push_back(guest_a.clone());
+
+    client.batch_transfer_tickets_to_recipients(&ticket_ids, &recipients, &booker);
+
+    assert_eq!(client.get_ticket_info(&ticket_ids.get(0).unwrap()).owner, guest_a);
+    assert_eq!(client.get_ticket_info(&ticket_ids.get(1).unwrap()).owner, guest_b);
+    assert_eq!(client.get_ticket_info(&ticket_ids.get(2).unwrap()).owner, guest_a);
+}
+
+#[test]
+fn test_batch_transfer_tickets_to_recipients_rejects_length_mismatch() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let booker = Address::generate(&env);
+    let guest = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &2u32, &booker);
+
+    let mut recipients = soroban_sdk::Vec::new(&env);
+    recipients.push_back(guest);
+
+    let result = client.try_batch_transfer_tickets_to_recipients(&ticket_ids, &recipients, &booker);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAmount)));
+    for id in ticket_ids.iter() {
+        assert_eq!(client.get_ticket_info(&id).owner, booker);
+    }
+}
+
+#[test]
+fn test_batch_transfer_tickets_to_recipients_rejects_self_as_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let booker = Address::generate(&env);
+    let guest = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &2u32, &booker);
+
+    let mut recipients = soroban_sdk::Vec::new(&env);
+    recipients.push_back(guest);
+    recipients.push_back(booker.clone());
+
+    let result = client.try_batch_transfer_tickets_to_recipients(&ticket_ids, &recipients, &booker);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAddress)));
+    for id in ticket_ids.iter() {
+        assert_eq!(client.get_ticket_info(&id).owner, booker);
+    }
+}
+
+#[test]
 fn test_transfer_ticket_blocked_during_blackout_window() {
     let env = Env::default();
     env.mock_all_auths();
