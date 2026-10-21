@@ -7,6 +7,7 @@ import { RecommendationsService } from './recommendations.service';
 import { RecommendationsController } from './recommendations.controller';
 
 import { Event } from '../events/entities/event.entity';
+import { Registration } from '../registrations/entities/registration.entity';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { Event } from '../events/entities/event.entity';
       UserPreference,
       EventSimilarity,
       Event,
+      Registration,
     ]),
   ],
   providers: [RecommendationsService],

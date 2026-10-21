@@ -5,8 +5,9 @@ import { RecommendationsService } from './recommendations.service';
 import { UserPreference } from './entities/user-preference.entity';
 import { EventSimilarity } from './entities/event-similarity.entity';
 import { Event, EventStatus } from './../events/entities/event.entity';
+import { Registration, RegistrationStatus } from '../registrations/entities/registration.entity';
 
-describe('RecommendationsService (#1243)', () => {
+describe('RecommendationsService (#1243, #1465)', () => {
   let service: RecommendationsService;
 
   const mockPreferencesRepo = {
@@ -26,6 +27,24 @@ describe('RecommendationsService (#1243)', () => {
           location: 'Lagos', startDate: new Date('2026-07-15'),
           ticketPrice: 10, currency: 'NGN', status: EventStatus.PUBLISHED },
       ]),
+    createQueryBuilder: jest.fn().mockReturnValue({
+      where: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    }),
+  };
+
+  const mockRegistrationsRepo = {
+    find: jest.fn(() => Promise.resolve([])),
+    createQueryBuilder: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      groupBy: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    }),
   };
 
   const preference = (over: Partial<UserPreference> = {}) =>
@@ -44,12 +63,29 @@ describe('RecommendationsService (#1243)', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Reset default mocks
+    mockEventsRepo.createQueryBuilder.mockReturnValue({
+      where: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    });
+    mockRegistrationsRepo.createQueryBuilder.mockReturnValue({
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      groupBy: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    });
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RecommendationsService,
         { provide: getRepositoryToken(UserPreference), useValue: mockPreferencesRepo },
         { provide: getRepositoryToken(EventSimilarity), useValue: mockSimilaritiesRepo },
         { provide: getRepositoryToken(Event), useValue: mockEventsRepo },
+        { provide: getRepositoryToken(Registration), useValue: mockRegistrationsRepo },
       ],
     }).compile();
     service = module.get(RecommendationsService);
@@ -61,6 +97,7 @@ describe('RecommendationsService (#1243)', () => {
         preference({ category: 'Technology', location: 'Lagos', weight: 80, attendanceCount: 3 }),
         preference({ category: 'Technology', location: 'Abuja', weight: 40, attendanceCount: 1 }),
       ]);
+      mockRegistrationsRepo.find.mockResolvedValue([]);
 
       const vector = await service.buildUserProfileVector('u-123');
 
@@ -73,19 +110,40 @@ describe('RecommendationsService (#1243)', () => {
 
     it('returns an empty profile when the user has no recorded preferences', async () => {
       mockPreferencesRepo.find.mockResolvedValue([]);
+      mockRegistrationsRepo.find.mockResolvedValue([]);
 
       const vector = await service.buildUserProfileVector('u-nobody');
 
       expect(vector.categoryWeights).toEqual({});
       expect(vector.locationWeights).toEqual({});
+      expect(vector.attendedEventIds.size).toBe(0);
+    });
+
+    it('enriches the vector with registration history (#1465)', async () => {
+      mockPreferencesRepo.find.mockResolvedValue([]);
+      mockRegistrationsRepo.find.mockResolvedValue([
+        { userId: 'u-123', eventId: 'evt-tech-a', status: RegistrationStatus.CONFIRMED },
+      ]);
+      mockEventsRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          { id: 'evt-tech-a', category: 'Technology', location: 'Lagos' },
+        ]),
+      });
+
+      const vector = await service.buildUserProfileVector('u-123');
+
+      expect(vector.attendedEventIds.has('evt-tech-a')).toBe(true);
+      expect(vector.categoryWeights['Technology']).toBeGreaterThan(0);
     });
   });
 
   describe('compute_similarity_scores', () => {
-    it('boosts events whose category top the user’s weighted profile', async () => {
+    it('boosts events whose category tops the user\'s weighted profile', async () => {
       mockPreferencesRepo.find.mockResolvedValue([
         preference({ category: 'Technology', location: 'Lagos', weight: 100, attendanceCount: 1 }),
       ]);
+      mockRegistrationsRepo.find.mockResolvedValue([]);
 
       const scores = await service.computeSimilarityScores(
         await service.buildUserProfileVector('u-123'),
@@ -95,9 +153,33 @@ describe('RecommendationsService (#1243)', () => {
       const tech = scores.find((s) => s.eventId === 'evt-tech-a');
       const food = scores.find((s) => s.eventId === 'evt-food-b');
       expect(tech).toBeDefined();
-      // A category the user never attended scores zero on that dimension.
       expect(food).toBeDefined();
       expect(tech!.score).toBeGreaterThan(food!.score);
+    });
+
+    it('filters out already-attended events (#1465)', async () => {
+      mockPreferencesRepo.find.mockResolvedValue([
+        preference({ category: 'Technology', location: 'Lagos', weight: 100, attendanceCount: 1 }),
+      ]);
+      mockRegistrationsRepo.find.mockResolvedValue([
+        { userId: 'u-123', eventId: 'evt-tech-a', status: RegistrationStatus.CONFIRMED },
+      ]);
+      mockEventsRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          { id: 'evt-tech-a', category: 'Technology', location: 'Lagos' },
+        ]),
+      });
+
+      const vector = await service.buildUserProfileVector('u-123');
+      const scores = await service.computeSimilarityScores(
+        vector,
+        await service.listCandidateEvents(),
+      );
+
+      // evt-tech-a is already attended and must not appear in the scored list.
+      const tech = scores.find((s) => s.eventId === 'evt-tech-a');
+      expect(tech).toBeUndefined();
     });
   });
 
@@ -106,8 +188,9 @@ describe('RecommendationsService (#1243)', () => {
       mockPreferencesRepo.find.mockResolvedValue([
         preference({ category: 'Technology', location: 'Lagos', weight: 90, attendanceCount: 4 }),
       ]);
+      mockRegistrationsRepo.find.mockResolvedValue([]);
 
-      const result = await service.generateRecommendations('u-123');
+      const result = await service.rankRecommendations('u-123');
 
       expect(result.userId).toBe('u-123');
       expect(result.generatedAt).toBeDefined();
@@ -120,7 +203,7 @@ describe('RecommendationsService (#1243)', () => {
       }
     });
 
-    it('persists a user’s preference replacement set', async () => {
+    it('persists a user\'s preference replacement set', async () => {
       const out = await service.updateUserPreferences('u-123', {
         preferences: [
           { category: 'Food', location: 'Lagos', weight: 70 },
@@ -129,6 +212,19 @@ describe('RecommendationsService (#1243)', () => {
 
       expect(mockPreferencesRepo.delete).toHaveBeenCalledWith({ userId: 'u-123' });
       expect(out.saved).toBe(1);
+    });
+
+    it('generateRecommendations delegates to rankRecommendations', async () => {
+      mockPreferencesRepo.find.mockResolvedValue([
+        preference({ category: 'Technology', location: 'Lagos', weight: 90, attendanceCount: 4 }),
+      ]);
+      mockRegistrationsRepo.find.mockResolvedValue([]);
+
+      const direct = await service.generateRecommendations('u-123', 3);
+      const ranked = await service.rankRecommendations('u-123', 3);
+
+      expect(direct.userId).toBe(ranked.userId);
+      expect(direct.recommendations.length).toBe(ranked.recommendations.length);
     });
   });
 });
