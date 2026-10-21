@@ -640,6 +640,34 @@ pub fn get_ticket_transfer_history(env: &Env, ticket_id: u64) -> Vec<TicketTrans
     history
 }
 
+/// Replace `user` with `replacement` in a ticket's transfer history, keeping
+/// the timestamps and the shape of the chain of custody (Issue #1452).
+pub fn replace_address_in_transfer_history(
+    env: &Env,
+    ticket_id: u64,
+    user: &Address,
+    replacement: &Address,
+) {
+    let key = (TRANSFER_HISTORY_PREFIX, ticket_id);
+    let history: Vec<TicketTransferRecord> = match env.storage().persistent().get(&key) {
+        Some(history) => history,
+        None => return,
+    };
+
+    let mut rewritten: Vec<TicketTransferRecord> = Vec::new(env);
+    for record in history.iter() {
+        rewritten.push_back(TicketTransferRecord {
+            from: if record.from == *user { replacement.clone() } else { record.from },
+            to: if record.to == *user { replacement.clone() } else { record.to },
+            timestamp: record.timestamp,
+        });
+    }
+    env.storage().persistent().set(&key, &rewritten);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
 /// Store a transfer blackout window for an event.
 pub fn set_transfer_blackout(env: &Env, event_id: u64, blackout: &TransferBlackout) {
     let key = (TRANSFER_BLACKOUT_PREFIX, event_id);

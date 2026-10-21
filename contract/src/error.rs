@@ -635,4 +635,34 @@ pub enum LumentixError {
     CannotModerateOrganizer = 293,
     /// Mute duration is above the seven-day maximum
     InvalidMuteDuration = 294,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Premium seat upgrade auction errors (Issue #1456)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No upgrade auction exists with the given ID
+    UpgradeAuctionNotFound = 295,
+    /// Auction tier, minimum bid, increment or duration is invalid, or it would run past the event start
+    InvalidUpgradeAuction = 296,
+    /// The auction is closed to bids: it has ended or been finalized
+    UpgradeAuctionClosed = 297,
+    /// The auction's bidding window has not ended yet
+    UpgradeAuctionStillOpen = 298,
+    /// The bid is below the minimum bid or the current highest bid plus the increment
+    UpgradeBidTooLow = 299,
+    /// The ticket is not owned by the bidder, belongs to another event, or can no longer be upgraded
+    UpgradeBidTicketInvalid = 300,
+    /// The ticket already holds the tier being auctioned
+    UpgradeTierAlreadyHeld = 301,
+    /// The auction has reached its maximum number of recorded bids
+    UpgradeAuctionBidLimit = 302,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GDPR data export and deletion errors (Issue #1452)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// A data-deletion request is already on record for this user
+    DeletionAlreadyRequested = 303,
+    /// No data-deletion request is on record for this user
+    DeletionNotRequested = 304,
+    /// Page size is zero or above the per-call limit
+    InvalidDataPageSize = 305,
 }

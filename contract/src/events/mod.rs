@@ -2190,3 +2190,69 @@ impl ChatUserMuted {
         );
     }
 }
+
+/// Emitted when an organizer opens a premium seat upgrade auction (Issue #1456).
+pub struct UpgradeAuctionOpened;
+impl UpgradeAuctionOpened {
+    pub fn emit(env: &Env, auction_id: u64, event_id: u64, target_tier: String, ends_at: u64) {
+        env.events().publish(
+            (Symbol::new(env, "upg_auction_opened"),),
+            (auction_id, event_id, target_tier, ends_at),
+        );
+    }
+}
+
+/// Emitted for every bid on an upgrade auction, so the bidding is public (Issue #1456).
+pub struct UpgradeBidPlaced;
+impl UpgradeBidPlaced {
+    pub fn emit(env: &Env, auction_id: u64, bidder: Address, ticket_id: u64, amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "upg_bid_placed"),),
+            (auction_id, bidder, ticket_id, amount),
+        );
+    }
+}
+
+/// Emitted when an upgrade auction closes; `winning_bid` is 0 when nobody won (Issue #1456).
+pub struct UpgradeAuctionFinalized;
+impl UpgradeAuctionFinalized {
+    pub fn emit(env: &Env, auction_id: u64, winner: Option<Address>, winning_bid: i128) {
+        env.events().publish(
+            (Symbol::new(env, "upg_auction_final"),),
+            (auction_id, winner, winning_bid),
+        );
+    }
+}
+
+/// Emitted when a user exports their personal data (Issue #1452).
+pub struct UserDataExported;
+impl UserDataExported {
+    pub fn emit(env: &Env, user: Address, ticket_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "user_data_exported"),),
+            (user, ticket_count),
+        );
+    }
+}
+
+/// Emitted when a user asks for their data to be deleted (Issue #1452).
+pub struct DataDeletionRequested;
+impl DataDeletionRequested {
+    pub fn emit(env: &Env, user: Address, requested_at: u64) {
+        env.events().publish(
+            (Symbol::new(env, "data_deletion_req"),),
+            (user, requested_at),
+        );
+    }
+}
+
+/// Emitted after a batch of a user's records is anonymized (Issue #1452).
+pub struct HistoricalRecordsAnonymized;
+impl HistoricalRecordsAnonymized {
+    pub fn emit(env: &Env, user: Address, anonymized: u32, retained: u32, completed: bool) {
+        env.events().publish(
+            (Symbol::new(env, "records_anonymized"),),
+            (user, anonymized, retained, completed),
+        );
+    }
+}
