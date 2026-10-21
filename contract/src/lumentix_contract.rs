@@ -8900,4 +8900,161 @@ impl LumentixContract {
         }
         Ok(())
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PREMIUM SEAT UPGRADE AUCTIONS (Issue #1456)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Open an ascending auction for one premium upgrade at an event.
+    ///
+    /// The winning ticket moves into `target_tier`. Bids must be at least
+    /// `min_bid` and each must beat the leader by `min_increment`. The auction
+    /// runs for `duration_seconds` and must end before the event starts.
+    /// Organizer or admin only. Returns the new auction's ID.
+    pub fn open_upgrade_auction(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        target_tier: String,
+        min_bid: i128,
+        min_increment: i128,
+        duration_seconds: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        let auction = crate::upgrade_auction::open_upgrade_auction(
+            &env,
+            event_id,
+            target_tier,
+            min_bid,
+            min_increment,
+            duration_seconds,
+        )?;
+        Ok(auction.auction_id)
+    }
+
+    /// Bid on an upgrade auction with a ticket you own.
+    ///
+    /// The bid is held by the contract while it leads and refunded as soon as
+    /// someone outbids it. Returns the updated auction.
+    pub fn place_upgrade_bid(
+        env: Env,
+        bidder: Address,
+        auction_id: u64,
+        ticket_id: u64,
+        amount: i128,
+    ) -> Result<crate::upgrade_auction::UpgradeAuction, LumentixError> {
+        bidder.require_auth();
+
+        crate::upgrade_auction::place_upgrade_bid(&env, &bidder, auction_id, ticket_id, amount)
+    }
+
+    /// Settle an auction whose bidding window has ended: the highest bid wins
+    /// and its ticket moves into the auctioned tier. Anyone may call this.
+    pub fn finalize_winning_bid(
+        env: Env,
+        auction_id: u64,
+    ) -> Result<crate::upgrade_auction::UpgradeAuction, LumentixError> {
+        crate::upgrade_auction::finalize_winning_bid(&env, auction_id)
+    }
+
+    /// Read an upgrade auction.
+    pub fn get_upgrade_auction(
+        env: Env,
+        auction_id: u64,
+    ) -> Result<crate::upgrade_auction::UpgradeAuction, LumentixError> {
+        crate::upgrade_auction::get_upgrade_auction(&env, auction_id)
+    }
+
+    /// Every bid placed on an upgrade auction, oldest first.
+    pub fn get_upgrade_bids(
+        env: Env,
+        auction_id: u64,
+    ) -> Result<Vec<crate::upgrade_auction::UpgradeBid>, LumentixError> {
+        crate::upgrade_auction::get_upgrade_bids(&env, auction_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GDPR DATA EXPORT AND DELETION (Issue #1452)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Export one page of the data held about `user` in machine-readable form.
+    ///
+    /// Scans `limit` ticket ids (at most 100) from `start_ticket_id`; start at
+    /// 0 and pass each page's `next_ticket_id` until it comes back 0. Callable
+    /// by the user themselves or the contract admin.
+    pub fn export_user_data(
+        env: Env,
+        caller: Address,
+        user: Address,
+        start_ticket_id: u64,
+        limit: u32,
+    ) -> Result<crate::gdpr::UserDataExport, LumentixError> {
+        caller.require_auth();
+        Self::require_data_subject_or_admin(&env, &caller, &user)?;
+
+        crate::gdpr::export_user_data(&env, &user, start_ticket_id, limit)
+    }
+
+    /// Exercise the right to deletion. The user is soft-deleted at once; run
+    /// `anonymize_historical_records` to cascade through their records.
+    pub fn request_data_deletion(
+        env: Env,
+        user: Address,
+    ) -> Result<crate::gdpr::DeletionRequest, LumentixError> {
+        user.require_auth();
+
+        crate::gdpr::request_data_deletion(&env, &user)
+    }
+
+    /// Anonymize one page of a deleted user's records, keeping aggregate
+    /// analytics intact. Tickets for events that have not happened yet are
+    /// retained until they are spent. Callable by the user or the contract admin.
+    pub fn anonymize_historical_records(
+        env: Env,
+        caller: Address,
+        user: Address,
+        start_ticket_id: u64,
+        limit: u32,
+    ) -> Result<crate::gdpr::AnonymizationResult, LumentixError> {
+        caller.require_auth();
+        Self::require_data_subject_or_admin(&env, &caller, &user)?;
+
+        crate::gdpr::anonymize_historical_records(&env, &user, start_ticket_id, limit)
+    }
+
+    /// A user's deletion request, if they have made one.
+    pub fn get_data_deletion_request(
+        env: Env,
+        user: Address,
+    ) -> Option<crate::gdpr::DeletionRequest> {
+        crate::gdpr::get_deletion_request(&env, &user)
+    }
+
+    /// Aggregate anonymization counters.
+    pub fn get_anonymized_stats(env: Env) -> crate::gdpr::AnonymizedStats {
+        crate::gdpr::get_anonymized_stats(&env)
+    }
+
+    /// The pseudonym an anonymized ticket carries, if it has been anonymized.
+    pub fn get_ticket_pseudonym(env: Env, ticket_id: u64) -> Option<BytesN<32>> {
+        crate::gdpr::get_ticket_pseudonym(&env, ticket_id)
+    }
+
+    /// Personal data is the data subject's to export and erase; the admin
+    /// may act on their behalf for a verified request.
+    fn require_data_subject_or_admin(
+        env: &Env,
+        caller: &Address,
+        user: &Address,
+    ) -> Result<(), LumentixError> {
+        if !storage::is_initialized(env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        if caller != user && storage::get_admin(env) != *caller {
+            return Err(LumentixError::Unauthorized);
+        }
+        Ok(())
+    }
 }
