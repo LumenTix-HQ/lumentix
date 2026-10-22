@@ -11,6 +11,8 @@ import { VenuesController } from './venues.controller';
 import { VenueLayoutController } from './venue-layout.controller';
 import { IotCapacityService } from './iot-capacity.service';
 import { IotCapacityController } from './iot-capacity.controller';
+import { SeatMapService } from './seat-map.service';
+import { SeatMapController } from './seat-map.controller';
 
 import { EventsModule } from '../events/events.module';
 import { AuditModule } from '../audit/audit.module';
@@ -33,8 +35,8 @@ import { Event } from '../events/entities/event.entity';
     AuditModule,
     NotificationModule,
   ],
-  controllers: [VenuesController, VenueLayoutController, IotCapacityController],
-  providers: [VenuesService, IotCapacityService],
-  exports: [VenuesService, IotCapacityService],
+  controllers: [VenuesController, VenueLayoutController, IotCapacityController, SeatMapController],
+  providers: [VenuesService, IotCapacityService, SeatMapService],
+  exports: [VenuesService, IotCapacityService, SeatMapService],
 })
 export class VenuesModule {}
