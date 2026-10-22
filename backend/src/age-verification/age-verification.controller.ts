@@ -69,4 +69,21 @@ export class AgeProofController {
       req.user.id,
     );
   }
+
+  @Post('verify-on-chain')
+  @ApiOperation({ summary: 'Verify age proof on-chain for event purchase' })
+  @ApiResponse({ status: 201, description: 'On-chain verification completed' })
+  verifyAgeProofOnChain(@Body() dto: { proof: string; minimumAge: number; eventId: string }) {
+    return this.ageProofService.verifyAgeProofOnChain(dto.proof, dto.minimumAge, dto.eventId);
+  }
+
+  @Post('reject-underage')
+  @ApiOperation({ summary: 'Check and reject underage purchase attempts' })
+  @ApiResponse({ status: 201, description: 'Purchase validation result' })
+  rejectUnderagePurchase(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: { eventId: string; minimumAge: number },
+  ) {
+    return this.ageProofService.rejectUnderagePurchase(req.user.id, dto.eventId, dto.minimumAge);
+  }
 }
