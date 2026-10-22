@@ -7360,7 +7360,8 @@ impl LumentixContract {
     /// Checks:
     ///  a) The event exists and has completed.
     ///  b) The ticket exists, belongs to `owner`, and belongs to `event_id`.
-    ///  c) The ticket was used (checked in) — the attendance proof.
+    ///  c) The ticket was used (checked in) and not refunded or revoked —
+    ///     the attendance proof.
     ///  d) `signature` is a non-empty attendance authorization proof.
     pub fn verify_attendance_proof(
         env: Env,
@@ -7381,7 +7382,7 @@ impl LumentixContract {
         if ticket.event_id != event_id {
             return Err(LumentixError::TicketEventMismatch);
         }
-        if !ticket.used {
+        if !ticket.used || ticket.refunded || ticket.revoked {
             return Err(LumentixError::AttendanceNotVerified);
         }
 
