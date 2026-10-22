@@ -75,6 +75,7 @@ const BIOMETRIC_CRED_PREFIX: &str = "BIOCRED_";
 const EVENT_BIOMETRIC_REQUIRED_PREFIX: &str = "BIOREQ_";
 const PASS_PACKAGE_PREFIX: &str = "PPKG_";
 const PASS_PACKAGE_ID_COUNTER: &str = "PPKG_CTR";
+const PASS_REDEMPTION_PREFIX: &str = "PPKGRED_";
 const SURVEY_ID_COUNTER: &str = "SURVEY_CTR";
 const SURVEY_PREFIX: &str = "SURVEY_";
 const SURVEY_EVENT_INDEX_PREFIX: &str = "SUREVT_";
@@ -490,6 +491,21 @@ pub fn get_pass_package(env: &Env, package_id: u64) -> Result<PassPackage, Lumen
         .persistent()
         .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     Ok(package)
+}
+
+/// Check whether a pass package has already been redeemed for an event.
+pub fn has_pass_redemption(env: &Env, package_id: u64, event_id: u64) -> bool {
+    let key = (PASS_REDEMPTION_PREFIX, package_id, event_id);
+    env.storage().persistent().has(&key)
+}
+
+/// Record that a pass package has been redeemed for an event.
+pub fn mark_pass_redemption(env: &Env, package_id: u64, event_id: u64) {
+    let key = (PASS_REDEMPTION_PREFIX, package_id, event_id);
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
 /// Set ticket data

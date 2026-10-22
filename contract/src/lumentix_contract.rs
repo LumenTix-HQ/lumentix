@@ -2184,7 +2184,8 @@ impl LumentixContract {
 
     /// Atomically consume one allowance from `package_id` for entry into
     /// `event_id`. Fails if the package is expired/inactive, the event is not
-    /// part of the package, or the allowance is exhausted. Each Soroban
+    /// part of the package, the package was already redeemed for the event,
+    /// or the allowance is exhausted. Each Soroban
     /// invocation executes as a single atomic read-modify-write against
     /// ledger state, so concurrent entry attempts cannot overspend the
     /// remaining balance.
@@ -2218,12 +2219,16 @@ impl LumentixContract {
         if !eligible {
             return Err(LumentixError::PassPackageEventNotEligible);
         }
+        if storage::has_pass_redemption(&env, package_id, event_id) {
+            return Err(LumentixError::PassPackageEventAlreadyRedeemed);
+        }
         if package.remaining_allowance == 0 {
             return Err(LumentixError::PassPackageExhausted);
         }
 
         package.remaining_allowance -= 1;
         storage::set_pass_package(&env, package_id, &package);
+        storage::mark_pass_redemption(&env, package_id, event_id);
 
         PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
         Ok(package.remaining_allowance)

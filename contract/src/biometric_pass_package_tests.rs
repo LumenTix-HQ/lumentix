@@ -320,6 +320,27 @@ fn deduct_pass_allowance_rejects_ineligible_event() {
 }
 
 #[test]
+fn deduct_pass_allowance_rejects_repeat_redemption_for_same_event() {
+    let env = Env::default();
+    let (_admin, _contract_id, client) = setup(&env);
+    let organizer = Address::generate(&env);
+    let owner = Address::generate(&env);
+    let event_a = publish_event(&env, &client, &organizer, 100, 10);
+    let event_b = publish_event(&env, &client, &organizer, 100, 10);
+
+    let ids = events_vec(&env, &[event_a, event_b]);
+    let package_id = client.create_pass_package(&organizer, &owner, &ids, &2u32, &5000u64);
+
+    client.deduct_pass_allowance(&owner, &package_id, &event_a);
+
+    let result = client.try_deduct_pass_allowance(&owner, &package_id, &event_a);
+    assert_eq!(result, Err(Ok(LumentixError::PassPackageEventAlreadyRedeemed)));
+
+    let (remaining, _) = client.check_pass_balance(&package_id);
+    assert_eq!(remaining, 1u32);
+}
+
+#[test]
 fn deduct_pass_allowance_rejects_non_owner() {
     let env = Env::default();
     let (_admin, _contract_id, client) = setup(&env);
