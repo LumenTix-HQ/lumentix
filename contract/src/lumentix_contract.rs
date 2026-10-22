@@ -62,7 +62,7 @@ use crate::types::{
     UpgradeProposal,
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
     PricingSchedule, MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics,
-    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
+    DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode, CircuitBreakerState,
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,

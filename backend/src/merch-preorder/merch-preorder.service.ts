@@ -136,4 +136,17 @@ export class MerchPreorderService {
       throw new ForbiddenException('Only the event organizer can manage merchandise pre-orders');
     }
   }
+
+  // ── Aliases for Issue #1455 ───────────────────────────────────────────
+  async create_merch_preorder(dto: CreateMerchPreorderDto, userId: string): Promise<MerchPreorder> {
+    return this.createMerchPreorder(dto, userId);
+  }
+
+  async reserve_variant_stock(variantId: string, quantity: number): Promise<MerchVariant> {
+    return this.reserveVariantStock(variantId, quantity);
+  }
+
+  async confirm_preorder_pickup(preorderId: string, organizerId: string): Promise<MerchPreorder> {
+    return this.confirmPreorderPickup(preorderId, organizerId);
+  }
 }
