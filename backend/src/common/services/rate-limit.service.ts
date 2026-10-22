@@ -247,8 +247,17 @@ export class RateLimitService {
     apiKey?: string,
     options?: EnforceOptions,
   ): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
-    const ipLimit = Math.max(1, Number(this.config.get('RATE_LIMIT_PER_IP', 100)));
-    const apiKeyLimit = Math.max(1, Number(this.config.get('RATE_LIMIT_PER_API_KEY', 1000)));
+    let ipLimit = Math.max(1, Number(this.config.get('RATE_LIMIT_PER_IP', 100)));
+    let apiKeyLimit = Math.max(1, Number(this.config.get('RATE_LIMIT_PER_API_KEY', 1000)));
+
+    // Apply route-specific limits if configured
+    if (options?.route) {
+      const routeConfig = this.getRouteSpecificLimits(options.route);
+      if (routeConfig) {
+        ipLimit = routeConfig.ipLimit ?? ipLimit;
+        apiKeyLimit = routeConfig.apiKeyLimit ?? apiKeyLimit;
+      }
+    }
 
     try {
       if (await this.is_ip_blocked(ip)) {
@@ -316,5 +325,25 @@ export class RateLimitService {
 
       return { allowed: true, retryAfterSeconds: 0 };
     }
+  }
+
+  /**
+   * Get route-specific rate limits from configuration
+   * Supports custom limits per route pattern for fine-grained control
+   */
+  private getRouteSpecificLimits(route: string): { ipLimit?: number; apiKeyLimit?: number } | null {
+    // Check for exact route match in environment variables
+    const routeKey = route.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase();
+    const ipLimit = this.config.get<number>(`RATE_LIMIT_${routeKey}_PER_IP`);
+    const apiKeyLimit = this.config.get<number>(`RATE_LIMIT_${routeKey}_PER_API_KEY`);
+
+    if (ipLimit || apiKeyLimit) {
+      return {
+        ipLimit: ipLimit ? Math.max(1, Number(ipLimit)) : undefined,
+        apiKeyLimit: apiKeyLimit ? Math.max(1, Number(apiKeyLimit)) : undefined,
+      };
+    }
+
+    return null;
   }
 }
