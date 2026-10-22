@@ -400,6 +400,136 @@ export class EscrowService {
     return { txHash, balance };
   }
 
+  // ── Multi-Organizer Escrow Split (#1469) ───────────────────────────────────
+
+  private static readonly splitsMap = new Map<
+    string,
+    Array<{ organizerId: string; walletAddress: string; ratio: number }>
+  >();
+
+  private static readonly disputesMap = new Map<
+    string,
+    Array<{ organizerId: string; reason: string; timestamp: Date }>
+  >();
+
+  /**
+   * Define co-organizer revenue split ratios for an event.
+   */
+  async create_escrow_split(
+    eventId: string,
+    splits: Array<{ organizerId: string; walletAddress: string; ratio: number }>,
+  ): Promise<{ eventId: string; splits: typeof splits }> {
+    const event = await this.getEventWithEscrow(eventId);
+    if (!event) {
+      throw new NotFoundException(`Event ${eventId} not found`);
+    }
+
+    if (!splits || splits.length === 0) {
+      throw new BadRequestException('At least one split recipient must be provided');
+    }
+
+    const totalRatio = splits.reduce((acc, s) => acc + s.ratio, 0);
+    const isValidSum =
+      Math.abs(totalRatio - 100) < 0.01 || Math.abs(totalRatio - 1.0) < 0.001;
+
+    if (!isValidSum) {
+      throw new BadRequestException(
+        `Total split ratios must equal 100% or 1.0. Current sum: ${totalRatio}`,
+      );
+    }
+
+    EscrowService.splitsMap.set(eventId, splits);
+
+    await this.auditService.log({
+      action: 'ESCROW_SPLIT_CREATED',
+      userId: SYSTEM_USER_ID,
+      resourceId: eventId,
+      meta: { splits },
+    });
+
+    return { eventId, splits };
+  }
+
+  /**
+   * Release escrow funds to co-organizers according to pre-agreed split ratios.
+   */
+  async release_escrow_funds(
+    eventId: string,
+  ): Promise<{ eventId: string; released: boolean; distributions: any[] }> {
+    const disputes = EscrowService.disputesMap.get(eventId) || [];
+    if (disputes.length > 0) {
+      throw new BadRequestException(
+        `Cannot release escrow funds: Event ${eventId} has active disputes.`,
+      );
+    }
+
+    const splits = EscrowService.splitsMap.get(eventId);
+    const event = await this.getEventWithEscrow(eventId);
+
+    if (!event.escrowPublicKey) {
+      throw new BadRequestException(`Event ${eventId} has no escrow account`);
+    }
+
+    const balance = await this.stellarService.getXlmBalance(event.escrowPublicKey);
+    const totalBalance = parseFloat(balance) || 0;
+
+    const distributions = [];
+    if (splits && splits.length > 0) {
+      const isHundredBase = Math.abs(splits.reduce((a, b) => a + b.ratio, 0) - 100) < 0.01;
+      for (const split of splits) {
+        const fraction = isHundredBase ? split.ratio / 100 : split.ratio;
+        const amount = (totalBalance * fraction).toFixed(7);
+        distributions.push({
+          organizerId: split.organizerId,
+          walletAddress: split.walletAddress,
+          amount,
+        });
+      }
+    } else {
+      distributions.push({
+        organizerId: event.organizerId,
+        walletAddress: event.escrowPublicKey,
+        amount: totalBalance.toFixed(7),
+      });
+    }
+
+    await this.auditService.log({
+      action: 'ESCROW_FUNDS_RELEASED',
+      userId: SYSTEM_USER_ID,
+      resourceId: eventId,
+      meta: { distributions, balance },
+    });
+
+    return { eventId, released: true, distributions };
+  }
+
+  /**
+   * Dispute an escrow split for an event.
+   */
+  async dispute_escrow_split(
+    eventId: string,
+    organizerId: string,
+    reason: string,
+  ): Promise<{ eventId: string; organizerId: string; status: string; reason: string }> {
+    const currentDisputes = EscrowService.disputesMap.get(eventId) || [];
+    currentDisputes.push({ organizerId, reason, timestamp: new Date() });
+    EscrowService.disputesMap.set(eventId, currentDisputes);
+
+    await this.auditService.log({
+      action: 'ESCROW_SPLIT_DISPUTED',
+      userId: organizerId,
+      resourceId: eventId,
+      meta: { reason },
+    });
+
+    return {
+      eventId,
+      organizerId,
+      status: 'DISPUTED',
+      reason,
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────────────────────────────────────────

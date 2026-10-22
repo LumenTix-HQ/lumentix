@@ -94,6 +94,34 @@ export class AuditService {
     return this.findLogs(dto);
   }
 
+  // ── Issue #1468 functions ──────────────────────────────────────────────────
+
+  /**
+   * Search audit logs for event actions (issue #1468).
+   */
+  async query_audit_logs(dto: ListAuditLogsDto) {
+    return this.findLogs(dto);
+  }
+
+  /**
+   * Filter audit logs by action type (issue #1468).
+   */
+  async filter_by_action_type(action: string, dto?: Partial<ListAuditLogsDto>) {
+    return this.findLogs({ ...dto, action } as ListAuditLogsDto);
+  }
+
+  /**
+   * Export audit trail as formatted data (issue #1468).
+   */
+  async export_audit_trail(dto: ListAuditLogsDto): Promise<{ total: number; data: AuditLog[] }> {
+    const qb = this.auditLogRepository.createQueryBuilder('log');
+    if (dto.action) qb.andWhere('log.action = :action', { action: dto.action });
+    if (dto.userId) qb.andWhere('log.userId = :userId', { userId: dto.userId });
+    if (dto.resourceId) qb.andWhere('log.resourceId = :resourceId', { resourceId: dto.resourceId });
+    const logs = await qb.orderBy('log.createdAt', 'DESC').getMany();
+    return { total: logs.length, data: logs };
+  }
+
   async prune(retentionDays: number): Promise<number> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - retentionDays);

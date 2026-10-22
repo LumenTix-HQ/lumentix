@@ -77,4 +77,35 @@ export class GiftingController {
   ) {
     return this.giftingService.cancelGift(giftId, req.user.id);
   }
+
+  // ── Issue #1466 aliases ────────────────────────────────────────────────────
+
+  @Post(':ticketId/wrap-gift')
+  @ApiOperation({ summary: 'Wrap a ticket gift (issue #1466)' })
+  wrap_ticket_gift(
+    @Param('ticketId', ParseUUIDPipe) ticketId: string,
+    @Body() dto: WrapTicketGiftDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.wrapTicketGift(ticketId, dto, req);
+  }
+
+  @Post('gifts/:giftId/schedule-delivery')
+  @ApiOperation({ summary: 'Schedule gift delivery (issue #1466)' })
+  schedule_gift_delivery(
+    @Param('giftId', ParseUUIDPipe) giftId: string,
+    @Body() dto: ScheduleGiftDeliveryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.scheduleGiftDelivery(giftId, dto, req);
+  }
+
+  @Post('gifts/:giftId/unwrap-animation')
+  @ApiOperation({ summary: 'Unwrap gift animation (issue #1466)' })
+  unwrap_gift_animation(
+    @Param('giftId', ParseUUIDPipe) giftId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.unwrapGiftAnimation(giftId, req);
+  }
 }

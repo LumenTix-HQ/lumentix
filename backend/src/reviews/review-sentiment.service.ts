@@ -292,6 +292,20 @@ export class ReviewSentimentService {
     };
   }
 
+  // ── Issue #1461 aliases ────────────────────────────────────────────────────
+
+  analyze_review_sentiment(text: string | null, rating?: number): SentimentAnalysis {
+    return this.analyzeReviewSentiment(text, rating);
+  }
+
+  async generate_sentiment_summary(eventId: string): Promise<SentimentSummary> {
+    return this.generateSentimentSummary(eventId);
+  }
+
+  async flag_toxic_review(reviewId: string): Promise<ToxicityAssessment> {
+    return this.flagToxicReview(reviewId);
+  }
+
   // ───────────────────────────────────────────────────────────────────────
 
   private tokenize(text: string): string[] {

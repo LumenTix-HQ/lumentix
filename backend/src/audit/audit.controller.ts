@@ -54,6 +54,29 @@ export class AuditController {
     return this.auditService.findLogs(dto);
   }
 
+  // ── Issue #1468 endpoints ──────────────────────────────────────────────────
+
+  @Get('query')
+  @ApiOperation({ summary: 'Query audit logs (issue #1468)' })
+  query_audit_logs(@Query() dto: ListAuditLogsDto) {
+    return this.auditService.query_audit_logs(dto);
+  }
+
+  @Get('filter-action')
+  @ApiOperation({ summary: 'Filter audit logs by action type (issue #1468)' })
+  filter_by_action_type(
+    @Query('action') action: string,
+    @Query() dto: ListAuditLogsDto,
+  ) {
+    return this.auditService.filter_by_action_type(action, dto);
+  }
+
+  @Get('export-trail')
+  @ApiOperation({ summary: 'Export audit trail (issue #1468)' })
+  export_audit_trail(@Query() dto: ListAuditLogsDto) {
+    return this.auditService.export_audit_trail(dto);
+  }
+
   @Get('user/:userId')
   @ApiOperation({
     summary: 'Get user audit logs',
