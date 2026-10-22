@@ -2184,7 +2184,8 @@ impl LumentixContract {
 
     /// Atomically consume one allowance from `package_id` for entry into
     /// `event_id`. Fails if the package is expired/inactive, the event is not
-    /// part of the package, or the allowance is exhausted. Each Soroban
+    /// part of the package, the package was already redeemed for the event,
+    /// or the allowance is exhausted. Each Soroban
     /// invocation executes as a single atomic read-modify-write against
     /// ledger state, so concurrent entry attempts cannot overspend the
     /// remaining balance.
@@ -2218,12 +2219,16 @@ impl LumentixContract {
         if !eligible {
             return Err(LumentixError::PassPackageEventNotEligible);
         }
+        if storage::has_pass_redemption(&env, package_id, event_id) {
+            return Err(LumentixError::PassPackageEventAlreadyRedeemed);
+        }
         if package.remaining_allowance == 0 {
             return Err(LumentixError::PassPackageExhausted);
         }
 
         package.remaining_allowance -= 1;
         storage::set_pass_package(&env, package_id, &package);
+        storage::mark_pass_redemption(&env, package_id, event_id);
 
         PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
         Ok(package.remaining_allowance)
@@ -7360,7 +7365,8 @@ impl LumentixContract {
     /// Checks:
     ///  a) The event exists and has completed.
     ///  b) The ticket exists, belongs to `owner`, and belongs to `event_id`.
-    ///  c) The ticket was used (checked in) — the attendance proof.
+    ///  c) The ticket was used (checked in) and not refunded or revoked —
+    ///     the attendance proof.
     ///  d) `signature` is a non-empty attendance authorization proof.
     pub fn verify_attendance_proof(
         env: Env,
@@ -7381,7 +7387,7 @@ impl LumentixContract {
         if ticket.event_id != event_id {
             return Err(LumentixError::TicketEventMismatch);
         }
-        if !ticket.used {
+        if !ticket.used || ticket.refunded || ticket.revoked {
             return Err(LumentixError::AttendanceNotVerified);
         }
 
@@ -7582,8 +7588,9 @@ impl LumentixContract {
     }
 
     /// Cast a vote for a candidate in an open schedule slot vote. Only
-    /// holders of a ticket for the event being voted on may participate,
-    /// and each ticket holder may vote once per slot.
+    /// holders of a valid (not refunded or revoked) ticket for the event
+    /// being voted on may participate, and each ticket holder may vote once
+    /// per slot.
     pub fn cast_schedule_vote(
         env: Env,
         voter: Address,
@@ -7613,7 +7620,11 @@ impl LumentixContract {
         let mut ticket_id: u64 = 1;
         while ticket_id < next_ticket_id {
             if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
-                if ticket.owner == voter && ticket.event_id == vote.event_id {
+                if ticket.owner == voter
+                    && ticket.event_id == vote.event_id
+                    && !ticket.refunded
+                    && !ticket.revoked
+                {
                     is_ticket_holder = true;
                     break;
                 }

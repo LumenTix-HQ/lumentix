@@ -665,4 +665,10 @@ pub enum LumentixError {
     DeletionNotRequested = 304,
     /// Page size is zero or above the per-call limit
     InvalidDataPageSize = 305,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages errors (Issue #1420)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// This pass package has already been redeemed for the requested event
+    PassPackageEventAlreadyRedeemed = 306,
 }
