@@ -7588,8 +7588,9 @@ impl LumentixContract {
     }
 
     /// Cast a vote for a candidate in an open schedule slot vote. Only
-    /// holders of a ticket for the event being voted on may participate,
-    /// and each ticket holder may vote once per slot.
+    /// holders of a valid (not refunded or revoked) ticket for the event
+    /// being voted on may participate, and each ticket holder may vote once
+    /// per slot.
     pub fn cast_schedule_vote(
         env: Env,
         voter: Address,
@@ -7619,7 +7620,11 @@ impl LumentixContract {
         let mut ticket_id: u64 = 1;
         while ticket_id < next_ticket_id {
             if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
-                if ticket.owner == voter && ticket.event_id == vote.event_id {
+                if ticket.owner == voter
+                    && ticket.event_id == vote.event_id
+                    && !ticket.refunded
+                    && !ticket.revoked
+                {
                     is_ticket_holder = true;
                     break;
                 }
