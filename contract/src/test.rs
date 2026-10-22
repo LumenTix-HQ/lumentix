@@ -4189,6 +4189,23 @@ fn test_generate_transaction_nonce_increments_per_account() {
 }
 
 #[test]
+fn test_generate_transaction_nonce_is_monotonic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+
+    let mut previous = client.generate_transaction_nonce(&account);
+    for _ in 0..10 {
+        let next = client.generate_transaction_nonce(&account);
+        assert!(next > previous, "nonce must strictly increase");
+        assert_eq!(next, previous + 1);
+        previous = next;
+    }
+}
+
+#[test]
 fn test_generate_transaction_nonce_is_independent_per_account() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4230,6 +4247,101 @@ fn test_validate_idempotency_key_false_after_reject_replay_attempt() {
     client.reject_replay_attempt(&account, &key);
 
     assert!(!client.validate_idempotency_key(&account, &key));
+}
+
+#[test]
+fn test_validate_idempotency_key_rejects_empty_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+    let key = BytesN::from_array(&env, &[0u8; 32]);
+
+    // An all-zero key carries no entropy and cannot identify a transaction.
+    assert!(!client.validate_idempotency_key(&account, &key));
+}
+
+#[test]
+fn test_validate_idempotency_key_rejects_oversized_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+    let key = BytesN::from_array(&env, &[0xFFu8; 32]);
+
+    // A key that is not a well-formed 32-byte digest is refused.
+    assert!(!client.validate_idempotency_key(&account, &key));
+}
+
+#[test]
+fn test_validate_idempotency_key_rejects_reused_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+    let key = BytesN::from_array(&env, &[3u8; 32]);
+
+    assert!(client.validate_idempotency_key(&account, &key));
+    client.reject_replay_attempt(&account, &key);
+    assert!(!client.validate_idempotency_key(&account, &key));
+}
+
+#[test]
+fn test_reject_replay_attempt_allows_first_time_execution() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+    let key = BytesN::from_array(&env, &[4u8; 32]);
+
+    // A brand new key is accepted exactly once.
+    let result = client.try_reject_replay_attempt(&account, &key);
+    assert!(result.is_ok());
+    assert!(!client.validate_idempotency_key(&account, &key));
+}
+
+#[test]
+fn test_reject_replay_attempt_rejects_duplicate_nonce() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+
+    let nonce = client.generate_transaction_nonce(&account);
+    let key = BytesN::from_array(&env, &[5u8; 32]);
+
+    client.reject_replay_attempt(&account, &key);
+
+    // Replaying the same nonce with a fresh key must still be refused.
+    let replay_key = BytesN::from_array(&env, &[6u8; 32]);
+    let result = client.try_reject_replay_attempt(&account, &replay_key);
+    assert_eq!(result, Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
+
+    // The next nonce is still issued monotonically after the rejection.
+    let next = client.generate_transaction_nonce(&account);
+    assert_eq!(next, nonce + 1);
+}
+
+#[test]
+fn test_reject_replay_attempt_rejects_reused_idempotency_key() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let account = Address::generate(&env);
+    let key = BytesN::from_array(&env, &[8u8; 32]);
+
+    client.reject_replay_attempt(&account, &key);
+    client.generate_transaction_nonce(&account);
+
+    // A different nonce does not make a consumed key usable again.
+    let result = client.try_reject_replay_attempt(&account, &key);
+    assert_eq!(result, Err(Ok(LumentixError::IdempotencyKeyAlreadyUsed)));
 }
 
 #[test]
@@ -4381,6 +4493,79 @@ fn test_batch_transfer_tickets_require_auth_once_for_sender() {
     assert_eq!(auths.len(), 1);
     let (addr, _) = auths.first().unwrap();
     assert_eq!(*addr, buyer_a);
+}
+
+#[test]
+fn test_batch_transfer_tickets_to_recipients_gives_each_guest_their_ticket() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let booker = Address::generate(&env);
+    let guest_a = Address::generate(&env);
+    let guest_b = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &3u32, &booker);
+
+    let mut recipients = soroban_sdk::Vec::new(&env);
+    recipients.push_back(guest_a.clone());
+    recipients.push_back(guest_b.clone());
+    recipients.push_back(guest_a.clone());
+
+    client.batch_transfer_tickets_to_recipients(&ticket_ids, &recipients, &booker);
+
+    assert_eq!(client.get_ticket_info(&ticket_ids.get(0).unwrap()).owner, guest_a);
+    assert_eq!(client.get_ticket_info(&ticket_ids.get(1).unwrap()).owner, guest_b);
+    assert_eq!(client.get_ticket_info(&ticket_ids.get(2).unwrap()).owner, guest_a);
+}
+
+#[test]
+fn test_batch_transfer_tickets_to_recipients_rejects_length_mismatch() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let booker = Address::generate(&env);
+    let guest = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &2u32, &booker);
+
+    let mut recipients = soroban_sdk::Vec::new(&env);
+    recipients.push_back(guest);
+
+    let result = client.try_batch_transfer_tickets_to_recipients(&ticket_ids, &recipients, &booker);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAmount)));
+    for id in ticket_ids.iter() {
+        assert_eq!(client.get_ticket_info(&id).owner, booker);
+    }
+}
+
+#[test]
+fn test_batch_transfer_tickets_to_recipients_rejects_self_as_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let booker = Address::generate(&env);
+    let guest = Address::generate(&env);
+
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+    let ticket_ids = client.batch_purchase_tickets(&event_id, &2u32, &booker);
+
+    let mut recipients = soroban_sdk::Vec::new(&env);
+    recipients.push_back(guest);
+    recipients.push_back(booker.clone());
+
+    let result = client.try_batch_transfer_tickets_to_recipients(&ticket_ids, &recipients, &booker);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAddress)));
+    for id in ticket_ids.iter() {
+        assert_eq!(client.get_ticket_info(&id).owner, booker);
+    }
 }
 
 #[test]
@@ -7733,6 +7918,37 @@ fn test_venue_capacity_unconfigured_is_unlimited() {
 }
 
 #[test]
+fn test_set_venue_capacity_requires_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let intruder = Address::generate(&env);
+    let result = client.try_set_venue_capacity(&event_id, &10u32, &intruder);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+
+    // Nothing was configured by the refused call.
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), None);
+}
+
+#[test]
+fn test_set_venue_capacity_rejects_zero_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let result = client.try_set_venue_capacity(&event_id, &0u32, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), None);
+}
+
+#[test]
 fn test_set_venue_capacity_seeds_counter_from_tickets_sold() {
     let env = Env::default();
     env.mock_all_auths();
@@ -7789,6 +8005,57 @@ fn test_increment_attendance_counter_up_to_capacity() {
 }
 
 #[test]
+fn test_increment_attendance_counter_requires_organizer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &5u32, &organizer);
+
+    let intruder = Address::generate(&env);
+    let result = client.try_increment_attendance_counter(&event_id, &1u32, &intruder);
+    assert_eq!(result, Err(Ok(LumentixError::Unauthorized)));
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, 0u32);
+}
+
+#[test]
+fn test_increment_attendance_counter_rejects_zero_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &5u32, &organizer);
+
+    let result = client.try_increment_attendance_counter(&event_id, &0u32, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAmount)));
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, 0u32);
+}
+
+#[test]
+fn test_increment_attendance_counter_rejects_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    client.set_venue_capacity(&event_id, &u32::MAX, &organizer);
+    client.increment_attendance_counter(&event_id, &u32::MAX, &organizer);
+
+    // The counter is full; any further increment would wrap around.
+    let result = client.try_increment_attendance_counter(&event_id, &1u32, &organizer);
+    assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+    assert_eq!(client.get_venue_capacity(&event_id).minted_count, u32::MAX);
+}
+
+#[test]
 fn test_increment_attendance_counter_rejects_over_capacity() {
     let env = Env::default();
     env.mock_all_auths();
@@ -7825,6 +8092,20 @@ fn test_reject_over_capacity_mint_is_check_only() {
     client.increment_attendance_counter(&event_id, &5u32, &organizer);
     let result = client.try_reject_over_capacity_mint(&event_id, &1u32);
     assert_eq!(result, Err(Ok(LumentixError::VenueCapacityExceeded)));
+}
+
+#[test]
+fn test_reject_over_capacity_mint_without_configured_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    // No venue capacity configured: the check is a no-op rather than a block.
+    client.reject_over_capacity_mint(&event_id, &1_000u32);
+    assert_eq!(client.get_remaining_venue_capacity(&event_id), None);
 }
 
 #[test]

@@ -206,6 +206,10 @@ For the exhaustive, code-sample-driven walkthrough see
 | `propose_upgrade`, `vote_on_upgrade`, `execute_upgrade` | Governance-gated contract upgrades |
 | `purchase_insurance`, `process_insurance_claim` | Optional ticket insurance |
 | `create_venue_layout`, `select_seat` | Seat-map based venues |
+| `create_pass_package`, `deduct_pass_allowance`, `check_pass_balance` | Cross-event pass packages (e.g. any 3 of 10 events) |
+| `submit_anonymous_survey`, `verify_attendance_proof`, `compile_survey_results` | Attendance-gated anonymous feedback surveys |
+| `initialize_schedule_vote`, `cast_schedule_vote`, `tally_vote_results` | Ticket-holder voting on schedule slots |
+| `create_promo_code`, `apply_promo_code_discount`, `validate_promo_code_limits` | Promo codes with global/per-user limits |
 
 Every mutating call that requires authorization calls
 `<address>.require_auth()` before touching storage — always simulate first
@@ -246,6 +250,18 @@ impl TicketPurchased {
 
 Index these from an off-chain indexer via `getEvents` on the Soroban RPC,
 filtering by contract ID and topic.
+
+Events emitted by the pass package, survey and schedule voting functions:
+
+| Event | Emitted by |
+|---|---|
+| `PassPackageCreated` | `create_pass_package` |
+| `PassAllowanceDeducted` | `deduct_pass_allowance` |
+| `AnonymousSurveySubmitted` | `submit_anonymous_survey` (never includes the respondent's address or ticket) |
+| `SurveyResultsCompiled` | `compile_survey_results` |
+| `ScheduleVoteInitialized` | `initialize_schedule_vote` |
+| `ScheduleVoteCast` | `cast_schedule_vote` |
+| `ScheduleVoteFinalized` | `tally_vote_results` |
 
 ---
 
@@ -320,6 +336,29 @@ let event_id = client.create_event(
 
 let ticket_id = client.purchase_ticket(&buyer, &event_id, &ticket_price);
 client.use_ticket(&ticket_id, &organizer); // gate check-in
+```
+
+### Contract: pass packages, surveys and schedule votes (Rust test harness style)
+
+```rust
+// Organizer sells a pass for any 2 of 3 events; the holder redeems one entry.
+let events = vec![&env, event_a, event_b, event_c];
+let package_id = client.create_pass_package(&organizer, &holder, &events, &2u32, &expires_at);
+let remaining = client.deduct_pass_allowance(&holder, &package_id, &event_a);
+let (remaining, eligible) = client.check_pass_balance(&package_id);
+
+// After a completed event, a checked-in attendee submits 1-5 ratings anonymously.
+let survey_id = client.submit_anonymous_survey(
+    &event_id, &ticket_id, &attendee, &signature, &vec![&env, 5u32, 4u32], &comment,
+);
+let results = client.compile_survey_results(&event_id); // averages x100
+
+// Ticket holders pick who plays a slot; anyone can tally after the deadline.
+let vote_id = client.initialize_schedule_vote(
+    &organizer, &event_id, &slot_name, &candidates, &voting_deadline,
+);
+client.cast_schedule_vote(&ticket_holder, &vote_id, &0u32);
+let finalized = client.tally_vote_results(&vote_id);
 ```
 
 ### Contract: JS client (soroban-client / stellar-sdk)

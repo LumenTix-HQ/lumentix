@@ -1287,27 +1287,38 @@ pub struct TokenGateEligibility {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Smart Contract Circuit Breaker (Issue #1460)
+// Transaction Replay Protection (Issue #1473)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// State of the emergency circuit breaker pause mechanism.
+/// Maximum accepted length (in bytes) of an idempotency key.
+pub const MAX_IDEMPOTENCY_KEY_LEN: u32 = 64;
+
+/// Minimum accepted length (in bytes) of an idempotency key.
+pub const MIN_IDEMPOTENCY_KEY_LEN: u32 = 8;
+
+/// The highest nonce currently accepted for an account. Every state-changing
+/// transaction must carry a nonce strictly greater than `nonce`; the stored
+/// value is bumped to the submitted nonce once the transaction is applied.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CircuitBreakerState {
-    pub is_active: bool,
-    pub activated_at: u64,
-    pub activated_by: Address,
-    pub reason: String,
-    pub anomaly_count: u32,
-    pub resume_signers: Vec<Address>,
-    pub required_resume_signatures: u32,
+pub struct TransactionNonce {
+    /// Account the nonce belongs to.
+    pub account: Address,
+    /// Last accepted nonce for the account.
+    pub nonce: u64,
+    /// Ledger timestamp when the nonce was last advanced.
+    pub issued_at: u64,
 }
 
-/// Threshold configuration for automated anomaly detection.
+/// A consumed idempotency key, recorded so that a retried or replayed
+/// transaction carrying the same key is rejected instead of re-executed.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnomalyThresholdConfig {
-    pub max_failed_transfers_window: u32,
-    pub max_velocity_per_window: u32,
-    pub window_seconds: u64,
+pub struct IdempotencyRecord {
+    /// Client-supplied idempotency key.
+    pub key: String,
+    /// Account that first consumed the key.
+    pub account: Address,
+    /// Ledger timestamp when the key was consumed.
+    pub consumed_at: u64,
 }

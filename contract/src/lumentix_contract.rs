@@ -7,7 +7,7 @@ use crate::events::{
     AccessibilityBooked, AccessibilityInventoryUpdated, AdminChanged, AnonymousSurveySubmitted,
     AttendanceMemorabiliaMinted,
     AttendanceVerificationFailed,
-    AttendanceVerified, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
+    AttendanceVerified, BatchTicketsDistributed, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
     CarbonOffsetPurchased, CheckinProofValidated, CollectibleInventoryUpdated,
     CrossChainTransferCompleted,
@@ -433,7 +433,35 @@ impl LumentixContract {
         event_id: u64,
         amount: i128,
     ) -> Result<u64, LumentixError> {
+        Self::purchase_ticket_internal(env, buyer, event_id, amount, None)
+    }
+
+    /// Purchase a ticket guarded by a replay-protection idempotency key.
+    /// A network-retried or replayed call carrying the same key is rejected
+    /// with `IdempotencyKeyAlreadyUsed` before any state change.
+    pub fn purchase_ticket_with_key(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        amount: i128,
+        idempotency_key: BytesN<32>,
+    ) -> Result<u64, LumentixError> {
+        Self::purchase_ticket_internal(env, buyer, event_id, amount, Some(idempotency_key))
+    }
+
+    fn purchase_ticket_internal(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        amount: i128,
+        idempotency_key: Option<BytesN<32>>,
+    ) -> Result<u64, LumentixError> {
         buyer.require_auth();
+
+        // Reject duplicate submissions before any state change (Issue #1473).
+        if let Some(key) = idempotency_key.as_ref() {
+            Self::consume_replay_key(&env, &buyer, key)?;
+        }
 
         let mut event = storage::get_event(&env, event_id)?;
 
@@ -570,7 +598,35 @@ impl LumentixContract {
         quantity: u32,
         buyer: Address,
     ) -> Result<Vec<u64>, LumentixError> {
+        Self::batch_purchase_tickets_internal(env, event_id, quantity, buyer, None)
+    }
+
+    /// Batch purchase guarded by a replay-protection idempotency key.
+    /// A network-retried or replayed call carrying the same key is rejected
+    /// with `IdempotencyKeyAlreadyUsed` before any state change.
+    pub fn batch_purchase_tickets_with_key(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        buyer: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<Vec<u64>, LumentixError> {
+        Self::batch_purchase_tickets_internal(env, event_id, quantity, buyer, Some(idempotency_key))
+    }
+
+    fn batch_purchase_tickets_internal(
+        env: Env,
+        event_id: u64,
+        quantity: u32,
+        buyer: Address,
+        idempotency_key: Option<BytesN<32>>,
+    ) -> Result<Vec<u64>, LumentixError> {
         buyer.require_auth();
+
+        // Reject duplicate submissions before any state change (Issue #1473).
+        if let Some(key) = idempotency_key.as_ref() {
+            Self::consume_replay_key(&env, &buyer, key)?;
+        }
 
         // Validate quantity is positive and within batch limit
         if quantity == 0 {
@@ -888,7 +944,35 @@ impl LumentixContract {
         from: Address,
         to: Address,
     ) -> Result<(), LumentixError> {
+        Self::transfer_ticket_internal(env, ticket_id, from, to, None)
+    }
+
+    /// Transfer a ticket guarded by a replay-protection idempotency key.
+    /// A network-retried or replayed call carrying the same key is rejected
+    /// with `IdempotencyKeyAlreadyUsed` before any state change.
+    pub fn transfer_ticket_with_key(
+        env: Env,
+        ticket_id: u64,
+        from: Address,
+        to: Address,
+        idempotency_key: BytesN<32>,
+    ) -> Result<(), LumentixError> {
+        Self::transfer_ticket_internal(env, ticket_id, from, to, Some(idempotency_key))
+    }
+
+    fn transfer_ticket_internal(
+        env: Env,
+        ticket_id: u64,
+        from: Address,
+        to: Address,
+        idempotency_key: Option<BytesN<32>>,
+    ) -> Result<(), LumentixError> {
         from.require_auth();
+
+        // Reject duplicate submissions before any state change (Issue #1473).
+        if let Some(key) = idempotency_key.as_ref() {
+            Self::consume_replay_key(&env, &from, key)?;
+        }
 
         let mut ticket = storage::get_ticket(&env, ticket_id)?;
         Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
@@ -910,14 +994,14 @@ impl LumentixContract {
     /// transaction carrying the same key can be rejected.
     pub fn generate_transaction_nonce(env: Env, account: Address) -> u64 {
         account.require_auth();
-        storage::consume_transaction_nonce(&env, &account)
+        crate::replay_protection::generate_transaction_nonce(&env, &account)
     }
 
     /// Returns whether `key` is still unused (`true`) or has already been
     /// consumed by a prior `reject_replay_attempt` call (`false`). Read-only
     /// — does not itself consume the key.
     pub fn validate_idempotency_key(env: Env, account: Address, key: BytesN<32>) -> bool {
-        !storage::is_idempotency_key_used(&env, &account, &key)
+        crate::replay_protection::validate_idempotency_key(&env, &account, &key)
     }
 
     /// Consumes `key`, erroring with `IdempotencyKeyAlreadyUsed` if it has
@@ -930,7 +1014,7 @@ impl LumentixContract {
         key: BytesN<32>,
     ) -> Result<(), LumentixError> {
         account.require_auth();
-        Self::consume_replay_key(&env, &account, &key)
+        crate::replay_protection::reject_replay_attempt(&env, &account, &key)
     }
 
     // Internal operations authorize the account once in their purchase/transfer
@@ -940,11 +1024,7 @@ impl LumentixContract {
         account: &Address,
         key: &BytesN<32>,
     ) -> Result<(), LumentixError> {
-        if storage::is_idempotency_key_used(env, account, key) {
-            return Err(LumentixError::IdempotencyKeyAlreadyUsed);
-        }
-        storage::consume_idempotency_key(env, account, key);
-        Ok(())
+        crate::replay_protection::consume_idempotency_key(env, account, key)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1029,8 +1109,7 @@ impl LumentixContract {
         amount: i128,
         idempotency_key: BytesN<32>,
     ) -> Result<u64, LumentixError> {
-        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
-        Self::purchase_ticket(env, buyer, event_id, amount)
+        Self::purchase_ticket_internal(env, buyer, event_id, amount, Some(idempotency_key))
     }
 
     /// Replay-protected group purchase; retries cannot mint another batch.
@@ -1041,8 +1120,7 @@ impl LumentixContract {
         buyer: Address,
         idempotency_key: BytesN<32>,
     ) -> Result<Vec<u64>, LumentixError> {
-        Self::consume_replay_key(&env, &buyer, &idempotency_key)?;
-        Self::batch_purchase_tickets(env, event_id, quantity, buyer)
+        Self::batch_purchase_tickets_internal(env, event_id, quantity, buyer, Some(idempotency_key))
     }
 
     /// Same as `transfer_ticket`, but guarded by `reject_replay_attempt` so a
@@ -1055,13 +1133,7 @@ impl LumentixContract {
         to: Address,
         idempotency_key: BytesN<32>,
     ) -> Result<(), LumentixError> {
-        from.require_auth();
-        Self::consume_replay_key(&env, &from, &idempotency_key)?;
-
-        let mut ticket = storage::get_ticket(&env, ticket_id)?;
-        Self::validate_ticket_transfer(&env, &ticket, &from, true)?;
-        Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from, to);
-        Ok(())
+        Self::transfer_ticket_internal(env, ticket_id, from, to, Some(idempotency_key))
     }
 
     /// Return the full ownership transfer history for a ticket.
@@ -2112,7 +2184,8 @@ impl LumentixContract {
 
     /// Atomically consume one allowance from `package_id` for entry into
     /// `event_id`. Fails if the package is expired/inactive, the event is not
-    /// part of the package, or the allowance is exhausted. Each Soroban
+    /// part of the package, the package was already redeemed for the event,
+    /// or the allowance is exhausted. Each Soroban
     /// invocation executes as a single atomic read-modify-write against
     /// ledger state, so concurrent entry attempts cannot overspend the
     /// remaining balance.
@@ -2146,12 +2219,16 @@ impl LumentixContract {
         if !eligible {
             return Err(LumentixError::PassPackageEventNotEligible);
         }
+        if storage::has_pass_redemption(&env, package_id, event_id) {
+            return Err(LumentixError::PassPackageEventAlreadyRedeemed);
+        }
         if package.remaining_allowance == 0 {
             return Err(LumentixError::PassPackageExhausted);
         }
 
         package.remaining_allowance -= 1;
         storage::set_pass_package(&env, package_id, &package);
+        storage::mark_pass_redemption(&env, package_id, event_id);
 
         PassAllowanceDeducted::emit(&env, package_id, event_id, package.remaining_allowance);
         Ok(package.remaining_allowance)
@@ -2595,7 +2672,11 @@ impl LumentixContract {
     ) -> Result<(), LumentixError> {
         from.require_auth();
 
-        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &to, &from)?;
+        let mut recipients: Vec<Address> = Vec::new(&env);
+        for _ in ticket_ids.iter() {
+            recipients.push_back(to.clone());
+        }
+        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &recipients, &from)?;
 
         for (ticket_id, mut ticket) in ticket_ids.iter().zip(tickets.iter()) {
             Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from.clone(), to.clone());
@@ -2608,9 +2689,42 @@ impl LumentixContract {
         Ok(())
     }
 
+    /// Transfer multiple tickets from `from` to *different* recipients in a
+    /// single call (issue #1425). `recipients[i]` receives `ticket_ids[i]`,
+    /// so a group-booking organizer can hand each guest their own ticket
+    /// without paying for one transaction per guest. Validation is
+    /// all-or-nothing, exactly as in `batch_transfer_tickets`.
+    ///
+    /// # Errors
+    /// Returns `InvalidAmount` if `ticket_ids` is empty, contains a
+    /// duplicate, or differs in length from `recipients`; `InvalidAddress`
+    /// if any recipient is `from` itself. Otherwise returns whatever
+    /// `validate_ticket_transfer` would return for the first bad ticket.
+    pub fn batch_transfer_tickets_to_recipients(
+        env: Env,
+        ticket_ids: Vec<u64>,
+        recipients: Vec<Address>,
+        from: Address,
+    ) -> Result<(), LumentixError> {
+        from.require_auth();
+
+        let tickets = Self::validate_batch_recipients(&env, &ticket_ids, &recipients, &from)?;
+
+        for ((ticket_id, to), mut ticket) in
+            ticket_ids.iter().zip(recipients.iter()).zip(tickets.iter())
+        {
+            Self::persist_ticket_transfer(&env, ticket_id, &mut ticket, from.clone(), to);
+        }
+
+        BatchTicketsDistributed::emit(&env, from, ticket_ids, recipients);
+
+        Ok(())
+    }
+
     /// Validates a proposed batch transfer before any ticket is written:
-    /// the ticket-ID list is non-empty and has no duplicates, the
-    /// recipient isn't the sender itself, and every ticket individually
+    /// the ticket-ID list is non-empty and has no duplicates, there is
+    /// exactly one recipient per ticket, no recipient is the sender
+    /// itself, and every ticket individually
     /// passes the same ownership/status checks `transfer_ticket` applies.
     /// Returns the loaded `Ticket` records (in `ticket_ids` order) so the
     /// caller doesn't have to fetch them from storage a second time.
@@ -2623,13 +2737,13 @@ impl LumentixContract {
     fn validate_batch_recipients(
         env: &Env,
         ticket_ids: &Vec<u64>,
-        to: &Address,
+        recipients: &Vec<Address>,
         from: &Address,
     ) -> Result<Vec<Ticket>, LumentixError> {
-        if ticket_ids.is_empty() {
+        if ticket_ids.is_empty() || ticket_ids.len() != recipients.len() {
             return Err(LumentixError::InvalidAmount);
         }
-        if to == from {
+        if recipients.contains(from) {
             return Err(LumentixError::InvalidAddress);
         }
 
@@ -7251,7 +7365,8 @@ impl LumentixContract {
     /// Checks:
     ///  a) The event exists and has completed.
     ///  b) The ticket exists, belongs to `owner`, and belongs to `event_id`.
-    ///  c) The ticket was used (checked in) — the attendance proof.
+    ///  c) The ticket was used (checked in) and not refunded or revoked —
+    ///     the attendance proof.
     ///  d) `signature` is a non-empty attendance authorization proof.
     pub fn verify_attendance_proof(
         env: Env,
@@ -7272,7 +7387,7 @@ impl LumentixContract {
         if ticket.event_id != event_id {
             return Err(LumentixError::TicketEventMismatch);
         }
-        if !ticket.used {
+        if !ticket.used || ticket.refunded || ticket.revoked {
             return Err(LumentixError::AttendanceNotVerified);
         }
 
@@ -7473,8 +7588,9 @@ impl LumentixContract {
     }
 
     /// Cast a vote for a candidate in an open schedule slot vote. Only
-    /// holders of a ticket for the event being voted on may participate,
-    /// and each ticket holder may vote once per slot.
+    /// holders of a valid (not refunded or revoked) ticket for the event
+    /// being voted on may participate, and each ticket holder may vote once
+    /// per slot.
     pub fn cast_schedule_vote(
         env: Env,
         voter: Address,
@@ -7504,7 +7620,11 @@ impl LumentixContract {
         let mut ticket_id: u64 = 1;
         while ticket_id < next_ticket_id {
             if let Ok(ticket) = storage::get_ticket(&env, ticket_id) {
-                if ticket.owner == voter && ticket.event_id == vote.event_id {
+                if ticket.owner == voter
+                    && ticket.event_id == vote.event_id
+                    && !ticket.refunded
+                    && !ticket.revoked
+                {
                     is_ticket_holder = true;
                     break;
                 }
@@ -8461,110 +8581,528 @@ impl LumentixContract {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Smart Contract Circuit Breaker (Issue #1460)
+    // ATTENDEE HEATMAP (Issue #1499)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /// Activate circuit breaker for emergency pause when anomalous activity is detected (Issue #1460)
-    pub fn activate_circuit_breaker(
+    /// Configure the heatmap grid laid over an event's venue map.
+    ///
+    /// `tile_size` is the edge of one tile in venue-map units, the grid is
+    /// `grid_width` x `grid_height` tiles, and a tile holding
+    /// `congestion_threshold` attendees reads as congested. Only the event's
+    /// organizer or the contract admin may configure it. Reconfiguring clears
+    /// the stored tiles.
+    pub fn configure_heatmap(
         env: Env,
-        caller: Address,
-        reason: String,
-        required_resume_signatures: u32,
-    ) -> Result<bool, LumentixError> {
-        caller.require_auth();
-        if !storage::is_initialized(&env) {
+        organizer: Address,
+        event_id: u64,
+        tile_size: u32,
+        grid_width: u32,
+        grid_height: u32,
+        congestion_threshold: u32,
+    ) -> Result<crate::heatmap::HeatmapConfig, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::heatmap::configure_heatmap(
+            &env,
+            event_id,
+            tile_size,
+            grid_width,
+            grid_height,
+            congestion_threshold,
+        )
+    }
+
+    /// Read the heatmap grid configuration for an event.
+    pub fn get_heatmap_config(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::heatmap::HeatmapConfig, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::get_heatmap_config(&env, event_id)
+    }
+
+    /// Fold a batch of scanner positions into the event's heatmap.
+    ///
+    /// With `reset` true the batch is a full snapshot of current attendee
+    /// positions and replaces the counts; otherwise it is added to them.
+    /// Returns the new heatmap sequence number. Only the event's organizer or
+    /// the contract admin may report positions.
+    pub fn aggregate_scan_positions(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        positions: Vec<crate::heatmap::ScanPosition>,
+        reset: bool,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::heatmap::aggregate_scan_positions(&env, event_id, positions, reset)
+    }
+
+    /// Density overlay tiles for the event's interactive venue map.
+    pub fn generate_heatmap_tiles(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Vec<crate::heatmap::HeatmapTile>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::generate_heatmap_tiles(&env, event_id)
+    }
+
+    /// Tiles changed since `since_sequence`, for keeping the overlay live.
+    ///
+    /// Start from 0, then pass the returned `to_sequence` on the next poll.
+    pub fn stream_heatmap_updates(
+        env: Env,
+        event_id: u64,
+        since_sequence: u64,
+    ) -> Result<crate::heatmap::HeatmapUpdate, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::heatmap::stream_heatmap_updates(&env, event_id, since_sequence)
+    }
+
+    /// Shared guard: contract initialised, event exists, caller is its
+    /// organizer or the contract admin.
+    fn require_event_organizer_or_admin(
+        env: &Env,
+        event_id: u64,
+        caller: &Address,
+    ) -> Result<Event, LumentixError> {
+        if !storage::is_initialized(env) {
             return Err(LumentixError::NotInitialized);
         }
-        let admin = storage::get_admin(&env);
-        if caller != admin {
+
+        let event = storage::get_event(env, event_id)?;
+        if event.organizer != *caller && storage::get_admin(env) != *caller {
             return Err(LumentixError::Unauthorized);
         }
-        let now = env.ledger().timestamp();
-        let state = CircuitBreakerState {
-            is_active: true,
-            activated_at: now,
-            activated_by: caller.clone(),
-            reason,
-            anomaly_count: 1,
-            resume_signers: Vec::new(&env),
-            required_resume_signatures: if required_resume_signatures == 0 { 2 } else { required_resume_signatures },
-        };
-        storage::set_circuit_breaker_state(&env, &state);
-        Ok(true)
+        Ok(event)
     }
 
-    /// Check whether current metrics exceed anomaly threshold and trip circuit breaker if so (Issue #1460)
-    pub fn check_anomaly_threshold(
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CHECKOUT CURRENCY CONVERSION (Issue #1500)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Current exchange rate from `from_currency` to `to_currency`, as units of
+    /// the latter per unit of the former scaled by 10^7.
+    ///
+    /// Both currencies must be registered through `set_currency_oracle` with a
+    /// price no older than an hour.
+    pub fn fetch_live_exchange_rate(
+        env: Env,
+        from_currency: String,
+        to_currency: String,
+    ) -> Result<crate::currency_conversion::ExchangeRate, LumentixError> {
+        crate::currency_conversion::fetch_live_exchange_rate(&env, &from_currency, &to_currency)
+    }
+
+    /// Pin the rate between an event's currency and the buyer's chosen
+    /// currency for five minutes, so the price the buyer confirms is the price
+    /// they are charged. Returns the lock to hand to `convert_checkout_currency`.
+    pub fn lock_exchange_rate(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        buyer_currency: String,
+    ) -> Result<crate::currency_conversion::RateLock, LumentixError> {
+        buyer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        validation::validate_currency_code(&buyer_currency)?;
+
+        crate::currency_conversion::lock_exchange_rate(
+            &env,
+            &buyer,
+            event_id,
+            &event.currency,
+            &buyer_currency,
+        )
+    }
+
+    /// Price a ticket checkout in the buyer's preferred currency while the
+    /// organizer stays settled in the event's currency.
+    ///
+    /// The settlement amount is the event's current ticket price. Pass the
+    /// `lock_id` from `lock_exchange_rate` to charge the locked rate, or
+    /// `None` to use the live one. The returned `settlement_amount` is what
+    /// the organizer receives and what `purchase_ticket` takes; `buyer_amount`
+    /// is what the buyer pays in their own currency.
+    pub fn convert_checkout_currency(
+        env: Env,
+        buyer: Address,
+        event_id: u64,
+        buyer_currency: String,
+        lock_id: Option<u64>,
+    ) -> Result<crate::currency_conversion::CheckoutConversion, LumentixError> {
+        buyer.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        validation::validate_currency_code(&buyer_currency)?;
+
+        let settlement_amount =
+            Self::calculate_dynamic_price(env.clone(), event_id, 0, 0)?;
+
+        crate::currency_conversion::convert_checkout_currency(
+            &env,
+            &buyer,
+            event_id,
+            &event.currency,
+            &buyer_currency,
+            settlement_amount,
+            lock_id,
+        )
+    }
+
+    /// Read an exchange-rate lock.
+    pub fn get_exchange_rate_lock(
+        env: Env,
+        lock_id: u64,
+    ) -> Result<crate::currency_conversion::RateLock, LumentixError> {
+        crate::currency_conversion::get_rate_lock(&env, lock_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ON-CHAIN ROYALTY SPLITS (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Configure how an event's revenue is split between its artists.
+    ///
+    /// `splits` maps each artist wallet to a share in basis points and must sum
+    /// to 10 000. Only the event's organizer or the contract admin may set it;
+    /// setting it again replaces the previous splits.
+    pub fn set_royalty_splits(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        splits: Map<Address, u32>,
+    ) -> Result<(), LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::royalty::set_royalty_splits(&env, event_id, splits)
+    }
+
+    /// Read the royalty splits configured for an event.
+    pub fn get_royalty_splits(
+        env: Env,
+        event_id: u64,
+    ) -> Result<Map<Address, u32>, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        crate::royalty::get_royalty_splits(&env, event_id)
+    }
+
+    /// Pay `total_amount` of an event's escrow out to its artists according to
+    /// the configured splits.
+    ///
+    /// Only the event's organizer or the contract admin may distribute, and a
+    /// cancelled event's escrow is reserved for refunds. Returns the amount each
+    /// artist received; the amounts always add up to `total_amount`.
+    pub fn distribute_royalties(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        total_amount: i128,
+    ) -> Result<Map<Address, i128>, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        if event.status == EventStatus::Cancelled {
+            return Err(LumentixError::InvalidStatusTransition);
+        }
+
+        crate::royalty::distribute_royalties(&env, event_id, total_amount)
+    }
+
+    /// Cumulative royalties paid to each artist of an event.
+    pub fn query_royalty_ledger(env: Env, event_id: u64) -> Map<Address, i128> {
+        crate::royalty::query_royalty_ledger(&env, event_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // LIVESTREAM CHAT MODERATION (Issue #1501)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Run a livestream chat message through the event's moderation rules.
+    ///
+    /// Returns a verdict instead of failing, so the violation a filtered
+    /// message records is kept. The organizer and contract admin are never
+    /// moderated. Rules apply in order: ban, mute, word filter, slow mode.
+    pub fn moderate_chat_message(
+        env: Env,
+        sender: Address,
+        event_id: u64,
+        message: String,
+    ) -> Result<crate::chat_moderation::ModerationVerdict, LumentixError> {
+        sender.require_auth();
+
+        let event = storage::get_event(&env, event_id)?;
+        let exempt = event.organizer == sender || storage::get_admin(&env) == sender;
+
+        crate::chat_moderation::moderate_chat_message(&env, event_id, &sender, &message, exempt)
+    }
+
+    /// Set the minimum seconds between one user's chat messages; 0 turns slow
+    /// mode off. Organizer or admin only.
+    pub fn set_slow_mode(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        seconds: u32,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::set_slow_mode(&env, event_id, seconds)
+    }
+
+    /// Replace the event chat's filtered words. Matching ignores case and
+    /// applies anywhere inside a message. Organizer or admin only.
+    pub fn set_chat_word_filters(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        words: Vec<String>,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::set_word_filters(&env, event_id, words)
+    }
+
+    /// Ban a user from the event's livestream chat. Organizer or admin only;
+    /// neither can be banned.
+    pub fn ban_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+        reason: String,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+        Self::reject_moderating_staff(&env, &event, &user)?;
+
+        crate::chat_moderation::ban_chat_user(&env, event_id, &user, reason)
+    }
+
+    /// Lift a user's chat ban. Organizer or admin only.
+    pub fn unban_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        crate::chat_moderation::unban_chat_user(&env, event_id, &user)
+    }
+
+    /// Mute a user in the event's chat for `duration_seconds` (0 lifts the
+    /// mute). Organizer or admin only; neither can be muted.
+    pub fn mute_chat_user(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        user: Address,
+        duration_seconds: u64,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        organizer.require_auth();
+        let event = Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+        Self::reject_moderating_staff(&env, &event, &user)?;
+
+        crate::chat_moderation::mute_chat_user(&env, event_id, &user, duration_seconds)
+    }
+
+    /// Read the event chat's slow-mode and word-filter settings.
+    pub fn get_chat_settings(
+        env: Env,
+        event_id: u64,
+    ) -> Result<crate::chat_moderation::ChatSettings, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::chat_moderation::get_chat_settings(&env, event_id))
+    }
+
+    /// Read a user's moderation state in the event's chat.
+    pub fn get_chat_user_state(
+        env: Env,
+        event_id: u64,
+        user: Address,
+    ) -> Result<crate::chat_moderation::ChatUserState, LumentixError> {
+        let _ = storage::get_event(&env, event_id)?;
+        Ok(crate::chat_moderation::get_chat_user_state(
+            &env, event_id, &user,
+        ))
+    }
+
+    /// The organizer and the contract admin run the chat, so they are not
+    /// valid targets for a ban or mute.
+    fn reject_moderating_staff(
+        env: &Env,
+        event: &Event,
+        target: &Address,
+    ) -> Result<(), LumentixError> {
+        if event.organizer == *target || storage::get_admin(env) == *target {
+            return Err(LumentixError::CannotModerateOrganizer);
+        }
+        Ok(())
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PREMIUM SEAT UPGRADE AUCTIONS (Issue #1456)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Open an ascending auction for one premium upgrade at an event.
+    ///
+    /// The winning ticket moves into `target_tier`. Bids must be at least
+    /// `min_bid` and each must beat the leader by `min_increment`. The auction
+    /// runs for `duration_seconds` and must end before the event starts.
+    /// Organizer or admin only. Returns the new auction's ID.
+    pub fn open_upgrade_auction(
+        env: Env,
+        organizer: Address,
+        event_id: u64,
+        target_tier: String,
+        min_bid: i128,
+        min_increment: i128,
+        duration_seconds: u64,
+    ) -> Result<u64, LumentixError> {
+        organizer.require_auth();
+        Self::require_event_organizer_or_admin(&env, event_id, &organizer)?;
+
+        let auction = crate::upgrade_auction::open_upgrade_auction(
+            &env,
+            event_id,
+            target_tier,
+            min_bid,
+            min_increment,
+            duration_seconds,
+        )?;
+        Ok(auction.auction_id)
+    }
+
+    /// Bid on an upgrade auction with a ticket you own.
+    ///
+    /// The bid is held by the contract while it leads and refunded as soon as
+    /// someone outbids it. Returns the updated auction.
+    pub fn place_upgrade_bid(
+        env: Env,
+        bidder: Address,
+        auction_id: u64,
+        ticket_id: u64,
+        amount: i128,
+    ) -> Result<crate::upgrade_auction::UpgradeAuction, LumentixError> {
+        bidder.require_auth();
+
+        crate::upgrade_auction::place_upgrade_bid(&env, &bidder, auction_id, ticket_id, amount)
+    }
+
+    /// Settle an auction whose bidding window has ended: the highest bid wins
+    /// and its ticket moves into the auctioned tier. Anyone may call this.
+    pub fn finalize_winning_bid(
+        env: Env,
+        auction_id: u64,
+    ) -> Result<crate::upgrade_auction::UpgradeAuction, LumentixError> {
+        crate::upgrade_auction::finalize_winning_bid(&env, auction_id)
+    }
+
+    /// Read an upgrade auction.
+    pub fn get_upgrade_auction(
+        env: Env,
+        auction_id: u64,
+    ) -> Result<crate::upgrade_auction::UpgradeAuction, LumentixError> {
+        crate::upgrade_auction::get_upgrade_auction(&env, auction_id)
+    }
+
+    /// Every bid placed on an upgrade auction, oldest first.
+    pub fn get_upgrade_bids(
+        env: Env,
+        auction_id: u64,
+    ) -> Result<Vec<crate::upgrade_auction::UpgradeBid>, LumentixError> {
+        crate::upgrade_auction::get_upgrade_bids(&env, auction_id)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GDPR DATA EXPORT AND DELETION (Issue #1452)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Export one page of the data held about `user` in machine-readable form.
+    ///
+    /// Scans `limit` ticket ids (at most 100) from `start_ticket_id`; start at
+    /// 0 and pass each page's `next_ticket_id` until it comes back 0. Callable
+    /// by the user themselves or the contract admin.
+    pub fn export_user_data(
         env: Env,
         caller: Address,
-        failed_transfers: u32,
-        velocity: u32,
-    ) -> Result<bool, LumentixError> {
+        user: Address,
+        start_ticket_id: u64,
+        limit: u32,
+    ) -> Result<crate::gdpr::UserDataExport, LumentixError> {
         caller.require_auth();
-        if !storage::is_initialized(&env) {
-            return Err(LumentixError::NotInitialized);
-        }
-        let config = storage::get_anomaly_threshold_config(&env);
-        let anomalous = failed_transfers >= config.max_failed_transfers_window
-            || velocity >= config.max_velocity_per_window;
+        Self::require_data_subject_or_admin(&env, &caller, &user)?;
 
-        if anomalous {
-            let now = env.ledger().timestamp();
-            let mut state = storage::get_circuit_breaker_state(&env).unwrap_or(CircuitBreakerState {
-                is_active: true,
-                activated_at: now,
-                activated_by: caller.clone(),
-                reason: String::from_str(&env, "Anomaly threshold exceeded"),
-                anomaly_count: 0,
-                resume_signers: Vec::new(&env),
-                required_resume_signatures: 2,
-            });
-            state.is_active = true;
-            state.anomaly_count += 1;
-            state.activated_at = now;
-            storage::set_circuit_breaker_state(&env, &state);
-            return Ok(true);
-        }
-        Ok(false)
+        crate::gdpr::export_user_data(&env, &user, start_ticket_id, limit)
     }
 
-    /// Resume operations via multi-sig approval (Issue #1460)
-    pub fn resume_operations(
+    /// Exercise the right to deletion. The user is soft-deleted at once; run
+    /// `anonymize_historical_records` to cascade through their records.
+    pub fn request_data_deletion(
         env: Env,
-        approver: Address,
-    ) -> Result<bool, LumentixError> {
-        approver.require_auth();
-        if !storage::is_initialized(&env) {
-            return Err(LumentixError::NotInitialized);
-        }
-        let mut state = storage::get_circuit_breaker_state(&env)
-            .ok_or(LumentixError::EscrowSplitNotFound)?;
+        user: Address,
+    ) -> Result<crate::gdpr::DeletionRequest, LumentixError> {
+        user.require_auth();
 
-        if !state.is_active {
-            return Ok(true);
-        }
-
-        let mut already_signed = false;
-        for signer in state.resume_signers.iter() {
-            if signer == approver {
-                already_signed = true;
-                break;
-            }
-        }
-        if !already_signed {
-            state.resume_signers.push_back(approver.clone());
-        }
-
-        if state.resume_signers.len() >= state.required_resume_signatures {
-            state.is_active = false;
-        }
-
-        storage::set_circuit_breaker_state(&env, &state);
-        Ok(!state.is_active)
+        crate::gdpr::request_data_deletion(&env, &user)
     }
 
-    /// Query current circuit breaker status (Issue #1460)
-    pub fn get_circuit_breaker_status(env: Env) -> Option<CircuitBreakerState> {
-        storage::get_circuit_breaker_state(&env)
+    /// Anonymize one page of a deleted user's records, keeping aggregate
+    /// analytics intact. Tickets for events that have not happened yet are
+    /// retained until they are spent. Callable by the user or the contract admin.
+    pub fn anonymize_historical_records(
+        env: Env,
+        caller: Address,
+        user: Address,
+        start_ticket_id: u64,
+        limit: u32,
+    ) -> Result<crate::gdpr::AnonymizationResult, LumentixError> {
+        caller.require_auth();
+        Self::require_data_subject_or_admin(&env, &caller, &user)?;
+
+        crate::gdpr::anonymize_historical_records(&env, &user, start_ticket_id, limit)
+    }
+
+    /// A user's deletion request, if they have made one.
+    pub fn get_data_deletion_request(
+        env: Env,
+        user: Address,
+    ) -> Option<crate::gdpr::DeletionRequest> {
+        crate::gdpr::get_deletion_request(&env, &user)
+    }
+
+    /// Aggregate anonymization counters.
+    pub fn get_anonymized_stats(env: Env) -> crate::gdpr::AnonymizedStats {
+        crate::gdpr::get_anonymized_stats(&env)
+    }
+
+    /// The pseudonym an anonymized ticket carries, if it has been anonymized.
+    pub fn get_ticket_pseudonym(env: Env, ticket_id: u64) -> Option<BytesN<32>> {
+        crate::gdpr::get_ticket_pseudonym(&env, ticket_id)
+    }
+
+    /// Personal data is the data subject's to export and erase; the admin
+    /// may act on their behalf for a verified request.
+    fn require_data_subject_or_admin(
+        env: &Env,
+        caller: &Address,
+        user: &Address,
+    ) -> Result<(), LumentixError> {
+        if !storage::is_initialized(env) {
+            return Err(LumentixError::NotInitialized);
+        }
+        if caller != user && storage::get_admin(env) != *caller {
+            return Err(LumentixError::Unauthorized);
+        }
+        Ok(())
     }
 }

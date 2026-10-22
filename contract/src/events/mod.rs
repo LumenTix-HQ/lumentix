@@ -255,6 +255,18 @@ impl BatchTicketsTransferred {
     }
 }
 
+/// Event emitted by
+/// [`crate::lumentix_contract::LumentixContract::batch_transfer_tickets_to_recipients`].
+/// `recipients[i]` is the new owner of `ticket_ids[i]`.
+pub struct BatchTicketsDistributed;
+
+impl BatchTicketsDistributed {
+    pub fn emit(env: &Env, from: Address, ticket_ids: Vec<u64>, recipients: Vec<Address>) {
+        env.events()
+            .publish((symbol_short!("batchdst"),), (from, ticket_ids, recipients));
+    }
+}
+
 /// Event emitted when organizers update a transfer blackout window.
 pub struct TransferBlackoutUpdated;
 
@@ -2036,5 +2048,223 @@ impl BuyerGeoRejected {
     pub fn emit(env: &Env, event_id: u64, buyer: Address, country_code: String) {
         env.events()
             .publish((symbol_short!("georej"),), (event_id, buyer, country_code));
+    }
+}
+
+/// Emitted when an organizer configures an event's attendee heatmap grid (Issue #1499).
+pub struct HeatmapConfigured;
+impl HeatmapConfigured {
+    pub fn emit(env: &Env, event_id: u64, grid_width: u32, grid_height: u32, tile_size: u32) {
+        env.events().publish(
+            (Symbol::new(env, "heatmap_configured"),),
+            (event_id, grid_width, grid_height, tile_size),
+        );
+    }
+}
+
+/// Emitted when a batch of scan positions is folded into the heatmap (Issue #1499).
+/// Subscribers poll `stream_heatmap_updates` with the previous sequence on seeing it.
+pub struct ScanPositionsAggregated;
+impl ScanPositionsAggregated {
+    pub fn emit(env: &Env, event_id: u64, sequence: u64, positions: u32, tiles_touched: u32) {
+        env.events().publish(
+            (Symbol::new(env, "scan_positions_aggregated"),),
+            (event_id, sequence, positions, tiles_touched),
+        );
+    }
+}
+
+/// Emitted when a heatmap tile crosses its congestion threshold (Issue #1499).
+pub struct HeatmapCongestionDetected;
+impl HeatmapCongestionDetected {
+    pub fn emit(env: &Env, event_id: u64, tile_x: u32, tile_y: u32, count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "heatmap_congestion"),),
+            (event_id, tile_x, tile_y, count),
+        );
+    }
+}
+
+/// Emitted when a buyer pins an exchange rate for checkout (Issue #1500).
+pub struct ExchangeRateLocked;
+impl ExchangeRateLocked {
+    pub fn emit(
+        env: &Env,
+        lock_id: u64,
+        event_id: u64,
+        buyer: Address,
+        buyer_currency: String,
+        rate: i128,
+        expires_at: u64,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "exchange_rate_locked"),),
+            (lock_id, event_id, buyer, buyer_currency, rate, expires_at),
+        );
+    }
+}
+
+/// Emitted when a checkout is priced in the buyer's currency (Issue #1500).
+pub struct CheckoutCurrencyConverted;
+impl CheckoutCurrencyConverted {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        buyer: Address,
+        buyer_currency: String,
+        buyer_amount: i128,
+        settlement_amount: i128,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "checkout_currency_converted"),),
+            (event_id, buyer, buyer_currency, buyer_amount, settlement_amount),
+        );
+    }
+}
+
+/// Emitted when an organizer sets or replaces an event's royalty splits (Issue #1206).
+pub struct RoyaltySplitsSet;
+impl RoyaltySplitsSet {
+    pub fn emit(env: &Env, event_id: u64, total_bps: u32) {
+        env.events()
+            .publish((Symbol::new(env, "royalty_splits_set"),), (event_id, total_bps));
+    }
+}
+
+/// Emitted when escrow revenue is paid out to an event's artists (Issue #1206).
+pub struct RoyaltiesDistributed;
+impl RoyaltiesDistributed {
+    pub fn emit(env: &Env, event_id: u64, total_amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "royalties_distributed"),),
+            (event_id, total_amount),
+        );
+    }
+}
+
+/// Emitted when a chat message is turned away by moderation (Issue #1501).
+/// `verdict` is 1 banned, 2 muted, 3 slow mode, 4 filtered word.
+pub struct ChatMessageModerated;
+impl ChatMessageModerated {
+    pub fn emit(env: &Env, event_id: u64, user: Address, verdict: u32) {
+        env.events().publish(
+            (Symbol::new(env, "chat_message_moderated"),),
+            (event_id, user, verdict),
+        );
+    }
+}
+
+/// Emitted when an event's chat slow-mode interval changes (Issue #1501).
+pub struct ChatSlowModeSet;
+impl ChatSlowModeSet {
+    pub fn emit(env: &Env, event_id: u64, seconds: u32) {
+        env.events()
+            .publish((Symbol::new(env, "chat_slow_mode_set"),), (event_id, seconds));
+    }
+}
+
+/// Emitted when an event's chat word filters are replaced (Issue #1501).
+pub struct ChatWordFiltersUpdated;
+impl ChatWordFiltersUpdated {
+    pub fn emit(env: &Env, event_id: u64, word_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "chat_filters_updated"),),
+            (event_id, word_count),
+        );
+    }
+}
+
+/// Emitted when a user is banned from an event's chat (Issue #1501).
+pub struct ChatUserBanned;
+impl ChatUserBanned {
+    pub fn emit(env: &Env, event_id: u64, user: Address, reason: String) {
+        env.events()
+            .publish((Symbol::new(env, "chat_user_banned"),), (event_id, user, reason));
+    }
+}
+
+/// Emitted when a user's chat ban is lifted (Issue #1501).
+pub struct ChatUserUnbanned;
+impl ChatUserUnbanned {
+    pub fn emit(env: &Env, event_id: u64, user: Address) {
+        env.events()
+            .publish((Symbol::new(env, "chat_user_unbanned"),), (event_id, user));
+    }
+}
+
+/// Emitted when a user is muted, or unmuted with `muted_until` 0 (Issue #1501).
+pub struct ChatUserMuted;
+impl ChatUserMuted {
+    pub fn emit(env: &Env, event_id: u64, user: Address, muted_until: u64) {
+        env.events().publish(
+            (Symbol::new(env, "chat_user_muted"),),
+            (event_id, user, muted_until),
+        );
+    }
+}
+
+/// Emitted when an organizer opens a premium seat upgrade auction (Issue #1456).
+pub struct UpgradeAuctionOpened;
+impl UpgradeAuctionOpened {
+    pub fn emit(env: &Env, auction_id: u64, event_id: u64, target_tier: String, ends_at: u64) {
+        env.events().publish(
+            (Symbol::new(env, "upg_auction_opened"),),
+            (auction_id, event_id, target_tier, ends_at),
+        );
+    }
+}
+
+/// Emitted for every bid on an upgrade auction, so the bidding is public (Issue #1456).
+pub struct UpgradeBidPlaced;
+impl UpgradeBidPlaced {
+    pub fn emit(env: &Env, auction_id: u64, bidder: Address, ticket_id: u64, amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "upg_bid_placed"),),
+            (auction_id, bidder, ticket_id, amount),
+        );
+    }
+}
+
+/// Emitted when an upgrade auction closes; `winning_bid` is 0 when nobody won (Issue #1456).
+pub struct UpgradeAuctionFinalized;
+impl UpgradeAuctionFinalized {
+    pub fn emit(env: &Env, auction_id: u64, winner: Option<Address>, winning_bid: i128) {
+        env.events().publish(
+            (Symbol::new(env, "upg_auction_final"),),
+            (auction_id, winner, winning_bid),
+        );
+    }
+}
+
+/// Emitted when a user exports their personal data (Issue #1452).
+pub struct UserDataExported;
+impl UserDataExported {
+    pub fn emit(env: &Env, user: Address, ticket_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "user_data_exported"),),
+            (user, ticket_count),
+        );
+    }
+}
+
+/// Emitted when a user asks for their data to be deleted (Issue #1452).
+pub struct DataDeletionRequested;
+impl DataDeletionRequested {
+    pub fn emit(env: &Env, user: Address, requested_at: u64) {
+        env.events().publish(
+            (Symbol::new(env, "data_deletion_req"),),
+            (user, requested_at),
+        );
+    }
+}
+
+/// Emitted after a batch of a user's records is anonymized (Issue #1452).
+pub struct HistoricalRecordsAnonymized;
+impl HistoricalRecordsAnonymized {
+    pub fn emit(env: &Env, user: Address, anonymized: u32, retained: u32, completed: bool) {
+        env.events().publish(
+            (Symbol::new(env, "records_anonymized"),),
+            (user, anonymized, retained, completed),
+        );
     }
 }

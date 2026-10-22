@@ -232,6 +232,12 @@ pub mod types;
 pub mod validation;
 pub mod venue_capacity;
 pub mod achievement_badge;
+pub mod replay_protection;
+pub mod heatmap;
+pub mod currency_conversion;
+pub mod chat_moderation;
+pub mod upgrade_auction;
+pub mod gdpr;
 
 #[cfg(test)]
 pub mod test;
@@ -274,6 +280,24 @@ mod geo_fence_tests;
 #[cfg(test)]
 mod circuit_breaker_emergency_tests;
 
+#[cfg(test)]
+mod heatmap_tests;
+
+#[cfg(test)]
+mod currency_conversion_tests;
+
+#[cfg(test)]
+mod chat_moderation_tests;
+
+#[cfg(test)]
+mod upgrade_auction_tests;
+
+#[cfg(test)]
+mod gdpr_tests;
+
+#[cfg(test)]
+mod referral_offline_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
@@ -308,6 +332,14 @@ pub use events::{
     EscrowSplitCreated, EscrowSplitReleased, EscrowSplitDisputed,
     DynamicPricingCurveSet, PricingDecisionLogged,
     GeoFenceRulesSet, BuyerGeoVerified, BuyerGeoRejected,
+    ReplayAttemptRejected, IdempotencyKeyRegistered,
+    HeatmapConfigured, ScanPositionsAggregated, HeatmapCongestionDetected,
+    ExchangeRateLocked, CheckoutCurrencyConverted,
+    RoyaltySplitsSet, RoyaltiesDistributed,
+    ChatMessageModerated, ChatSlowModeSet, ChatWordFiltersUpdated, ChatUserBanned,
+    ChatUserUnbanned, ChatUserMuted,
+    UpgradeAuctionOpened, UpgradeBidPlaced, UpgradeAuctionFinalized,
+    UserDataExported, DataDeletionRequested, HistoricalRecordsAnonymized,
 };
 pub use lumentix_contract::LumentixContract;
 pub use models::{DataKey, EscrowConfig, EventAuth, Ticket as TicketModel, ValidatorKey};
@@ -329,4 +361,13 @@ pub use types::{
     ServiceHealthStatus, SystemHealthStatus, MetricDatapoint, TelemetryStatus,
     TokenGateConfig, TokenGateEligibility,
     DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
+};
+pub use chat_moderation::{ChatSettings, ChatUserState, ModerationVerdict};
+pub use gdpr::{AnonymizationResult, AnonymizedStats, DeletionRequest, DeletionStatus, UserDataExport};
+pub use upgrade_auction::{UpgradeAuction, UpgradeAuctionStatus, UpgradeBid};
+pub use currency_conversion::{CheckoutConversion, ExchangeRate, RateLock};
+pub use heatmap::{HeatmapConfig, HeatmapTile, HeatmapUpdate, ScanPosition};
+pub use replay_protection::{
+    generate_transaction_nonce, validate_idempotency_key, reject_replay_attempt,
+    ReplayProtectionConfig, TransactionNonce, IdempotencyKeyRecord,
 };

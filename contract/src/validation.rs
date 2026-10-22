@@ -169,6 +169,33 @@ pub fn validate_identity_level(level: u32) -> Result<(), LumentixError> {
     Ok(())
 }
 
+/// Maximum accepted length (in bytes) for an idempotency key.
+pub const MAX_IDEMPOTENCY_KEY_LEN: u32 = 64;
+
+/// Validate the format of an idempotency key.
+///
+/// Rejects empty keys and keys longer than [`MAX_IDEMPOTENCY_KEY_LEN`] with
+/// [`LumentixError::InvalidIdempotencyKey`].
+pub fn validate_idempotency_key_format(key: &String) -> Result<(), LumentixError> {
+    let len = key.len();
+    if len == 0 || len > MAX_IDEMPOTENCY_KEY_LEN {
+        return Err(LumentixError::InvalidIdempotencyKey);
+    }
+    Ok(())
+}
+
+/// Validate that a provided nonce is strictly greater than the last recorded
+/// nonce, preventing duplicate or out-of-order (replayed) transactions.
+///
+/// Returns [`LumentixError::NonceOutOfOrder`] when `provided_nonce` is not
+/// greater than `last_nonce`.
+pub fn validate_nonce_ordering(last_nonce: u64, provided_nonce: u64) -> Result<(), LumentixError> {
+    if provided_nonce <= last_nonce {
+        return Err(LumentixError::NonceOutOfOrder);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +300,51 @@ mod tests {
         assert_eq!(
             validate_currency_code(&empty),
             Err(LumentixError::EmptyString)
+        );
+    }
+
+    #[test]
+    fn test_validate_idempotency_key_format() {
+        let env = Env::default();
+        let valid = String::from_str(&env, "order-12345");
+        let empty = String::from_str(&env, "");
+
+        assert!(validate_idempotency_key_format(&valid).is_ok());
+        assert_eq!(
+            validate_idempotency_key_format(&empty),
+            Err(LumentixError::InvalidIdempotencyKey)
+        );
+
+        // Exactly at the max length is allowed.
+        let mut buf = [b'a'; 64];
+        let at_max = String::from_bytes(&env, &buf);
+        assert!(validate_idempotency_key_format(&at_max).is_ok());
+
+        // One byte over the max length is rejected.
+        buf[63] = b'b';
+        let over_max = String::from_bytes(&env, &[b'a'; 65]);
+        assert_eq!(
+            validate_idempotency_key_format(&over_max),
+            Err(LumentixError::InvalidIdempotencyKey)
+        );
+    }
+
+    #[test]
+    fn test_validate_nonce_ordering() {
+        assert!(validate_nonce_ordering(0, 1).is_ok());
+        assert!(validate_nonce_ordering(5, 6).is_ok());
+        assert!(validate_nonce_ordering(0, u64::MAX).is_ok());
+        assert_eq!(
+            validate_nonce_ordering(5, 5),
+            Err(LumentixError::NonceOutOfOrder)
+        );
+        assert_eq!(
+            validate_nonce_ordering(5, 4),
+            Err(LumentixError::NonceOutOfOrder)
+        );
+        assert_eq!(
+            validate_nonce_ordering(0, 0),
+            Err(LumentixError::NonceOutOfOrder)
         );
     }
 }

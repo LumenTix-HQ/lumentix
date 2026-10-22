@@ -75,6 +75,7 @@ const BIOMETRIC_CRED_PREFIX: &str = "BIOCRED_";
 const EVENT_BIOMETRIC_REQUIRED_PREFIX: &str = "BIOREQ_";
 const PASS_PACKAGE_PREFIX: &str = "PPKG_";
 const PASS_PACKAGE_ID_COUNTER: &str = "PPKG_CTR";
+const PASS_REDEMPTION_PREFIX: &str = "PPKGRED_";
 const SURVEY_ID_COUNTER: &str = "SURVEY_CTR";
 const SURVEY_PREFIX: &str = "SURVEY_";
 const SURVEY_EVENT_INDEX_PREFIX: &str = "SUREVT_";
@@ -492,6 +493,21 @@ pub fn get_pass_package(env: &Env, package_id: u64) -> Result<PassPackage, Lumen
     Ok(package)
 }
 
+/// Check whether a pass package has already been redeemed for an event.
+pub fn has_pass_redemption(env: &Env, package_id: u64, event_id: u64) -> bool {
+    let key = (PASS_REDEMPTION_PREFIX, package_id, event_id);
+    env.storage().persistent().has(&key)
+}
+
+/// Record that a pass package has been redeemed for an event.
+pub fn mark_pass_redemption(env: &Env, package_id: u64, event_id: u64) {
+    let key = (PASS_REDEMPTION_PREFIX, package_id, event_id);
+    env.storage().persistent().set(&key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
 /// Set ticket data
 pub fn set_ticket(env: &Env, ticket_id: u64, ticket: &Ticket) {
     let key = (TICKET_PREFIX, ticket_id);
@@ -638,6 +654,34 @@ pub fn get_ticket_transfer_history(env: &Env, ticket_id: u64) -> Vec<TicketTrans
             .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
     }
     history
+}
+
+/// Replace `user` with `replacement` in a ticket's transfer history, keeping
+/// the timestamps and the shape of the chain of custody (Issue #1452).
+pub fn replace_address_in_transfer_history(
+    env: &Env,
+    ticket_id: u64,
+    user: &Address,
+    replacement: &Address,
+) {
+    let key = (TRANSFER_HISTORY_PREFIX, ticket_id);
+    let history: Vec<TicketTransferRecord> = match env.storage().persistent().get(&key) {
+        Some(history) => history,
+        None => return,
+    };
+
+    let mut rewritten: Vec<TicketTransferRecord> = Vec::new(env);
+    for record in history.iter() {
+        rewritten.push_back(TicketTransferRecord {
+            from: if record.from == *user { replacement.clone() } else { record.from },
+            to: if record.to == *user { replacement.clone() } else { record.to },
+            timestamp: record.timestamp,
+        });
+    }
+    env.storage().persistent().set(&key, &rewritten);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
 }
 
 /// Store a transfer blackout window for an event.
@@ -2676,6 +2720,8 @@ pub fn has_offline_scan_synced(env: &Env, ticket_id: u64) -> bool {
 
 const TX_NONCE_PREFIX: &str = "TXNONCE_";
 const IDEMPOTENCY_KEY_PREFIX: &str = "IDEMKEY_";
+const TX_NONCE_SYMBOL: &str = "tx_nonce";
+const IDEM_KEY_SYMBOL: &str = "idem_key";
 
 /// Returns the next nonce that would be issued to `account`, without
 /// consuming it. Useful for a client to preview the value it should embed
@@ -2710,6 +2756,53 @@ pub fn is_idempotency_key_used(env: &Env, account: &Address, key: &BytesN<32>) -
 /// a replay. Callers should check `is_idempotency_key_used` first.
 pub fn consume_idempotency_key(env: &Env, account: &Address, key: &BytesN<32>) {
     let storage_key = (IDEMPOTENCY_KEY_PREFIX, account.clone(), key.clone());
+    env.storage().persistent().set(&storage_key, &true);
+    env.storage()
+        .persistent()
+        .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Replay protection: per-account nonce & idempotency key (Issue #1473)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Read the current nonce for `account` (0 when the account has never
+/// submitted a nonce-protected transaction).
+pub fn get_account_nonce(env: &Env, account: &Address) -> u64 {
+    let key = (TX_NONCE_SYMBOL, account.clone());
+    let nonce: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+    if env.storage().persistent().has(&key) {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    nonce
+}
+
+/// Persist the next nonce for `account`.
+pub fn set_account_nonce(env: &Env, account: &Address, nonce: u64) {
+    let key = (TX_NONCE_SYMBOL, account.clone());
+    env.storage().persistent().set(&key, &nonce);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+}
+
+/// Whether an idempotency key has already been consumed.
+pub fn has_idempotency_key(env: &Env, key: &String) -> bool {
+    let storage_key = (IDEM_KEY_SYMBOL, key.clone());
+    let has = env.storage().persistent().has(&storage_key);
+    if has {
+        env.storage()
+            .persistent()
+            .extend_ttl(&storage_key, PERSISTENT_LIFETIME, PERSISTENT_LIFETIME);
+    }
+    has
+}
+
+/// Mark an idempotency key as consumed so a later replay is rejected.
+pub fn consume_idempotency_key_str(env: &Env, key: &String) {
+    let storage_key = (IDEM_KEY_SYMBOL, key.clone());
     env.storage().persistent().set(&storage_key, &true);
     env.storage()
         .persistent()

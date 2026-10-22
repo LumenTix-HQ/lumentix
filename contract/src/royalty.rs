@@ -46,10 +46,15 @@ pub fn set_royalty_splits(
     event_id: u64,
     splits: Map<Address, u32>,
 ) -> Result<(), LumentixError> {
-    let total: u32 = splits.values().iter().sum();
-    if total != ROYALTY_TOTAL_BPS {
+    // Sum in u64 so a hostile map of huge shares cannot overflow its way to 10 000.
+    let mut sum: u64 = 0;
+    for bps in splits.values().iter() {
+        sum += u64::from(bps);
+    }
+    if sum != u64::from(ROYALTY_TOTAL_BPS) {
         return Err(LumentixError::InvalidRoyaltySplit);
     }
+    let total = ROYALTY_TOTAL_BPS;
 
     env.storage()
         .persistent()

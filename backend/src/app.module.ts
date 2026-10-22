@@ -59,6 +59,8 @@ import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module
 import { IdentityModule } from './identity/identity.module';
 import { FraudDetectionModule } from './fraud-detection/fraud-detection.module';
 import { PassPackagesModule } from './pass-packages/pass-packages.module';
+import { BridgeModule } from './bridge/bridge.module';
+import { TaxReceiptsModule } from './tax-receipts/tax-receipts.module';
 import { TestingModule } from './testing/testing.module';
 import { InternalModule } from './common/internal.module';
 import { InternalRoutingModule } from './internal/internal.module';
@@ -166,6 +168,8 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     TermsOfServiceModule,
     FraudDetectionModule,
     PassPackagesModule,
+    BridgeModule,
+    TaxReceiptsModule,
     TestingModule,
     InternalModule,
     InternalRoutingModule,

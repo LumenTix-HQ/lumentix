@@ -583,4 +583,92 @@ pub enum LumentixError {
     BuyerLocationRequired = 275,
     /// Buyer's region is not permitted by the event's geo-fence rules
     BuyerLocationNotAllowed = 276,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Smart contract event replay protection errors (Issue #1473)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Duplicate transaction detected: nonce already consumed or idempotency key reused
+    ReplayAttempt = 277,
+    /// Idempotency key is malformed or empty
+    InvalidIdempotencyKey = 278,
+    /// Nonce is not greater than the last consumed nonce for the account
+    NonceOutOfOrder = 279,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Attendee heatmap errors (Issue #1499)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No heatmap grid has been configured for the event
+    HeatmapNotConfigured = 280,
+    /// Heatmap grid has a zero or oversized dimension, tile size or threshold
+    InvalidHeatmapConfig = 281,
+    /// A scanned position falls outside the configured heatmap grid
+    ScanPositionOutOfBounds = 282,
+    /// Scan batch is empty or larger than the per-call limit
+    InvalidScanBatch = 283,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Checkout currency conversion errors (Issue #1500)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// An oracle price backing the exchange rate is older than the allowed age
+    StaleExchangeRate = 284,
+    /// No exchange-rate lock matches the given ID, event and currency
+    ExchangeRateLockNotFound = 285,
+    /// The exchange-rate lock's window has passed
+    ExchangeRateLockExpired = 286,
+    /// The exchange-rate lock has already been used for a checkout
+    ExchangeRateLockConsumed = 287,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Livestream chat moderation errors (Issue #1501)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Slow-mode interval is above the one-hour maximum
+    InvalidSlowModeInterval = 288,
+    /// Chat message is empty or longer than the maximum length
+    InvalidChatMessage = 289,
+    /// Word filter list is too long, or holds an empty or oversized word
+    InvalidChatWordFilter = 290,
+    /// The user is already banned from this event's chat
+    ChatUserAlreadyBanned = 291,
+    /// The user is not banned from this event's chat
+    ChatUserNotBanned = 292,
+    /// The event's organizer and the contract admin cannot be banned or muted
+    CannotModerateOrganizer = 293,
+    /// Mute duration is above the seven-day maximum
+    InvalidMuteDuration = 294,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Premium seat upgrade auction errors (Issue #1456)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No upgrade auction exists with the given ID
+    UpgradeAuctionNotFound = 295,
+    /// Auction tier, minimum bid, increment or duration is invalid, or it would run past the event start
+    InvalidUpgradeAuction = 296,
+    /// The auction is closed to bids: it has ended or been finalized
+    UpgradeAuctionClosed = 297,
+    /// The auction's bidding window has not ended yet
+    UpgradeAuctionStillOpen = 298,
+    /// The bid is below the minimum bid or the current highest bid plus the increment
+    UpgradeBidTooLow = 299,
+    /// The ticket is not owned by the bidder, belongs to another event, or can no longer be upgraded
+    UpgradeBidTicketInvalid = 300,
+    /// The ticket already holds the tier being auctioned
+    UpgradeTierAlreadyHeld = 301,
+    /// The auction has reached its maximum number of recorded bids
+    UpgradeAuctionBidLimit = 302,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GDPR data export and deletion errors (Issue #1452)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// A data-deletion request is already on record for this user
+    DeletionAlreadyRequested = 303,
+    /// No data-deletion request is on record for this user
+    DeletionNotRequested = 304,
+    /// Page size is zero or above the per-call limit
+    InvalidDataPageSize = 305,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages errors (Issue #1420)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// This pass package has already been redeemed for the requested event
+    PassPackageEventAlreadyRedeemed = 306,
 }
