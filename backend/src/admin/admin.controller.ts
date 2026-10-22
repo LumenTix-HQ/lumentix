@@ -161,6 +161,30 @@ export class AdminController {
     return this.adminService.blockUser(id);
   }
 
+  @Get('users/search')
+  @ApiOperation({ summary: 'Search users (issue #1459)' })
+  @ApiResponse({ status: 200, description: 'Users found' })
+  search_users(@Query() dto: ListAdminUsersDto) {
+    return this.adminService.search_users(dto);
+  }
+
+  @Patch('users/:id/role')
+  @ApiOperation({ summary: 'Update user role (issue #1459)' })
+  @ApiResponse({ status: 200, description: 'User role updated' })
+  update_user_role(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('role') role: UserRole,
+  ) {
+    return this.adminService.update_user_role(id, role);
+  }
+
+  @Patch('users/:id/suspend')
+  @ApiOperation({ summary: 'Suspend user account (issue #1459)' })
+  @ApiResponse({ status: 200, description: 'User suspended' })
+  suspend_user_account(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.suspend_user_account(id);
+  }
+
   // ── Events ────────────────────────────────────────────────────────────────
 
   @Get('events')

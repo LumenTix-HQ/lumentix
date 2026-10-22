@@ -137,6 +137,27 @@ export class AdminService {
     return paginate(qb, dto, 'user');
   }
 
+  /**
+   * Search users by criteria (issue #1459).
+   */
+  async search_users(dto: ListAdminUsersDto): Promise<PaginatedResult<User>> {
+    return this.listUsers(dto);
+  }
+
+  /**
+   * Update user role (issue #1459).
+   */
+  async update_user_role(userId: string, role: UserRole): Promise<User> {
+    return this.updateUser(userId, { role });
+  }
+
+  /**
+   * Suspend a user account (issue #1459).
+   */
+  async suspend_user_account(userId: string): Promise<User> {
+    return this.blockUser(userId);
+  }
+
   async updateUser(
     userId: string,
     dto: UpdateAdminUserDto,
