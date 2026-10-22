@@ -396,6 +396,42 @@ export class EventsController {
     return this.eventsService.getCancellationStatus(id, req.user.id);
   }
 
+  @Post(':id/cancel-on-chain')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Cancel event on-chain for smart contract refunds' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'On-chain cancellation initiated' })
+  cancelOnChain(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.cancelEventOnChain(id, req.user.id);
+  }
+
+  @Post(':id/execute-mass-refund')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Execute automatic mass refund for all ticket holders' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'Mass refund execution started' })
+  executeMassRefund(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.executeMassRefund(id, req.user.id);
+  }
+
+  @Get(':id/verify-refund-completion')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Verify all refunds completed for cancelled event' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Refund completion status' })
+  verifyRefundCompletion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.verifyRefundCompletion(id, req.user.id);
+  }
+
   @Get(':id/stats')
   @Roles(Role.ORGANIZER)
   @ApiOperation({
