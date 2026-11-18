@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -11,6 +11,7 @@ import { VerifyTicketDto } from './dto/verify-ticket.dto';
 import { Roles, Role } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @ApiTags('Tickets')
 @ApiBearerAuth()
@@ -35,9 +36,16 @@ export class VerificationController {
   @ApiResponse({ status: 403, description: 'Caller is not admin or organizer' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
   @ApiResponse({ status: 422, description: 'Ticket cannot be verified' })
-  async verify(@Body() verifyTicketDto: VerifyTicketDto) {
+  async verify(
+    @Body() verifyTicketDto: VerifyTicketDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     const { ticketId, signature } = verifyTicketDto;
-    const ticket = await this.ticketsService.verifyTicket(ticketId, signature);
+    const ticket = await this.ticketsService.verifyTicket(
+      ticketId,
+      signature,
+      req.user,
+    );
 
     return {
       message: 'Ticket verified successfully',

@@ -812,13 +812,31 @@ export class TicketsService {
     return this.ticketRepo.save(ticket);
   }
 
-  async verifyTicket(ticketId: string, signature: string): Promise<TicketEntity> {
+  async verifyTicket(
+    ticketId: string,
+    signature: string,
+    actor: { id: string; role: string },
+  ): Promise<TicketEntity> {
     if (!this.ticketSigningService.verify(ticketId, signature)) {
       throw new UnauthorizedException('Invalid ticket signature');
     }
 
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
+
+    // Same ownership rule as verifyQrCheckIn: only admins or the organizer of
+    // the ticket's own event may mark it as used.
+    if (actor.role !== 'admin') {
+      const event = await this.eventRepo.findOne({
+        where: { id: ticket.eventId },
+      });
+      if (!event) throw new NotFoundException('Event not found');
+      if (event.organizerId !== actor.id) {
+        throw new ForbiddenException(
+          'You cannot verify tickets for this event',
+        );
+      }
+    }
 
     if (ticket.status === 'used') {
       throw new BadRequestException('Ticket has already been used');
@@ -827,8 +845,17 @@ export class TicketsService {
       throw new BadRequestException('Ticket is no longer valid');
     }
 
+    // Conditional flip so concurrent verifications cannot both succeed.
+    const updated = await this.ticketRepo.update(
+      { id: ticket.id, status: 'valid' },
+      { status: 'used' },
+    );
+    if (updated.affected !== 1) {
+      throw new BadRequestException('Ticket has already been used');
+    }
+
     ticket.status = 'used';
-    return this.ticketRepo.save(ticket);
+    return ticket;
   }
 
   async verifyQrCheckIn(

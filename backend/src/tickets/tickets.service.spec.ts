@@ -18,6 +18,7 @@ describe('TicketsService', () => {
 
   const repo = {
     findOne: jest.fn(),
+    update: jest.fn(),
     create: jest.fn((x: TicketEntity) => x),
     save: jest.fn(
       (x: TicketEntity) =>
@@ -197,6 +198,29 @@ describe('TicketsService', () => {
       return signer.sign(privatePem, 'hex');
     }
 
+    const admin = { id: 'admin-1', role: 'admin' };
+
+    it('rejects an organizer of a different event', async () => {
+      repo.findOne.mockResolvedValue({
+        id: 't1',
+        status: 'valid',
+        eventId: 'e1',
+      });
+      jest
+        .spyOn(
+          service['ticketSigningService'] as unknown as TicketSigningService,
+          'verify',
+        )
+        .mockReturnValue(true);
+      jest
+        .spyOn(service['eventRepo'], 'findOne')
+        .mockResolvedValue({ id: 'e1', organizerId: 'other' } as never);
+
+      await expect(
+        service.verifyTicket('t1', 'sig', { id: 'org-1', role: 'organizer' }),
+      ).rejects.toThrow('You cannot verify tickets for this event');
+    });
+
     it('marks ticket as used when signature is valid', async () => {
       const ticketId = 'ticket-uuid-1234';
       const signature = makeSignature(ticketId);
@@ -210,9 +234,11 @@ describe('TicketsService', () => {
         )
         .mockReturnValue(true);
 
-      const result = await service.verifyTicket(ticketId, signature);
+      repo.update.mockResolvedValue({ affected: 1 });
+
+      const result = await service.verifyTicket(ticketId, signature, admin);
       expect(result.status).toBe('used');
-      expect(repo.save).toHaveBeenCalled();
+      expect(repo.update).toHaveBeenCalled();
     });
 
     it('rejects an arbitrary truthy string as signature', async () => {
@@ -223,7 +249,7 @@ describe('TicketsService', () => {
         )
         .mockReturnValue(false);
       await expect(
-        service.verifyTicket('ticket-uuid-1234', 'not-a-real-signature'),
+        service.verifyTicket('ticket-uuid-1234', 'not-a-real-signature', admin),
       ).rejects.toThrow('Invalid ticket signature');
     });
 
@@ -236,7 +262,7 @@ describe('TicketsService', () => {
         .mockReturnValue(false);
       const signature = makeSignature('other-ticket-id');
       await expect(
-        service.verifyTicket('ticket-uuid-1234', signature),
+        service.verifyTicket('ticket-uuid-1234', signature, admin),
       ).rejects.toThrow('Invalid ticket signature');
     });
 
@@ -252,7 +278,8 @@ describe('TicketsService', () => {
         )
         .mockReturnValue(true);
 
-      await expect(service.verifyTicket(ticketId, signature)).rejects.toThrow(
+      await expect(service.verifyTicket(ticketId, signature, admin),
+      ).rejects.toThrow(
         'Ticket has already been used',
       );
     });
