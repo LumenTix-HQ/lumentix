@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isTokenExpired, decodeJwtRole } from '@/lib/auth/token';
+import { hasRole, ROLES } from '@/lib/auth/roles';
 
 /**
  * Pages that require an authenticated user. `/events/:id/analytics` and
@@ -47,7 +48,7 @@ export default function middleware(req: NextRequest) {
 
   if (isOrganizerRoute(pathname)) {
     const role = decodeJwtRole(token);
-    if (role !== 'organizer' && role !== 'admin') {
+    if (!hasRole(role, ROLES.ORGANIZER, ROLES.ADMIN)) {
       url.pathname = '/';
       url.searchParams.delete('redirect');
       return NextResponse.redirect(url);
@@ -56,7 +57,7 @@ export default function middleware(req: NextRequest) {
 
   if (pathname.startsWith('/admin')) {
     const role = decodeJwtRole(token);
-    if (role !== 'admin') {
+    if (!hasRole(role, ROLES.ADMIN)) {
       url.pathname = '/';
       url.searchParams.delete('redirect');
       return NextResponse.redirect(url);

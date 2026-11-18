@@ -45,7 +45,7 @@ describe('middleware', () => {
     });
 
     it('redirects to login when the token is expired', () => {
-      const res = middleware(buildRequest('/profile', tokenFor('attendee', -60)));
+      const res = middleware(buildRequest('/profile', tokenFor('EVENT_GOER', -60)));
       const location = new URL(res.headers.get('location') as string);
 
       expect(res.status).toBe(307);
@@ -67,7 +67,7 @@ describe('middleware', () => {
     });
 
     it('allows a valid token through to a non-role-guarded route', () => {
-      const res = middleware(buildRequest('/profile', tokenFor('attendee')));
+      const res = middleware(buildRequest('/profile', tokenFor('EVENT_GOER')));
 
       expect(res.headers.get('location')).toBeNull();
       expect(res.headers.get('x-middleware-next')).toBe('1');
@@ -76,20 +76,20 @@ describe('middleware', () => {
 
   describe('organizer role guard', () => {
     it('allows an organizer through to /organizer', () => {
-      const res = middleware(buildRequest('/organizer/dashboard', tokenFor('organizer')));
+      const res = middleware(buildRequest('/organizer/dashboard', tokenFor('ORGANIZER')));
 
       expect(res.headers.get('location')).toBeNull();
       expect(res.headers.get('x-middleware-next')).toBe('1');
     });
 
     it('allows an admin through to /organizer', () => {
-      const res = middleware(buildRequest('/organizer/dashboard', tokenFor('admin')));
+      const res = middleware(buildRequest('/organizer/dashboard', tokenFor('ADMIN')));
 
       expect(res.headers.get('x-middleware-next')).toBe('1');
     });
 
     it('redirects a non-organizer away from /organizer', () => {
-      const res = middleware(buildRequest('/organizer/dashboard', tokenFor('attendee')));
+      const res = middleware(buildRequest('/organizer/dashboard', tokenFor('EVENT_GOER')));
       const location = new URL(res.headers.get('location') as string);
 
       expect(res.status).toBe(307);
@@ -100,13 +100,13 @@ describe('middleware', () => {
 
   describe('admin role guard', () => {
     it('allows an admin through to /admin', () => {
-      const res = middleware(buildRequest('/admin/users', tokenFor('admin')));
+      const res = middleware(buildRequest('/admin/users', tokenFor('ADMIN')));
 
       expect(res.headers.get('x-middleware-next')).toBe('1');
     });
 
     it('redirects an organizer away from /admin', () => {
-      const res = middleware(buildRequest('/admin/users', tokenFor('organizer')));
+      const res = middleware(buildRequest('/admin/users', tokenFor('ORGANIZER')));
       const location = new URL(res.headers.get('location') as string);
 
       expect(location.pathname).toBe('/');

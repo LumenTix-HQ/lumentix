@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
+import { isOrganizerOrAdmin } from "@/lib/auth/roles";
 import { useKioskScanner } from "@/hooks/useKioskScanner";
 import { ScanTarget } from "@/components/kiosk/ScanTarget";
 import { ScanResultDisplay } from "@/components/kiosk/ScanResultDisplay";
@@ -29,12 +30,12 @@ export default function KioskPage({ params }: { params: { id: string } }) {
       router.replace("/login");
       return;
     }
-    if (user.role !== "organizer" && user.role !== "admin") {
+    if (!isOrganizerOrAdmin(user.role)) {
       router.replace("/");
     }
   }, [isLoading, user, router]);
 
-  if (isLoading || !user || (user.role !== "organizer" && user.role !== "admin")) {
+  if (isLoading || !user || !isOrganizerOrAdmin(user.role)) {
     return null;
   }
 

@@ -3,11 +3,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { clearTokens } from '@/lib/auth/auth';
+import { normalizeRole, ROLES, type Role } from '@/lib/auth/roles';
+import { setApiAuthState } from '@/lib/api-client';
 
 interface User {
   id: string;
   email: string;
-  role: string;
+  role: Role;
 }
 
 interface AuthContextType {
@@ -45,7 +47,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         const data = await res.json();
         if (!cancelled) {
-          setUser({ id: data.id, email: data.email, role: data.role });
+          setUser({
+            id: data.id,
+            email: data.email,
+            role: normalizeRole(data.role) ?? ROLES.ATTENDEE,
+          });
         }
       } catch {
         if (!cancelled) setUser(null);
@@ -59,6 +65,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       cancelled = true;
     };
   }, []);
+
+  // Keep the API client's notion of "signed in" in sync with the resolved user
+  // (see #1616: only authenticated sessions may be redirected on a 401).
+  useEffect(() => {
+    setApiAuthState(!!user);
+  }, [user]);
 
   const logout = async () => {
     // Await revocation + cookie clearing before navigating: a client-side

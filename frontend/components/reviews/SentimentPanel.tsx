@@ -48,12 +48,14 @@ export function SentimentPanel({ eventId }: { eventId: string }) {
   const [sentiment, setSentiment] = useState<EventSentiment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [alert, setAlert] = useState(false);
+  const [unauthorized, setUnauthorized] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setSentiment(null);
     setError(null);
     setAlert(false);
+    setUnauthorized(false);
 
     if (!eventId.trim()) return;
 
@@ -64,6 +66,14 @@ export function SentimentPanel({ eventId }: { eventId: string }) {
         // Fewer than 3 reviews analysed means the backend could not produce a
         // meaningful summary; show a gentle notice rather than a wrong signal.
       } catch (err) {
+        // The endpoint is JWT-guarded. Anonymous visitors viewing a public
+        // event should not see an error banner (or be redirected to /login);
+        // hide the panel instead.
+        const status = (err as { status?: number } | null)?.status;
+        if (status === 401 || status === 403) {
+          if (!cancelled) setUnauthorized(true);
+          return;
+        }
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load sentiment.");
       }
     })();
@@ -73,7 +83,7 @@ export function SentimentPanel({ eventId }: { eventId: string }) {
     };
   }, [eventId]);
 
-  if (!eventId.trim()) return null;
+  if (!eventId.trim() || unauthorized) return null;
 
   return (
     <div className="mb-8">
