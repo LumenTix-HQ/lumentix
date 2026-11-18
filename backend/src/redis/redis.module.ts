@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import KeyvRedis from '@keyv/redis';
+import { buildRedisUrl } from '../common/redis/redis-options';
 
 @Module({
   imports: [
@@ -9,9 +10,9 @@ import KeyvRedis from '@keyv/redis';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const host = configService.get<string>('REDIS_HOST') ?? 'localhost';
-        const port = configService.get<number>('REDIS_PORT') ?? 6379;
-        return { stores: [new KeyvRedis(`redis://${host}:${port}`)] };
+        // Same AUTH/TLS/db configuration as REDIS_CLIENT and BullMQ (#1608).
+        // KeyvRedis uses node-redis, so it takes a URL rather than ioredis options.
+        return { stores: [new KeyvRedis(buildRedisUrl(configService))] };
       },
     }),
   ],

@@ -108,4 +108,23 @@ describe('envValidationSchema', () => {
     );
     expect(error).toBeUndefined();
   });
+
+  it('accepts an authenticated rediss:// REDIS_URL', () => {
+    const { error } = envValidationSchema.validate(
+      buildEnv({
+        REDIS_URL: 'rediss://default:secret@redis.example.com:6380/0',
+      }),
+      { abortEarly: false },
+    );
+    expect(error).toBeUndefined();
+  });
+
+  it('rejects a REDIS_URL that is not redis:// or rediss://', () => {
+    const { error } = envValidationSchema.validate(
+      buildEnv({ REDIS_URL: 'https://redis.example.com' }),
+      { abortEarly: false },
+    );
+    expect(error).toBeDefined();
+    expect(error?.details.some((d) => d.path.includes('REDIS_URL'))).toBe(true);
+  });
 });

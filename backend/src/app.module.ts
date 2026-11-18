@@ -67,6 +67,7 @@ import { InternalRoutingModule } from './internal/internal.module';
 import { RateLimitModule } from './common/rate-limit.module';
 import { RedisClientModule } from './common/redis/redis-client.module';
 import { REDIS_CLIENT } from './common/redis/redis.provider';
+import { buildRedisOptions } from './common/redis/redis-options';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 
@@ -115,10 +116,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        redis: {
-          host: config.get<string>('REDIS_HOST') || 'localhost',
-          port: config.get<number>('REDIS_PORT') || 6379,
-        },
+        redis: buildRedisOptions(config),
       }),
     }),
 
