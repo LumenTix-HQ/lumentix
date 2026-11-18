@@ -311,14 +311,53 @@ export class LoyaltyService {
       throw new BadRequestException('Discount code has expired');
     }
 
-    discount.status = DiscountStatus.USED;
-    discount.usedOnEventId = eventId;
-    await this.discountRepo.save(discount);
+    // Reserve (not consume) the code: it only becomes USED once the payment
+    // is confirmed, so an abandoned checkout does not burn the user's code.
+    // The conditional update keeps two concurrent checkouts from both
+    // reserving it.
+    const reserved = await this.discountRepo.update(
+      { id: discount.id, status: DiscountStatus.ACTIVE },
+      {
+        status: DiscountStatus.RESERVED,
+        usedOnEventId: eventId,
+        reservedAt: new Date(),
+      },
+    );
+    if (reserved.affected !== 1) {
+      throw new BadRequestException('Discount code is no longer available');
+    }
 
     return {
       discountPercent: Number(discount.discountPercent),
       discountId: discount.id,
     };
+  }
+
+  /** Call when the payment that used the reserved code is confirmed. */
+  async confirmDiscountUsage(discountId: string): Promise<void> {
+    await this.discountRepo.update(
+      { id: discountId, status: DiscountStatus.RESERVED },
+      { status: DiscountStatus.USED },
+    );
+  }
+
+  /** Call when the payment failed or was abandoned. */
+  async releaseDiscountReservation(discountId: string): Promise<void> {
+    await this.discountRepo.update(
+      { id: discountId, status: DiscountStatus.RESERVED },
+      { status: DiscountStatus.ACTIVE, usedOnEventId: null, reservedAt: null },
+    );
+  }
+
+  /** Reservations not confirmed within 30 minutes go back to ACTIVE. */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async releaseExpiredReservations(): Promise<number> {
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000);
+    const result = await this.discountRepo.update(
+      { status: DiscountStatus.RESERVED, reservedAt: LessThan(cutoff) },
+      { status: DiscountStatus.ACTIVE, usedOnEventId: null, reservedAt: null },
+    );
+    return result.affected ?? 0;
   }
 
   // ── Scheduled: Expire Points After the Inactivity Period ──────────────────
