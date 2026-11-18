@@ -50,6 +50,10 @@ export class ResaleTransaction {
   @Column({ type: 'varchar', default: 'completed' })
   status: ResaleStatus;
 
+  @Index('UQ_resale_transactions_transactionHash', {
+    unique: true,
+    where: '"transactionHash" IS NOT NULL',
+  })
   @Column({ type: 'varchar', nullable: true })
   transactionHash: string | null;
 

@@ -6,7 +6,9 @@ import helmet from 'helmet';
 import { corsOptions, helmetOptions } from './common/security/security.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody is required by InternalSignatureGuard, which signs over the exact
+  // request payload.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // ── Trust proxy hops so req.ip is the real client IP ─────────────────────
   const trustProxy = parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10);

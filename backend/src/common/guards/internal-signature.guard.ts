@@ -58,7 +58,8 @@ export class InternalSignatureGuard implements CanActivate {
     }
 
     // Raw body is expected to have been captured by a body parser as a Buffer
-    // on `request.rawBody`. Fall back to empty string for GET / DELETE requests.
+    // on `request.rawBody` (main.ts must call NestFactory.create with
+    // `{ rawBody: true }`). Fall back to empty string for GET / DELETE requests.
     const rawBody =
       (request as unknown as { rawBody?: Buffer }).rawBody?.toString('utf8') ??
       '';

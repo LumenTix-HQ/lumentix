@@ -10,7 +10,9 @@ test.describe('Ticket purchase and QR viewing', () => {
 
     const eventId = 'evt-123';
 
-    await page.route(`**/events/${eventId}`, (route) =>
+    // Only the proxied API call: a bare `**/events/<id>` glob also matches the
+    // page navigation and would render the JSON body instead of the page.
+    await page.route(`**/api/proxy/events/${eventId}`, (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
