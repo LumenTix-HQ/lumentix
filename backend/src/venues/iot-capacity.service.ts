@@ -30,6 +30,7 @@ import { Event } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { AuditService } from '../audit/audit.service';
 import { NotificationService } from '../notifications/notification.service';
+import { EventCacheService } from '../events/cache/event-cache.service';
 
 /** Thresholds used when the event has no custom overrides */
 const DEFAULT_WARNING_PCT  = 70;
@@ -64,6 +65,7 @@ export class IotCapacityService {
 
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
+    private readonly eventCacheService: EventCacheService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -409,6 +411,7 @@ export class IotCapacityService {
 
     // Persist the new limit
     await this.eventRepo.update({ id: eventId }, { maxAttendees: newLimit });
+    await this.eventCacheService.invalidateCacheEntry(eventId);
 
     // Determine if sales should be paused
     let salesPaused = false;

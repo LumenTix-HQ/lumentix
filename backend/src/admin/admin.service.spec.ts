@@ -6,6 +6,12 @@ import { Event, EventStatus } from '../events/entities/event.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/enums/user-role.enum';
 import { UserStatus } from '../users/enums/user-status.enum';
+import { RoleRequest } from '../users/entities/role-request.entity';
+import { AuditService } from '../audit/audit.service';
+import { MailerService } from '../mailer/mailer.service';
+import { StellarWebhookService } from '../stellar/stellar-webhook.service';
+import { EventStateService } from '../events/state/event-state.service';
+import { EventCacheService } from '../events/cache/event-cache.service';
 
 const makeEvent = (status: EventStatus): Event =>
   ({
@@ -30,6 +36,7 @@ describe('AdminService', () => {
     save: jest.Mock;
     createQueryBuilder?: jest.Mock;
   };
+  let eventCacheService: { invalidateCacheEntry: jest.Mock };
 
   const makeUserQueryBuilder = (result: User | null) => ({
     select: jest.fn().mockReturnThis(),
@@ -45,12 +52,22 @@ describe('AdminService', () => {
   beforeEach(async () => {
     eventRepo = { findOne: jest.fn(), save: jest.fn() };
     userRepo = { findOne: jest.fn(), save: jest.fn() };
+    eventCacheService = { invalidateCacheEntry: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminService,
         { provide: getRepositoryToken(Event), useValue: eventRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
+        {
+          provide: getRepositoryToken(RoleRequest),
+          useValue: { findOne: jest.fn(), save: jest.fn() },
+        },
+        { provide: AuditService, useValue: { log: jest.fn() } },
+        { provide: MailerService, useValue: {} },
+        { provide: StellarWebhookService, useValue: {} },
+        EventStateService,
+        { provide: EventCacheService, useValue: eventCacheService },
       ],
     }).compile();
 
@@ -73,6 +90,27 @@ describe('AdminService', () => {
       eventRepo.findOne.mockResolvedValue(makeEvent(EventStatus.PUBLISHED));
       await expect(service.approveEvent('event-uuid')).rejects.toThrow(
         BadRequestException,
+      );
+    });
+
+    it('rejects an archived event through the state machine', async () => {
+      eventRepo.findOne.mockResolvedValue(makeEvent(EventStatus.ARCHIVED));
+
+      await expect(service.approveEvent('event-uuid')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(eventRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the cached event after approval', async () => {
+      const event = makeEvent(EventStatus.DRAFT);
+      eventRepo.findOne.mockResolvedValue(event);
+      eventRepo.save.mockImplementation(async (e: Event) => e);
+
+      await service.approveEvent('event-uuid');
+
+      expect(eventCacheService.invalidateCacheEntry).toHaveBeenCalledWith(
+        'event-uuid',
       );
     });
 
@@ -107,6 +145,27 @@ describe('AdminService', () => {
       eventRepo.findOne.mockResolvedValue(makeEvent(EventStatus.COMPLETED));
       await expect(service.suspendEvent('event-uuid')).rejects.toThrow(
         BadRequestException,
+      );
+    });
+
+    it('rejects an archived event through the state machine', async () => {
+      eventRepo.findOne.mockResolvedValue(makeEvent(EventStatus.ARCHIVED));
+
+      await expect(service.suspendEvent('event-uuid')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(eventRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the cached event after suspension', async () => {
+      const event = makeEvent(EventStatus.PUBLISHED);
+      eventRepo.findOne.mockResolvedValue(event);
+      eventRepo.save.mockImplementation(async (e: Event) => e);
+
+      await service.suspendEvent('event-uuid');
+
+      expect(eventCacheService.invalidateCacheEntry).toHaveBeenCalledWith(
+        'event-uuid',
       );
     });
   });

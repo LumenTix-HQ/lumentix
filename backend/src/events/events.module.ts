@@ -42,6 +42,6 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
   ],
   controllers: [EventsController],
   providers: [EventsService, EventStateService, EventCacheService, CancelEventProcessor],
-  exports: [EventsService],
+  exports: [EventsService, EventStateService, EventCacheService],
 })
 export class EventsModule {}

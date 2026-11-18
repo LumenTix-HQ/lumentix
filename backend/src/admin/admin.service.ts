@@ -22,6 +22,8 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { MailerService } from '../mailer/mailer.service';
 import { StellarWebhookService, DlqItem } from '../stellar/stellar-webhook.service';
+import { EventStateService } from '../events/state/event-state.service';
+import { EventCacheService } from '../events/cache/event-cache.service';
 
 @Injectable()
 export class AdminService {
@@ -35,6 +37,8 @@ export class AdminService {
     private readonly auditService: AuditService,
     private readonly mailerService: MailerService,
     private readonly stellarWebhookService: StellarWebhookService,
+    private readonly eventStateService: EventStateService,
+    private readonly eventCacheService: EventCacheService,
   ) {}
 
   // ── Audit Logs ────────────────────────────────────────────────────────────
@@ -48,29 +52,23 @@ export class AdminService {
   async approveEvent(eventId: string): Promise<Event> {
     const event = await this.findEventOrFail(eventId);
 
-    if (event.status !== EventStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only draft events can be approved. Current status: "${event.status}".`,
-      );
-    }
+    this.eventStateService.validateTransition(event.status, EventStatus.PUBLISHED);
 
     event.status = EventStatus.PUBLISHED;
-    return this.eventRepository.save(event);
+    const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(eventId);
+    return saved;
   }
 
   async suspendEvent(eventId: string): Promise<Event> {
     const event = await this.findEventOrFail(eventId);
 
-    if (event.status === EventStatus.CANCELLED) {
-      throw new BadRequestException('Event is already cancelled.');
-    }
-
-    if (event.status === EventStatus.COMPLETED) {
-      throw new BadRequestException('Completed events cannot be suspended.');
-    }
+    this.eventStateService.validateTransition(event.status, EventStatus.CANCELLED);
 
     event.status = EventStatus.CANCELLED;
-    return this.eventRepository.save(event);
+    const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(eventId);
+    return saved;
   }
 
   // ── Users ─────────────────────────────────────────────────────────────────

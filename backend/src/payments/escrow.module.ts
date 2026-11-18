@@ -6,6 +6,7 @@ import { Event } from 'src/events/entities/event.entity';
 import { StellarModule } from 'src/stellar';
 import { Payment } from './entities/payment.entity';
 import { EscrowService } from './services/escrow.service';
+import { EventCacheService } from 'src/events/cache/event-cache.service';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { EscrowService } from './services/escrow.service';
     AuditModule,
     EncryptionModule,
   ],
-  providers: [EscrowService],
+  providers: [EscrowService, EventCacheService],
   exports: [EscrowService],
 })
 export class EscrowModule {}

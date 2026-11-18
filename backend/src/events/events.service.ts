@@ -268,6 +268,7 @@ export class EventsService {
     this.eventStateService.validateTransition(event.status, EventStatus.PUBLISHED);
     event.status = EventStatus.PUBLISHED;
     await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
     if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
       await this.escrowService.createEscrow(event.id);
     }
@@ -509,15 +510,20 @@ export class EventsService {
   }
 
   async getEventById(id: string): Promise<EventWithCapacity> {
-    const cached = await this.eventCacheService.fetchCachedMetadata(id);
-    if (cached) {
-      return cached;
+    let event: Event | null =
+      await this.eventCacheService.fetchCachedMetadata(id);
+
+    if (!event) {
+      event = await this.eventRepository.findOne({ where: { id } });
+      if (!event) {
+        throw new NotFoundException(`Event with id "${id}" not found`);
+      }
+      await this.eventCacheService.cacheEventMetadata(id, event);
     }
 
-    const event = await this.eventRepository.findOne({ where: { id } });
-    if (!event) {
-      throw new NotFoundException(`Event with id "${id}" not found`);
-    }
+    // Capacity is derived from live ticket rows and is deliberately not cached:
+    // a sale or refund must be visible on the next read even when the event
+    // row itself is still cached (#1606).
     const soldTickets = await this.ticketRepository.count({
       where: { eventId: id, status: 'valid' },
     });
@@ -525,15 +531,12 @@ export class EventsService {
     const remainingCapacity =
       event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
 
-    const result = {
+    return {
       ...event,
       soldTickets,
       remainingCapacity,
       availableSpots: remainingCapacity,
     };
-
-    await this.eventCacheService.cacheEventMetadata(id, result);
-    return result;
   }
 
   async listEvents(filterDto: ListEventsDto): Promise<PaginatedResult<EventWithCapacity>> {
@@ -611,7 +614,9 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.organizerId !== organizerId) throw new ForbiddenException();
     event.imageUrl = imageUrl;
-    return this.eventRepository.save(event);
+    const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(eventId);
+    return saved;
   }
 
   async trigger_emergency_protocol(
@@ -655,8 +660,10 @@ export class EventsService {
   async trigger_automatic_postponement(id: string, callerId: string, reason = 'Unsafe weather conditions') {
     const event = await this.getEventById(id);
     if (event.organizerId !== callerId) throw new ForbiddenException();
+    this.eventStateService.validateTransition(event.status, EventStatus.CANCELLED);
     event.status = EventStatus.CANCELLED;
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
     await this.notificationService.queueLifecycleEmail(saved);
     return saved;
   }
@@ -672,6 +679,7 @@ export class EventsService {
     event.startDate = startDate;
     event.endDate = endDate;
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
     await this.notificationService.queueLifecycleEmail(saved);
     return { ...saved, rescheduleReason: data.reason ?? null };
   }
@@ -811,6 +819,9 @@ export class EventsService {
       }
     }
     await this.eventRepository.save(events);
+    await Promise.all(
+      events.map((event) => this.eventCacheService.invalidateCacheEntry(event.id)),
+    );
 
     return { series: savedSeries, updatedEventsCount: events.length };
   }
@@ -836,6 +847,16 @@ export class EventsService {
       ? events.filter((e) => dto.eventIds!.includes(e.id))
       : events;
 
+    // Validate the whole batch up front so an illegal transition rejects the
+    // request before any event is mutated (#1605).
+    if (dto.status !== undefined) {
+      for (const event of targetEvents) {
+        if (event.status !== dto.status) {
+          this.eventStateService.validateTransition(event.status, dto.status);
+        }
+      }
+    }
+
     for (const event of targetEvents) {
       if (dto.status !== undefined) {
         event.status = dto.status;
@@ -846,6 +867,9 @@ export class EventsService {
     }
 
     const saved = await this.eventRepository.save(targetEvents);
+    await Promise.all(
+      saved.map((event) => this.eventCacheService.invalidateCacheEntry(event.id)),
+    );
     return { updatedEvents: saved };
   }
 
@@ -959,6 +983,7 @@ export class EventsService {
     }
 
     await this.eventRepository.update(id, { maxAttendees });
+    await this.eventCacheService.invalidateCacheEntry(id);
     return this.getEventById(id);
   }
 
