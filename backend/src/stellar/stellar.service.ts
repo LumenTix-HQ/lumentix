@@ -81,6 +81,9 @@ export class StellarService implements OnModuleDestroy {
     @Optional()
     @InjectQueue(PAYMENT_RETRY_QUEUE)
     private readonly paymentRetryQueue?: Queue,
+    @Optional()
+    @InjectRepository(PersistedXdr)
+    private readonly xdrRepository?: Repository<PersistedXdr>,
   ) {
     const horizonUrl =
       this.configService.get<string>('stellar.horizonUrl') ??
@@ -126,13 +129,19 @@ export class StellarService implements OnModuleDestroy {
     xdr: string,
     paymentId?: string,
   ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
-    const record = this.xdrRepository.create({
+    const xdrRepository = this.xdrRepository;
+    if (!xdrRepository) {
+      // Persistence is not configured (e.g. unit tests): submit directly.
+      return this.submitTransaction(xdr);
+    }
+
+    const record = xdrRepository.create({
       xdr,
       networkPassphrase: this.networkPassphrase,
       status: XdrStatus.PENDING,
       paymentId: paymentId ?? null,
     });
-    const saved = await this.xdrRepository.save(record);
+    const saved = await xdrRepository.save(record);
 
     try {
       const result = await this.submitTransaction(xdr);
@@ -143,14 +152,14 @@ export class StellarService implements OnModuleDestroy {
         saved.lastError =
           (result as { extras?: { result_codes?: { transaction?: string } } }).extras?.result_codes?.transaction ?? 'Submission failed';
       }
-      await this.xdrRepository.save(saved);
+      await xdrRepository.save(saved);
 
       return result;
     } catch (err: unknown) {
       saved.status = XdrStatus.FAILED;
       saved.lastError = err instanceof Error ? err.message : String(err);
       saved.nextRetryAt = new Date(Date.now() + 30_000); // first retry in 30s
-      await this.xdrRepository.save(saved);
+      await xdrRepository.save(saved);
       throw err;
     }
   }

@@ -1,3 +1,6 @@
+import { Inject } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../common/redis/redis.provider';
 import {
   Controller,
   Delete,
@@ -38,7 +41,10 @@ import { IdempotencyInterceptor } from '../common/interceptors/idempotency.inter
 @ApiResponse({ status: 403, description: 'Forbidden' })
 @ApiResponse({ status: 404, description: 'Resource not found' })
 export class RegistrationsController {
-  constructor(private readonly service: RegistrationsService) {}
+  constructor(
+    private readonly service: RegistrationsService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
 
   @Post('events/:id/register')
   @UseInterceptors(IdempotencyInterceptor)

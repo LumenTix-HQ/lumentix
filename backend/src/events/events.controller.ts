@@ -29,7 +29,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Express } from 'express';
+import { StorageService } from '../common/storage/storage.service';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -63,6 +63,7 @@ export class EventsController {
     private readonly eventsService: EventsService,
     @Inject(forwardRef(() => TicketsService))
     private readonly ticketsService: TicketsService,
+    private readonly storageService: StorageService,
   ) {}
 
   @Post()
@@ -183,7 +184,7 @@ export class EventsController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: AuthenticatedRequest,
   ) {
-    const { url } = await this.storageService.upload(file, `events/${id}`);
+    const url = await this.storageService.uploadFile(file, `events/${id}`);
     return this.eventsService.updateEventImage(id, url, req.user.id);
   }
 
