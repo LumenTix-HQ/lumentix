@@ -157,6 +157,8 @@ describe('EventsService', () => {
           provide: NotificationService,
           useValue: {
             queueLifecycleEmail: jest.fn(),
+            queueEmergencyEmail: jest.fn(),
+            queueRescheduleEmail: jest.fn(),
           },
         },
         { provide: EscrowService, useValue: escrowService },
