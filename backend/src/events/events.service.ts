@@ -1,3 +1,4 @@
+import { assertPublicHttpsUrl } from '../common/security/safe-url';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import {
@@ -184,6 +185,15 @@ export class EventsService {
     if (dto.status !== undefined && dto.status !== event.status) {
       this.eventStateService.validateTransition(event.status, dto.status);
     }
+    if (dto.webhookUrl !== undefined) {
+      try {
+        await assertPublicHttpsUrl(dto.webhookUrl);
+      } catch (err) {
+        throw new BadRequestException(
+          `Invalid webhookUrl: ${(err as Error).message}`,
+        );
+      }
+    }
     const previousStatus = event.status;
     const previousStartDate = event.startDate;
     const previousEndDate = event.endDate;
@@ -199,6 +209,7 @@ export class EventsService {
       ...(!isPublishing && dto.status !== undefined && { status: dto.status }),
       ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
       ...(dto.endDate !== undefined && { endDate: new Date(dto.endDate) }),
+      ...(dto.webhookUrl !== undefined && { webhookUrl: dto.webhookUrl }),
     };
 
     // ── Conflict detection on reschedule / relocation ──────────────────────

@@ -1,3 +1,4 @@
+import { assertPublicHttpsUrl } from '../../common/security/safe-url';
 import { Processor, Process, InjectQueue } from '@nestjs/bull';
 import { Job, Queue } from 'bull';
 import { Logger } from '@nestjs/common';
@@ -129,11 +130,26 @@ export class WebhookDeliveryJob {
     let responseBody: string | null = null;
     let retryAfterMs: number | null = null;
 
+    // Re-validate the target on every delivery: DNS can change after the URL
+    // was configured, and internal addresses must never be contacted.
+    try {
+      await assertPublicHttpsUrl(event.webhookUrl);
+    } catch (err) {
+      await this.moveToDeadLetter(
+        { eventId, paymentId, payload },
+        null,
+        `Blocked webhook URL: ${(err as Error).message}`,
+        attempt,
+      );
+      return;
+    }
+
     try {
       const response = await firstValueFrom(
         this.httpService.post(event.webhookUrl, payload, {
           headers,
           timeout: this.requestTimeoutMs,
+          maxRedirects: 0,
         }),
       );
       statusCode = response.status;
