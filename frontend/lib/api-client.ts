@@ -53,6 +53,10 @@ import type {
   ResaleMarketplaceResponse,
   ResalePurchaseResult,
 } from "@/types/resale";
+import type {
+  RecommendationResponse,
+  UpdatePreferencesDto,
+} from "@/types/recommendation";
 
 export interface BatchTransferEntry {
   ticketId: string;
@@ -463,14 +467,13 @@ export const apiClient = {
   getEventSentiment: (eventId: string) =>
     request<any>(`/reviews/events/${eventId}/sentiment`),
 
-  getRecommendations: (userId: string, limit?: number) =>
-    request<any>(`/recommendations/${userId}${limit ? `?limit=${limit}` : ""}`),
+  // Recommendations (#1619): the backend exposes the caller's own data at
+  // /recommendations/me; /recommendations/:userId is ADMIN-only.
+  getRecommendations: (limit?: number) =>
+    request<RecommendationResponse>(`/recommendations/me${limit ? `?limit=${limit}` : ""}`),
 
-  updateUserPreferences: (
-    userId: string,
-    body: { preferences: Array<{ category?: string | null; location?: string | null; weight: number }> },
-  ) =>
-    request<any>(`/recommendations/${userId}/preferences`, {
+  updateUserPreferences: (body: UpdatePreferencesDto) =>
+    request<any>("/recommendations/me/preferences", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
