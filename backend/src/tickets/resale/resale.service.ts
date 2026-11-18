@@ -167,6 +167,24 @@ export class ResaleService {
       throw new BadRequestException('Transaction not found on Stellar network');
     }
 
+    // A transaction hash may fund only one purchase.
+    const reused = await this.resaleTransactionRepo.findOne({
+      where: { transactionHash: dto.transactionHash },
+    });
+    if (reused) {
+      throw new BadRequestException(
+        'This transaction has already been used for a purchase',
+      );
+    }
+
+    const buyerWallet = await this.userRepo
+      .findOne({ where: { id: buyerId }, select: ['stellarPublicKey'] })
+      .then((u) => u?.stellarPublicKey);
+    if (!buyerWallet) {
+      throw new BadRequestException('Buyer has no linked Stellar wallet');
+    }
+    const listingCurrency = ticket.listingCurrency ?? 'XLM';
+
     const operations = await this.resolvePaymentOperations(txRecord);
     const sellerWallet = await this.userRepo
       .findOne({ where: { id: sellerId }, select: ['stellarPublicKey'] })
@@ -174,7 +192,17 @@ export class ResaleService {
 
     if (!sellerWallet) throw new BadRequestException('Seller has no linked Stellar wallet');
 
-    const matchingOp = operations.find((op) => op.to === sellerWallet);
+    const matchingOp = operations.find(
+      (op) =>
+        op.type === 'payment' &&
+        op.to === sellerWallet &&
+        // The payment must come from the buyer's own wallet...
+        (op.from ?? op.source_account) === buyerWallet &&
+        // ...in the listing's currency.
+        (listingCurrency === 'XLM'
+          ? op.asset_type === 'native'
+          : op.asset_code === listingCurrency),
+    );
     if (!matchingOp) throw new BadRequestException('Payment destination does not match seller wallet');
 
     const onChainAmount = parseFloat(matchingOp.amount);
@@ -543,7 +571,17 @@ export class ResaleService {
 
   private async resolvePaymentOperations(
     txRecord: Awaited<ReturnType<StellarService['getTransaction']>>,
-  ): Promise<Array<{ type: string; to: string; amount: string; asset_type: string; asset_code?: string }>> {
+  ): Promise<
+    Array<{
+      type: string;
+      to: string;
+      from?: string;
+      source_account?: string;
+      amount: string;
+      asset_type: string;
+      asset_code?: string;
+    }>
+  > {
     try {
       const operationsHref = (txRecord as any)._links?.operations?.href;
       if (!operationsHref) return [];
@@ -551,7 +589,7 @@ export class ResaleService {
       if (!response.ok) return [];
       const payload = (await response.json()) as { _embedded: { records: any[] } };
       return payload._embedded.records.filter(
-        (operation: any) => operation.type === 'payment' || operation.type === 'create_account',
+        (operation: any) => operation.type === 'payment',
       );
     } catch {
       return [];

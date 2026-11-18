@@ -33,23 +33,50 @@ export class BruteForceService {
     return `bruteforce:locked:${ip}`;
   }
 
-  async recordFailedAttempt(ip: string): Promise<void> {
-    const key = this.attemptsKey(ip);
-    const attempts = await this.redisClient.incr(key);
+  /** Normalised key subject so "A@x.com" and "a@x.com " share one counter. */
+  static accountSubject(account: string): string {
+    return `account:${account.trim().toLowerCase()}`;
+  }
 
-    if (attempts === 1) {
-      // first attempt starts rolling window
-      await this.redisClient.expire(key, this.windowSeconds);
-    }
+  /**
+   * Count one failed attempt for a subject (an IP, or an account via
+   * `accountSubject`). INCR + EXPIRE + lock run in one MULTI so a crash
+   * between them cannot leave a counter without a TTL.
+   */
+  async recordFailedAttempt(subject: string): Promise<void> {
+    const key = this.attemptsKey(subject);
+    const results = await this.redisClient
+      .multi()
+      .incr(key)
+      .expire(key, this.windowSeconds, 'NX')
+      .exec();
 
+    const attempts = Number(results?.[0]?.[1] ?? 0);
     if (attempts >= this.maxAttempts) {
       await this.redisClient.set(
-        this.lockedKey(ip),
+        this.lockedKey(subject),
         '1',
         'EX',
         this.lockSeconds,
       );
     }
+  }
+
+  /** Record a failure against both the account and the source IP. */
+  async recordFailedLogin(account: string, ip: string): Promise<void> {
+    await Promise.all([
+      this.recordFailedAttempt(BruteForceService.accountSubject(account)),
+      this.recordFailedAttempt(ip),
+    ]);
+  }
+
+  /** Locked when either the account or the IP is locked. */
+  async isLoginLocked(account: string, ip: string): Promise<boolean> {
+    const [byAccount, byIp] = await Promise.all([
+      this.isLocked(BruteForceService.accountSubject(account)),
+      this.isLocked(ip),
+    ]);
+    return byAccount || byIp;
   }
 
   async isLocked(ip: string): Promise<boolean> {
