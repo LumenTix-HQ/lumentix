@@ -1,13 +1,15 @@
+import themeInit from './theme-init.json';
+
 export type Theme = 'light' | 'dark';
 
 /** localStorage key holding the user's explicit choice. */
-export const THEME_STORAGE_KEY = 'theme';
+export const THEME_STORAGE_KEY: string = themeInit.storageKey;
 
 /**
  * Theme used when the user has never chosen one. Lumentix was designed dark,
  * so dark stays the default; light is opt-in.
  */
-export const DEFAULT_THEME: Theme = 'dark';
+export const DEFAULT_THEME: Theme = themeInit.defaultTheme as Theme;
 
 export function isTheme(value: unknown): value is Theme {
   return value === 'light' || value === 'dark';
@@ -69,7 +71,8 @@ export function toggleTheme(current?: Theme): Theme {
  * Inline script for <head>: applies the saved theme before first paint so a
  * light-mode user never sees a flash of the dark theme during hydration.
  * Mirrors getSavedTheme/applyThemeTokens without depending on the bundle.
+ *
+ * The script text lives in lib/theme-init.json so next.config.base.js can hash
+ * the exact same bytes for the Content-Security-Policy script-src directive.
  */
-export const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
-  THEME_STORAGE_KEY,
-)});if(t!=='light'&&t!=='dark')t=${JSON.stringify(DEFAULT_THEME)};var r=document.documentElement;r.setAttribute('data-theme',t);r.classList.toggle('dark',t==='dark');r.style.colorScheme=t;}catch(e){}})();`;
+export const THEME_INIT_SCRIPT: string = themeInit.script;
