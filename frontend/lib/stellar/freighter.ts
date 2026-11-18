@@ -70,12 +70,18 @@ export const signTransactionWithFreighter = async (
 ): Promise<string> => {
   try {
     const networkPassphrase = getNetworkPassphrase(network);
-    const signedXdr = await signTransaction(xdr, {
-      network: network === NetworkType.MAINNET ? 'PUBLIC' : 'TESTNET',
-      networkPassphrase,
-    });
+    // freighter-api v6 resolves to { signedTxXdr, signerAddress, error }.
+    const result = await signTransaction(xdr, { networkPassphrase });
+    if (result.error) {
+      throw new Error(
+        typeof result.error === 'string'
+          ? result.error
+          : (result.error as { message?: string }).message ??
+            'Transaction signing failed',
+      );
+    }
 
-    return signedXdr;
+    return result.signedTxXdr;
   } catch (error) {
     if (error instanceof Error) {
       if (error.message.includes('User declined')) {

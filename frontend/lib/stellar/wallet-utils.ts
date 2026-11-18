@@ -43,8 +43,9 @@ export const getNetworkPassphrase = (network: NetworkType): string => {
 
 export const isFreighterInstalled = async (): Promise<boolean> => {
   try {
+    // v6 resolves to { isConnected, error } rather than a boolean.
     const result = await isConnected();
-    return result === true;
+    return result.isConnected === true && !result.error;
   } catch {
     return false;
   }

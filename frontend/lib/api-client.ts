@@ -368,12 +368,12 @@ export const apiClient = {
     const qs = params ? "?" + new URLSearchParams(params).toString() : "";
     return request<ResaleMarketplaceResponse>(`/resale/marketplace${qs}`);
   },
-  listTicketForResale: (ticketId, dto: ListTicketForResaleDto) =>
+  listTicketForResale: (ticketId: string, dto: ListTicketForResaleDto) =>
     request(`/resale/list/${ticketId}`, {
       method: "POST",
       body: JSON.stringify(dto),
     }),
-  buyResaleTicket: (ticketId, dto: BuyResaleTicketDto) =>
+  buyResaleTicket: (ticketId: string, dto: BuyResaleTicketDto) =>
     request<ResalePurchaseResult>(`/resale/buy/${ticketId}`, {
       method: "POST",
       body: JSON.stringify(dto),

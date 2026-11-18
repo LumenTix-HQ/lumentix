@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { ExchangeRate } from './entities/exchange-rate.entity';
@@ -9,7 +9,12 @@ import { RatesRefreshJob } from './jobs/rates-refresh.job';
 import { MailerModule } from '../mailer/mailer.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ExchangeRate]), ConfigModule, CurrenciesModule, MailerModule],
+  imports: [
+    TypeOrmModule.forFeature([ExchangeRate]),
+    ConfigModule,
+    forwardRef(() => CurrenciesModule),
+    MailerModule,
+  ],
   controllers: [ExchangeRatesController],
   providers: [ExchangeRatesService, RatesRefreshJob],
   exports: [ExchangeRatesService],
