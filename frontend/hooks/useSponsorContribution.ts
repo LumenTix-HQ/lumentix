@@ -57,10 +57,21 @@ export function useSponsorContribution(eventId: string) {
             ? 'Public Global Stellar Network ; September 2015'
             : 'Test SDF Network ; September 2015';
 
-        const signedXdr = await signTransaction(xdr, {
+        // freighter-api v6: `address` replaces `accountToSign` and the result
+        // is an object holding the signed XDR.
+        const signed = await signTransaction(xdr, {
           networkPassphrase,
-          accountToSign: publicKey,
+          address: publicKey,
         });
+        if (signed.error) {
+          throw new Error(
+            typeof signed.error === 'string'
+              ? signed.error
+              : (signed.error as { message?: string }).message ??
+                'Signing failed',
+          );
+        }
+        const signedXdr = signed.signedTxXdr;
 
         setStatus('confirming');
 

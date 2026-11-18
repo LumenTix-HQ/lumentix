@@ -86,7 +86,7 @@ export function eventDataUrls(eventIds: string[], apiBase = ''): string[] {
 // Aliases for Issue #1462
 export const precache_event_data = precacheEventData;
 export const queue_background_sync = replayQueuedRequests;
-export async function serve_offline_listing(request: Request | string): Promise<Response | null> {
+export async function serveOfflineListing(request: Request | string): Promise<Response | null> {
   if (typeof caches === 'undefined') return null;
   const cache = await caches.open('lumentix-data-v1');
   return (await cache.match(request)) ?? null;

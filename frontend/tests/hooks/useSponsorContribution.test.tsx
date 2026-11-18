@@ -7,6 +7,8 @@ const initiateSponsorship = vi.fn();
 const confirmSponsorship = vi.fn();
 const getSponsorEvent = vi.fn();
 
+vi.mock('@stellar/freighter-api', async () => (await import('../mocks/freighter')).freighterModule);
+
 vi.mock('@/contexts/WalletContext', () => ({
   useWallet: (...a: unknown[]) => useWallet(...a),
 }));
@@ -39,7 +41,10 @@ describe('useSponsorContribution (#1170)', () => {
     });
     initiateSponsorship.mockResolvedValue({ xdr: 'AAAA…', contributionId: 'c-1' });
     confirmSponsorship.mockResolvedValue({ rank: 1, transactionHash: '0xhash' });
-    vi.mocked(signTransaction).mockResolvedValue('signed-xdr');
+    vi.mocked(signTransaction).mockResolvedValue({
+      signedTxXdr: 'signed-xdr',
+      signerAddress: 'GABC…',
+    });
   });
 
   it('routes initiation and confirmation through the shared api client', async () => {
@@ -58,7 +63,7 @@ describe('useSponsorContribution (#1170)', () => {
     });
     expect(signTransaction).toHaveBeenCalledWith('AAAA…', {
       networkPassphrase: 'Test SDF Network ; September 2015',
-      accountToSign: 'GABC…',
+      address: 'GABC…',
     });
     expect(confirmSponsorship).toHaveBeenCalledWith('c-1', 'signed-xdr');
     expect(result.current.status).toBe('confirmed');
