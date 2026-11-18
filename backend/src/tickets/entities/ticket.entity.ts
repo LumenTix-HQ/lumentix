@@ -6,7 +6,7 @@ import {
   Index,
 } from 'typeorm';
 
-export type TicketStatus = 'valid' | 'used' | 'refunded' | 'expired';
+export type TicketStatus = 'valid' | 'used' | 'refunded' | 'expired' | 'cancelled';
 
 @Index(['eventId', 'status'])
 @Entity({ name: 'tickets' })

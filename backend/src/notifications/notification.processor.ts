@@ -14,6 +14,13 @@ import { CalendarService } from '../calendar/calendar.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationCategory, NotificationChannel } from './dto/save-notification-preferences.dto';
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 @Processor('notifications')
 export class NotificationProcessor {
   private readonly logger = new Logger(NotificationProcessor.name);
@@ -37,7 +44,13 @@ export class NotificationProcessor {
     preferenceKey: string,
     category: NotificationCategory,
   ): Promise<boolean> {
-    const criticalJobs = ['sendRefundEmail', 'eventCancelled']; // cancellation is critical
+    // cancellation, emergency and reschedule notices bypass quiet hours
+    const criticalJobs = [
+      'sendRefundEmail',
+      'eventCancelled',
+      'sendEmergencyEmail',
+      'sendEventRescheduledEmail',
+    ];
     if (criticalJobs.includes(job.name)) {
       return false;
     }
@@ -213,6 +226,43 @@ export class NotificationProcessor {
       </div>
     `;
     await this.mailerService.send({ to: email, subject, html });
+    return { sent: true };
+  }
+
+  @Process('sendEmergencyEmail')
+  async handleEmergencyEmail(job: Job) {
+    // Emergency notices are critical: no preference or quiet-hours check.
+    const { userId, eventTitle, message } = job.data;
+    const user = userId ? await this.usersService.findById(userId) : null;
+    if (!user || !user.email) {
+      this.logger.error(`No email found for emergency job ${job.id}`);
+      return;
+    }
+    await this.mailerService.send({
+      to: user.email,
+      subject: `Emergency notice: ${eventTitle}`,
+      html: `<p><strong>Emergency notice for ${escapeHtml(eventTitle)}</strong></p><p>${escapeHtml(message)}</p>`,
+    });
+    return { sent: true };
+  }
+
+  @Process('sendEventRescheduledEmail')
+  async handleEventRescheduledEmail(job: Job) {
+    const { userId, eventTitle, oldStartDate, newStartDate, newEndDate } =
+      job.data;
+    const user = userId ? await this.usersService.findById(userId) : null;
+    if (!user || !user.email) {
+      this.logger.error(`No email found for reschedule job ${job.id}`);
+      return;
+    }
+    const reason = job.data.reason
+      ? `<p>Reason: ${escapeHtml(job.data.reason)}</p>`
+      : '';
+    await this.mailerService.send({
+      to: user.email,
+      subject: `Event rescheduled: ${eventTitle}`,
+      html: `<p>${escapeHtml(eventTitle)} has been rescheduled.</p><p>Previously: ${escapeHtml(oldStartDate)}</p><p>New dates: ${escapeHtml(newStartDate)} - ${escapeHtml(newEndDate)}</p>${reason}`,
+    });
     return { sent: true };
   }
 

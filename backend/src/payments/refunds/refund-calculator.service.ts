@@ -20,13 +20,13 @@ export class RefundCalculatorService {
   constructor(private readonly configService: ConfigService) {
     this.policy = {
       fullRefundWindowHours: Number(
-        this.configService.get<number>('FULL_REFUND_WINDOW_HOURS', 48),
+        this.configService.get<number>('FULL_REFUND_WINDOW_HOURS', 24),
       ),
       partialRefundRate: Number(
         this.configService.get<number>('PARTIAL_REFUND_RATE', 0.5),
       ),
       refundCutoffHours: Number(
-        this.configService.get<number>('REFUND_CUTOFF_HOURS', 24),
+        this.configService.get<number>('REFUND_CUTOFF_HOURS', 72),
       ),
     };
   }
