@@ -20,6 +20,11 @@ function buildEnv(overrides: Record<string, unknown> = {}): Record<string, unkno
     SMTP_USER: 'user@test.com',
     SMTP_PASS: 'pass',
     MAIL_FROM: 'noreply@test.com',
+    WEBHOOK_SECRET: 'webhook-secret',
+    INTERNAL_SECRET: 'internal-secret',
+    GOOGLE_CLIENT_ID: 'google-client-id',
+    GOOGLE_CLIENT_SECRET: 'google-client-secret',
+    GOOGLE_CALLBACK_URL: 'http://localhost:3000/auth/google/callback',
     ...overrides,
   };
 }

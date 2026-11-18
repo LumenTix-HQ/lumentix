@@ -75,7 +75,7 @@ export class PassPackage {
   /**
    * Maximum number of this pass package that can be sold
    */
-  @Column({ nullable: true, default: null })
+  @Column({ type: 'int', nullable: true, default: null })
   maxPackagesToSell: number | null;
 
   /**

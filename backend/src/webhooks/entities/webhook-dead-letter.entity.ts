@@ -23,7 +23,7 @@ export class WebhookDeadLetter {
   @Column({ type: 'jsonb' })
   payload: Record<string, unknown>;
 
-  @Column({ nullable: true })
+  @Column({ type: 'int', nullable: true })
   lastStatusCode: number | null;
 
   @Column({ type: 'text', nullable: true })

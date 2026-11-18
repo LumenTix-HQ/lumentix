@@ -116,6 +116,10 @@
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
   },
+  "overrides": {
+    "multer": ">=2.5.0",
+    "js-yaml": ">=4.1.1"
+  },
   "jest": {
     "moduleFileExtensions": [
       "js",
