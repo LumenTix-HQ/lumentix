@@ -1,3 +1,4 @@
+import { EventSeries } from '../../events/entities/event-series.entity';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -69,6 +70,7 @@ describe('RefundService', () => {
         { provide: getRepositoryToken(TicketEntity), useValue: mockRepo() },
         { provide: getRepositoryToken(Event), useValue: mockRepo() },
         { provide: getRepositoryToken(User), useValue: mockRepo() },
+        { provide: getRepositoryToken(EventSeries), useValue: mockRepo() },
         {
           provide: StellarService,
           useValue: { sendPayment: jest.fn() },

@@ -21,7 +21,7 @@ import { Roles, Role } from '../../common/decorators/roles.decorator';
 import { MultisigService } from './multisig.service';
 import { InitiatePayoutDto } from './dto/initiate-payout.dto';
 import { ApproveSignatureDto } from './dto/approve-signature.dto';
-import { AuthenticatedRequest } from '../../auth/interfaces/authenticated-request.interface';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @ApiTags('Payments - Multisig')
 @ApiBearerAuth()

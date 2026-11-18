@@ -21,7 +21,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles, Role } from '../../common/decorators/roles.decorator';
 import { DynamicQrService } from './dynamic-qr.service';
 import { ValidateOtpDto } from './dto/validate-otp.dto';
-import { AuthenticatedRequest } from '../../auth/interfaces/authenticated-request.interface';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @ApiTags('Tickets - Dynamic QR')
 @Controller('tickets')

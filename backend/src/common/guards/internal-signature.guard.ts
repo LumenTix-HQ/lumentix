@@ -67,7 +67,7 @@ export class InternalSignatureGuard implements CanActivate {
       .update(`${timestamp}:${rawBody}`)
       .digest('hex');
 
-    if (!timingSafeEqual(expected, signature)) {
+    if (!safeCompare(expected, signature)) {
       this.logger.warn(
         `InternalSignatureGuard: invalid signature on ${request.method} ${request.path}`,
       );
@@ -81,7 +81,7 @@ export class InternalSignatureGuard implements CanActivate {
 /**
  * Constant-time string comparison to prevent timing attacks.
  */
-function timingSafeEqual(a: string, b: string): boolean {
+function safeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);

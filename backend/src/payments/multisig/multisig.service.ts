@@ -68,7 +68,7 @@ export class MultisigService {
       action: AuditAction.PAYOUT_INITIATED,
       userId: initiatorId,
       resourceId: saved.id,
-      details: { eventId: dto.eventId, amount: dto.amount },
+      meta: { eventId: dto.eventId, amount: dto.amount },
     });
 
     return saved;
@@ -132,7 +132,7 @@ export class MultisigService {
       action: AuditAction.PAYOUT_APPROVED,
       userId: coordinatorId,
       resourceId: payoutId,
-      details: { signaturesCount: Object.keys(saved.signatures).length },
+      meta: { signaturesCount: Object.keys(saved.signatures).length },
     });
 
     return saved;
@@ -233,7 +233,7 @@ export class MultisigService {
         action: AuditAction.PAYOUT_EXECUTED,
         userId: executorId,
         resourceId: payoutId,
-        details: { transactionHash: txHash },
+        meta: { transactionHash: txHash },
       });
 
       return saved;
@@ -246,7 +246,7 @@ export class MultisigService {
         action: AuditAction.PAYOUT_FAILED,
         userId: executorId,
         resourceId: payoutId,
-        details: { error: error.message },
+        meta: { error: error.message },
       });
 
       throw new BadRequestException(`Payout execution failed: ${error.message}`);
