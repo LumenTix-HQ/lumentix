@@ -272,7 +272,10 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
   private async tryConfirmPayment(transactionHash: string): Promise<boolean> {
     try {
-      await this.paymentsService.confirmPayment({ transactionHash });
+      await this.paymentsService.confirmPayment(
+        { transactionHash },
+        'system',
+      );
       this.logger.log(
         `Payment confirmed via stream: txHash=${transactionHash}`,
       );
