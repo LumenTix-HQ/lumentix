@@ -63,6 +63,16 @@ export function replayQueuedRequests(): void {
 }
 
 /**
+ * Ask the worker to drop everything it cached for the signed-in user.
+ *
+ * Called on logout (#1613). Event/ticket responses live in a dedicated cache,
+ * so clearing it is enough; the app shell is not user data and stays.
+ */
+export function clearOfflineEventData(): void {
+  controller()?.postMessage({ type: 'CLEAR_USER_CACHES' });
+}
+
+/**
  * Build the endpoint list for a set of events, so a listing page can hand the
  * worker exactly the detail pages a user might open next.
  */
