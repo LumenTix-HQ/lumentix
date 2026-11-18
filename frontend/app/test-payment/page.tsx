@@ -47,6 +47,15 @@ export default function TestPaymentPage() {
           🧪 Stellar Payment Test
         </h1>
 
+        <p
+          role="note"
+          className="mx-auto mb-8 max-w-2xl rounded-lg border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-center text-sm text-amber-100"
+        >
+          Development-only demo. This page generates throwaway testnet keys and
+          bypasses the wallet-based checkout used by real purchases. Do not link
+          it from production navigation.
+        </p>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Account Setup Section */}
           <div className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
