@@ -647,7 +647,7 @@ export class EventsService {
   async send_emergency_notifications(id: string, callerId: string, message: string) {
     const event = await this.getEventById(id);
     if (event.organizerId !== callerId) throw new ForbiddenException();
-    await this.notificationService.queueLifecycleEmail({ ...event, status: EventStatus.CANCELLED } as Event);
+    await this.notificationService.queueEmergencyEmail(event, message);
     return { eventId: id, message, queued: true };
   }
 
@@ -676,11 +676,16 @@ export class EventsService {
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) {
       throw new BadRequestException('Invalid reschedule date range.');
     }
+    const previous = { startDate: event.startDate, endDate: event.endDate };
     event.startDate = startDate;
     event.endDate = endDate;
     const saved = await this.eventRepository.save(event);
     await this.eventCacheService.invalidateCacheEntry(id);
-    await this.notificationService.queueLifecycleEmail(saved);
+    await this.notificationService.queueRescheduleEmail(
+      saved,
+      previous,
+      data.reason,
+    );
     return { ...saved, rescheduleReason: data.reason ?? null };
   }
 

@@ -4,6 +4,7 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { RolesGuard } from './roles.guard';
 import { Event } from '../events/entities/event.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { User } from '../users/entities/user.entity';
 import { RoleRequest } from '../users/entities/role-request.entity';
 import { StellarWebhookModule } from '../stellar/stellar-webhook.module';
@@ -14,7 +15,7 @@ import { EventCacheService } from '../events/cache/event-cache.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Event, User, RoleRequest]),
+    TypeOrmModule.forFeature([Event, User, RoleRequest, RefreshToken]),
     StellarWebhookModule,
     AuditModule,
     MailerModule,

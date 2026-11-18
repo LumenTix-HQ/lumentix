@@ -103,6 +103,13 @@ export class AuthService {
     record.revoked = true;
     await this.refreshTokenRepository.save(record);
     const user = await this.usersService.findById(record.userId);
+    if (
+      !user ||
+      (user as any).status === 'blocked' ||
+      (user as any).deletedAt
+    ) {
+      throw new UnauthorizedException('Account is not active.');
+    }
     const { access_token } = this.signToken(record.userId, (user as any).role);
     const refresh_token = await this.issueRefreshToken(record.userId);
     return { access_token, refresh_token };

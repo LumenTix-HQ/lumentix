@@ -22,6 +22,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { MailerService } from '../mailer/mailer.service';
 import { StellarWebhookService, DlqItem } from '../stellar/stellar-webhook.service';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { EventStateService } from '../events/state/event-state.service';
 import { EventCacheService } from '../events/cache/event-cache.service';
 
@@ -34,6 +35,8 @@ export class AdminService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(RoleRequest)
     private readonly roleRequestRepository: Repository<RoleRequest>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
     private readonly auditService: AuditService,
     private readonly mailerService: MailerService,
     private readonly stellarWebhookService: StellarWebhookService,
@@ -81,7 +84,14 @@ export class AdminService {
     }
 
     user.status = UserStatus.BLOCKED;
-    return this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+    // Cut off access immediately: outstanding refresh tokens must not keep
+    // minting new access tokens for a blocked user.
+    await this.refreshTokenRepository.update(
+      { userId: user.id, revoked: false },
+      { revoked: true },
+    );
+    return saved;
   }
 
   async unblockUser(userId: string): Promise<User> {

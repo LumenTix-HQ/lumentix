@@ -57,8 +57,12 @@ export const envValidationSchema = Joi.object({
   CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
 
   // Refund policy
-  REFUND_CUTOFF_HOURS: Joi.number().default(24),
-  FULL_REFUND_WINDOW_HOURS: Joi.number().default(48),
+  // The full-refund window must end before the cutoff, otherwise the partial
+  // tier never applies.
+  FULL_REFUND_WINDOW_HOURS: Joi.number().default(24),
+  REFUND_CUTOFF_HOURS: Joi.number()
+    .greater(Joi.ref('FULL_REFUND_WINDOW_HOURS'))
+    .default(72),
 
   // Loyalty: balances expire after this many days without activity
   LOYALTY_POINTS_INACTIVITY_DAYS: Joi.number().integer().min(1).default(365),
