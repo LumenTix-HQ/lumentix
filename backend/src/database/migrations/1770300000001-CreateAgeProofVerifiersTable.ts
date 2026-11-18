@@ -7,10 +7,10 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * in-memory `Map`, so registrations were lost on restart and not shared across
  * instances. This table makes the trusted verifier set durable and auditable.
  */
-export class CreateAgeProofVerifiersTable1770300000000
+export class CreateAgeProofVerifiersTable1770300000001
   implements MigrationInterface
 {
-  name = 'CreateAgeProofVerifiersTable1770300000000';
+  name = 'CreateAgeProofVerifiersTable1770300000001';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

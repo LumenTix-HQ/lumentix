@@ -8,10 +8,14 @@ describe('data-source', () => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       moduleExports = require('./data-source');
     });
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { DataSource } = require('typeorm');
-
-    const instances = Object.values(moduleExports).filter((value) => value instanceof DataSource);
+    // instanceof is unreliable across jest.isolateModules, so match on shape.
+    const instances = Object.values(moduleExports).filter(
+      (value) =>
+        typeof value === 'object' &&
+        value !== null &&
+        typeof (value as { initialize?: unknown }).initialize === 'function' &&
+        'options' in (value as object),
+    );
     expect(instances).toHaveLength(1);
     expect(moduleExports.default).toBeUndefined();
   });

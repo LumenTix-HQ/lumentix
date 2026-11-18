@@ -1,3 +1,4 @@
+import { AuditService } from '../audit/audit.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
@@ -74,6 +75,10 @@ describe('AuthService', () => {
           useValue: {
             get: jest.fn().mockReturnValue('http://localhost:3000'),
           },
+        },
+        {
+          provide: AuditService,
+          useValue: { log: jest.fn() },
         },
         {
           provide: MailerService,

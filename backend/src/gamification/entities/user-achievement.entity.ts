@@ -23,7 +23,7 @@ export class UserAchievement {
   @Column({ type: 'varchar', length: 128 })
   userId: string;
 
-  @Column({ type: 'varchar', length: 128 })
+  @Column({ type: 'uuid' })
   achievementId: string;
 
   @ManyToOne(() => Achievement, { eager: true, onDelete: 'CASCADE' })

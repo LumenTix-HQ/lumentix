@@ -1,3 +1,5 @@
+import { RoleRequest } from './entities/role-request.entity';
+import { StellarService } from '../stellar/stellar.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -63,6 +65,11 @@ describe('UsersService', () => {
           provide: getRepositoryToken(TicketEntity),
           useValue: mockTicketRepository,
         },
+        {
+          provide: getRepositoryToken(RoleRequest),
+          useValue: { findOne: jest.fn(), find: jest.fn(), save: jest.fn() },
+        },
+        { provide: StellarService, useValue: {} },
         { provide: CurrenciesService, useValue: {} },
         { provide: ExchangeRatesService, useValue: {} },
       ],
