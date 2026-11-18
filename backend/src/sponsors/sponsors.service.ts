@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -27,8 +28,16 @@ import { Role } from '../common/decorators/roles.decorator';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 
+/** True only when Horizon answered with a definite 4xx rejection. */
+export function isDefiniteStellarFailure(err: unknown): boolean {
+  const status = (err as { response?: { status?: number } })?.response?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
 @Injectable()
 export class SponsorsService {
+  private readonly logger = new Logger(SponsorsService.name);
+
   constructor(
     @InjectRepository(SponsorTier)
     private readonly tierRepository: Repository<SponsorTier>,
@@ -219,10 +228,19 @@ export class SponsorsService {
         'XLM',
       );
     } catch (err) {
-      // The payout did not happen, so release the claim to allow a retry.
-      await this.eventRepository.update(eventId, {
-        escrowDistributedAt: null,
-      });
+      // Only release the claim when Horizon definitively rejected the
+      // transaction (4xx, e.g. tx_failed). Timeouts, 5xx and unknown errors
+      // are ambiguous: the payment may still have been applied, so keeping
+      // the claim prevents a second payout until it is reconciled.
+      if (isDefiniteStellarFailure(err)) {
+        await this.eventRepository.update(eventId, {
+          escrowDistributedAt: null,
+        });
+      } else {
+        this.logger.warn(
+          `Escrow distribution for event ${eventId} has an unknown outcome; claim retained for reconciliation`,
+        );
+      }
       throw err;
     }
 

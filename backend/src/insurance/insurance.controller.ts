@@ -66,6 +66,24 @@ export class InsuranceController {
     return this.insuranceService.purchaseInsurance(req.user.id, dto);
   }
 
+  @Post('policies/:policyId/activate')
+  @ApiOperation({
+    summary: 'Activate a policy after paying the premium',
+    description:
+      'Verifies the premium transaction on Stellar and activates the policy.',
+  })
+  activatePolicy(
+    @Req() req: AuthenticatedRequest,
+    @Param('policyId') policyId: string,
+    @Body() body: { transactionHash: string },
+  ): Promise<InsurancePolicyDto> {
+    return this.insuranceService.activatePolicy(
+      req.user.id,
+      policyId,
+      body.transactionHash,
+    );
+  }
+
   // ── process_insurance_claim ───────────────────────────────────────────────
 
   @Post('claim')

@@ -8,6 +8,8 @@ import {
 } from 'typeorm';
 
 export enum InsurancePolicyStatus {
+  /** Policy created but the premium has not been paid/confirmed yet. */
+  PENDING_PAYMENT = 'pending_payment',
   ACTIVE = 'active',
   CLAIMED = 'claimed',
   EXPIRED = 'expired',

@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 
 import {
@@ -178,7 +178,8 @@ export class InsuranceService {
       premiumPaid,
       coverageAmount: ticketPrice,
       currency,
-      status: InsurancePolicyStatus.ACTIVE,
+      // Not active until the premium transaction is confirmed on-chain.
+      status: InsurancePolicyStatus.PENDING_PAYMENT,
       claimReason: null,
       premiumTransactionHash: null,
       claimTransactionHash: null,
@@ -586,17 +587,61 @@ export class InsuranceService {
       event.escrowSecretEncrypted,
     );
 
-    const txResponse = await this.stellarService.sendPayment(
-      escrowSecret,
-      user.stellarPublicKey,
-      String(policy.coverageAmount),
-      policy.currency,
+    // Refuse to pay a ticket that was already refunded (e.g. by the event
+    // cancellation refund job), otherwise it is paid back twice.
+    const ticket = await this.ticketRepo.findOne({
+      where: { id: dto.ticketId },
+    });
+    if (ticket?.status === 'refunded') {
+      throw new BadRequestException(
+        'This ticket has already been refunded and cannot be paid out again.',
+      );
+    }
+
+    // Claim the payout atomically before sending: only the request that flips
+    // the policy out of ACTIVE/UNDER_REVIEW may pay, so concurrent claim,
+    // auto-adjudication and review calls cannot each send funds.
+    const previousStatus = policy.status;
+    const claimed = await this.policyRepo.update(
+      {
+        id: policy.id,
+        status: In([
+          InsurancePolicyStatus.ACTIVE,
+          InsurancePolicyStatus.UNDER_REVIEW,
+        ]),
+      },
+      { status: InsurancePolicyStatus.CLAIMED },
     );
+    if (claimed.affected !== 1) {
+      throw new ConflictException('This policy has already been claimed.');
+    }
+
+    let txResponse: Awaited<ReturnType<StellarService['sendPayment']>>;
+    try {
+      txResponse = await this.stellarService.sendPayment(
+        escrowSecret,
+        user.stellarPublicKey,
+        String(policy.coverageAmount),
+        policy.currency,
+      );
+    } catch (err) {
+      // Release the claim only for a definite Horizon rejection (4xx); on
+      // timeouts/5xx the payment may have landed, so keep it claimed.
+      const status = (err as { response?: { status?: number } })?.response
+        ?.status;
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        await this.policyRepo.update(
+          { id: policy.id },
+          { status: previousStatus },
+        );
+      }
+      throw err;
+    }
 
     const txHash =
       typeof txResponse.hash === 'string' ? txResponse.hash : 'unknown';
 
-    // 8. Mark policy as claimed
+    // 8. Record the claim details
     policy.status = InsurancePolicyStatus.CLAIMED;
     policy.claimReason = dto.cancellationReason;
     policy.claimTransactionHash = txHash;
@@ -714,16 +759,56 @@ export class InsuranceService {
   }
 
   /**
+   * Activate a PENDING_PAYMENT policy once its premium transaction is
+   * confirmed successful on Stellar. Unpaid policies can never be claimed.
+   */
+  async activatePolicy(
+    userId: string,
+    policyId: string,
+    transactionHash: string,
+  ): Promise<InsurancePolicyDto> {
+    const policy = await this.policyRepo.findOne({ where: { id: policyId } });
+    if (!policy) throw new NotFoundException(`Policy "${policyId}" not found.`);
+    if (policy.userId !== userId) {
+      throw new ForbiddenException('You do not own this policy.');
+    }
+    if (policy.status !== InsurancePolicyStatus.PENDING_PAYMENT) {
+      throw new BadRequestException('Policy is not awaiting payment.');
+    }
+
+    const reused = await this.policyRepo.findOne({
+      where: { premiumTransactionHash: transactionHash },
+    });
+    if (reused) {
+      throw new ConflictException('This transaction was already used.');
+    }
+
+    const tx = await this.stellarService.getTransaction(transactionHash);
+    if (!tx.successful) {
+      throw new BadRequestException('Premium transaction was not successful.');
+    }
+
+    policy.status = InsurancePolicyStatus.ACTIVE;
+    policy.premiumTransactionHash = transactionHash;
+    return this.toDto(await this.policyRepo.save(policy));
+  }
+
+  /**
    * Get aggregate insurance pool statistics.
    */
   async getInsurancePool(): Promise<InsurancePoolDto> {
     const [totalPolicies, totalClaimsProcessed, premiumResult, claimsResult] =
       await Promise.all([
-        this.policyRepo.count(),
+        this.policyRepo.count({
+          where: { status: Not(InsurancePolicyStatus.PENDING_PAYMENT) },
+        }),
         this.policyRepo.count({ where: { status: InsurancePolicyStatus.CLAIMED } }),
         this.policyRepo
           .createQueryBuilder('p')
           .select('COALESCE(SUM(p.premiumPaid), 0)', 'total')
+          .where('p.status != :pending', {
+            pending: InsurancePolicyStatus.PENDING_PAYMENT,
+          })
           .getRawOne<{ total: string }>(),
         this.policyRepo
           .createQueryBuilder('p')
