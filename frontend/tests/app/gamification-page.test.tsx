@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 const useAuth = vi.fn();
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => useAuth() }));
 
-const apiClient = {
+const apiClient = vi.hoisted(() => ({
   getMyGamificationProfile: vi.fn(),
   getAllAchievements: vi.fn(),
   getMyAchievements: vi.fn(),
@@ -13,7 +13,7 @@ const apiClient = {
   getMyChallenges: vi.fn(),
   joinChallenge: vi.fn(),
   recordActivity: vi.fn(),
-};
+}));
 vi.mock('@/lib/api-client', () => ({ apiClient }));
 
 import GamificationPage from '@/app/gamification/page';

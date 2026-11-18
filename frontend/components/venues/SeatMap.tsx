@@ -273,7 +273,6 @@ function SeatMapCanvas({
                   aria-label={injectAriaLabels.seat(seat, selected)}
                   aria-pressed={selected}
                   aria-disabled={!available}
-                  title={`${seat.seatIdentifier} - ${seat.status}`}
                   className="focus:outline-none [&:focus-visible>rect]:stroke-blue-300 [&:focus-visible>rect]:[stroke-width:3]"
                   onClick={() => handleSelect(seat)}
                   onFocus={() => setFocusedSeatId(seat.id)}

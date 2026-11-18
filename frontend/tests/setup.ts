@@ -7,8 +7,8 @@ afterEach(() => {
   cleanup();
 });
 
-// Mock window.matchMedia
-Object.defineProperty(window, 'matchMedia', {
+// Mock window.matchMedia (skipped in node-environment test files)
+if (typeof window !== 'undefined') Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
     matches: false,
@@ -58,11 +58,13 @@ for (const method of ['getItem', 'setItem', 'removeItem', 'clear', 'key'] as con
   vi.spyOn(memoryLocalStorage, method);
 }
 
-Object.defineProperty(window, 'localStorage', {
-  value: memoryLocalStorage,
-  configurable: true,
-  writable: true,
-});
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'localStorage', {
+    value: memoryLocalStorage,
+    configurable: true,
+    writable: true,
+  });
+}
 
 // Start every test with empty storage and fresh call history. (Some tests call
 // vi.restoreAllMocks(), which un-spies the methods, hence the optional calls.)

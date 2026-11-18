@@ -142,7 +142,7 @@ describe('WalletContext', () => {
   });
 
   it('should persist wallet to localStorage on connect', async () => {
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    const setItemSpy = vi.spyOn(window.localStorage, 'setItem');
 
     renderWithContext();
 
@@ -167,7 +167,7 @@ describe('WalletContext', () => {
       network: NetworkType.TESTNET,
     };
 
-    vi.spyOn(Storage.prototype, 'getItem').mockReturnValue(JSON.stringify(storedWallet));
+    vi.spyOn(window.localStorage, 'getItem').mockReturnValue(JSON.stringify(storedWallet));
 
     renderWithContext();
 

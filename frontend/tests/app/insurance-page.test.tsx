@@ -4,12 +4,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 const useAuth = vi.fn();
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => useAuth() }));
 
-const apiClient = {
+const apiClient = vi.hoisted(() => ({
   getMyInsurancePolicies: vi.fn(),
   getInsurancePool: vi.fn(),
   purchaseInsurance: vi.fn(),
   fileInsuranceClaim: vi.fn(),
-};
+}));
 vi.mock('@/lib/api-client', () => ({ apiClient }));
 
 import InsurancePage from '@/app/insurance/page';

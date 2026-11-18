@@ -1,7 +1,7 @@
 import { type RefObject } from 'react';
 
 export interface ScanTargetProps {
-  inputRef: RefObject<HTMLInputElement | null>;
+  inputRef: RefObject<HTMLInputElement>;
   isSubmitting: boolean;
   onSubmit: (value: string) => void;
 }

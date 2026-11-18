@@ -8,8 +8,8 @@ const eventDataUrls = vi.fn((ids: string[], _base = '') => [
 ]);
 
 vi.mock('@/lib/pwa/offline-events', () => ({
-  precacheEventData: (...a: unknown[]) => precacheEventData(...a),
-  eventDataUrls: (...a: unknown[]) => eventDataUrls(...a),
+  precacheEventData: (urls: string[]) => precacheEventData(urls),
+  eventDataUrls: (ids: string[], base?: string) => eventDataUrls(ids, base),
 }));
 
 vi.mock('@/components/events/EventCard', () => ({
