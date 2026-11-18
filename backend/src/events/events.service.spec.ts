@@ -84,6 +84,7 @@ const mockRepo = {
   create: jest.fn(),
   save: jest.fn(),
   findOne: jest.fn(),
+  find: jest.fn(),
   findAndCount: jest.fn(),
   remove: jest.fn(),
   count: jest.fn().mockResolvedValue(0),
@@ -102,6 +103,17 @@ describe('EventsService', () => {
   let repo: Repository<Event>;
   let historyRepo: Repository<EventHistory>;
   let eventStateService: { validateTransition: jest.Mock };
+  let eventCacheService: {
+    fetchCachedMetadata: jest.Mock;
+    cacheEventMetadata: jest.Mock;
+    invalidateCacheEntry: jest.Mock;
+  };
+  let seriesRepo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    findOne: jest.Mock;
+    find: jest.Mock;
+  };
   let escrowService: { createEscrow: jest.Mock };
   let auditService: { log: jest.Mock };
   let ticketRepo: Repository<TicketEntity>;
@@ -115,6 +127,17 @@ describe('EventsService', () => {
 
   beforeEach(async () => {
     eventStateService = { validateTransition: jest.fn() };
+    eventCacheService = {
+      fetchCachedMetadata: jest.fn().mockResolvedValue(null),
+      cacheEventMetadata: jest.fn(),
+      invalidateCacheEntry: jest.fn(),
+    };
+    seriesRepo = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn(),
+      find: jest.fn(),
+    };
     escrowService = { createEscrow: jest.fn().mockResolvedValue('GESCROW123') };
     auditService = { log: jest.fn().mockResolvedValue({}) };
 
@@ -144,7 +167,7 @@ describe('EventsService', () => {
         },
         {
           provide: EventCacheService,
-          useValue: { fetchCachedMetadata: jest.fn().mockResolvedValue(null), cacheEventMetadata: jest.fn(), invalidateCacheEntry: jest.fn() },
+          useValue: eventCacheService,
         },
         {
           provide: RefundService,
@@ -156,7 +179,7 @@ describe('EventsService', () => {
         },
         {
           provide: getRepositoryToken(EventSeries),
-          useValue: { create: jest.fn(), save: jest.fn(), findOne: jest.fn(), find: jest.fn() },
+          useValue: seriesRepo,
         },
       ],
     }).compile();
@@ -519,6 +542,124 @@ describe('EventsService', () => {
       expect(qbMock.andWhere).toHaveBeenCalledWith(
         'eh.archivedAt <= :toDate',
         { toDate: expect.any(Date) },
+      );
+    });
+  });
+
+  describe('event cache invalidation (#1606)', () => {
+    it('recomputes capacity from live tickets even when the event row is cached', async () => {
+      eventCacheService.fetchCachedMetadata.mockResolvedValue({
+        ...mockEvent,
+        status: EventStatus.PUBLISHED,
+        soldTickets: 99,
+        remainingCapacity: 1,
+        availableSpots: 1,
+      });
+      mockRepo.count.mockResolvedValue(4);
+
+      const result = await service.getEventById('uuid-1');
+
+      expect(mockRepo.findOne).not.toHaveBeenCalled();
+      expect(result.soldTickets).toBe(4);
+      expect(result.remainingCapacity).toBe(96);
+      expect(result.availableSpots).toBe(96);
+    });
+
+    it('invalidates the cache after rescheduling', async () => {
+      eventCacheService.fetchCachedMetadata.mockResolvedValue(null);
+      mockRepo.findOne.mockResolvedValue(mockEvent);
+      mockRepo.save.mockImplementation(async (value: any) => value);
+
+      await service.reschedule_event('uuid-1', 'organizer-1', {
+        startDate: '2025-07-01',
+        endDate: '2025-07-02',
+      });
+
+      expect(eventCacheService.invalidateCacheEntry).toHaveBeenCalledWith(
+        'uuid-1',
+      );
+    });
+
+    it('validates the transition before postponing', async () => {
+      eventCacheService.fetchCachedMetadata.mockResolvedValue(null);
+      mockRepo.findOne.mockResolvedValue({
+        ...mockEvent,
+        status: EventStatus.ARCHIVED,
+      });
+      eventStateService.validateTransition.mockImplementation(() => {
+        throw new BadRequestException('Invalid status transition');
+      });
+
+      await expect(
+        service.trigger_automatic_postponement('uuid-1', 'organizer-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the cache after updating an event image', async () => {
+      mockRepo.findOne.mockResolvedValue(mockEvent);
+      mockRepo.save.mockImplementation(async (value: any) => value);
+
+      await service.updateEventImage(
+        'uuid-1',
+        'https://img.test/1.png',
+        'organizer-1',
+      );
+
+      expect(eventCacheService.invalidateCacheEntry).toHaveBeenCalledWith(
+        'uuid-1',
+      );
+    });
+  });
+
+  describe('bulk_update_series (#1605)', () => {
+    const series = { id: 'series-1', organizerId: 'organizer-1' };
+
+    it('rejects the whole batch when a transition is illegal', async () => {
+      seriesRepo.findOne.mockResolvedValue(series);
+      mockRepo.find.mockResolvedValue([
+        { ...mockEvent, id: 'event-1', status: EventStatus.PUBLISHED },
+        { ...mockEvent, id: 'event-2', status: EventStatus.ARCHIVED },
+      ]);
+      eventStateService.validateTransition.mockImplementation(
+        (current: EventStatus) => {
+          if (current === EventStatus.ARCHIVED) {
+            throw new BadRequestException('Invalid status transition');
+          }
+        },
+      );
+
+      await expect(
+        service.bulk_update_series(
+          'series-1',
+          { status: EventStatus.CANCELLED },
+          'organizer-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.save).not.toHaveBeenCalled();
+      expect(eventStateService.validateTransition).toHaveBeenCalledTimes(2);
+    });
+
+    it('invalidates every updated event after a valid batch', async () => {
+      seriesRepo.findOne.mockResolvedValue(series);
+      mockRepo.find.mockResolvedValue([
+        { ...mockEvent, id: 'event-1', status: EventStatus.DRAFT },
+        { ...mockEvent, id: 'event-2', status: EventStatus.DRAFT },
+      ]);
+      mockRepo.save.mockImplementation(async (value: any) => value);
+
+      const result = await service.bulk_update_series(
+        'series-1',
+        { status: EventStatus.PUBLISHED },
+        'organizer-1',
+      );
+
+      expect(result.updatedEvents).toHaveLength(2);
+      expect(eventCacheService.invalidateCacheEntry).toHaveBeenCalledWith(
+        'event-1',
+      );
+      expect(eventCacheService.invalidateCacheEntry).toHaveBeenCalledWith(
+        'event-2',
       );
     });
   });

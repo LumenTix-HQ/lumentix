@@ -15,6 +15,7 @@ import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
 import { StellarService } from 'src/stellar';
 import { Payment, PaymentStatus } from '../entities/payment.entity';
+import { EventCacheService } from 'src/events/cache/event-cache.service';
 
 /** System user ID used in audit logs for automated escrow actions */
 const SYSTEM_USER_ID = 'system';
@@ -33,6 +34,7 @@ export class EscrowService {
     private readonly auditService: AuditService,
     private readonly configService: ConfigService,
     private readonly encryptionService: EncryptionService,
+    private readonly eventCacheService: EventCacheService,
   ) {
     this.funderSecret =
       this.configService.get<string>('ESCROW_FUNDER_SECRET') ?? '';
@@ -126,6 +128,7 @@ export class EscrowService {
       .set({ escrowPublicKey: publicKey, escrowSecretEncrypted })
       .where('id = :id', { id: eventId })
       .execute();
+    await this.eventCacheService.invalidateCacheEntry(eventId);
 
     await this.auditService.log({
       action: AuditAction.ESCROW_CREATED,
@@ -225,6 +228,7 @@ export class EscrowService {
       .set({ escrowSecretEncrypted: null })
       .where('id = :id', { id: eventId })
       .execute();
+    await this.eventCacheService.invalidateCacheEntry(eventId);
 
     const txHash = String(txResponse.hash);
 
@@ -380,6 +384,7 @@ export class EscrowService {
       .set({ escrowSecretEncrypted: null, escrowPublicKey: null, mergedAt: new Date() })
       .where('id = :id', { id: eventId })
       .execute();
+    await this.eventCacheService.invalidateCacheEntry(eventId);
 
     await this.auditService.log({
       action: AuditAction.ESCROW_MERGED,

@@ -11,6 +11,8 @@ import { AuditService } from 'src/audit/audit.service';
 import { AuditAction } from 'src/audit/entities/audit-log.entity';
 import { Event, EventStatus } from 'src/events/entities/event.entity';
 import { StellarService } from 'src/stellar';
+import { EventCacheService } from 'src/events/cache/event-cache.service';
+import { Payment } from '../entities/payment.entity';
 import {
   EncryptionService,
   ENCRYPTION_PROVIDER,
@@ -82,6 +84,7 @@ describe('EscrowService', () => {
   >;
   let auditService: jest.Mocked<Pick<AuditService, 'log'>>;
   let eventRepository: { createQueryBuilder: jest.Mock };
+  let eventCacheService: { invalidateCacheEntry: jest.Mock };
 
   beforeEach(async () => {
     stellarService = {
@@ -98,14 +101,18 @@ describe('EscrowService', () => {
 
     auditService = { log: jest.fn().mockResolvedValue(undefined) };
 
+    eventCacheService = { invalidateCacheEntry: jest.fn() };
+
     eventRepository = { createQueryBuilder: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EscrowService,
         { provide: getRepositoryToken(Event), useValue: eventRepository },
+        { provide: getRepositoryToken(Payment), useValue: {} },
         { provide: StellarService, useValue: stellarService },
         { provide: AuditService, useValue: auditService },
+        { provide: EventCacheService, useValue: eventCacheService },
         {
           provide: ConfigService,
           useValue: {
@@ -150,6 +157,9 @@ describe('EscrowService', () => {
         expect.objectContaining({ escrowPublicKey: ESCROW_PUBLIC_KEY }),
       );
       expect(publicKey).toBe(ESCROW_PUBLIC_KEY);
+      expect(eventCacheService.invalidateCacheEntry).toHaveBeenCalledWith(
+        'event-uuid-1',
+      );
     });
 
     it('does not store the plain-text secret', async () => {

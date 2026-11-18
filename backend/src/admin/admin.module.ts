@@ -9,6 +9,8 @@ import { RoleRequest } from '../users/entities/role-request.entity';
 import { StellarWebhookModule } from '../stellar/stellar-webhook.module';
 import { AuditModule } from '../audit/audit.module';
 import { MailerModule } from '../mailer/mailer.module';
+import { EventStateService } from '../events/state/event-state.service';
+import { EventCacheService } from '../events/cache/event-cache.service';
 
 @Module({
   imports: [
@@ -18,7 +20,7 @@ import { MailerModule } from '../mailer/mailer.module';
     MailerModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, RolesGuard],
+  providers: [AdminService, RolesGuard, EventStateService, EventCacheService],
   exports: [RolesGuard],
 })
 export class AdminModule {}
