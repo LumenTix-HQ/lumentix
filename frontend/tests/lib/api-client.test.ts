@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiGet, apiPost, apiPatch, apiDelete, apiRequest } from '@/lib/api-client';
+import { apiClient, apiGet, apiPost, apiPatch, apiDelete, apiRequest } from '@/lib/api-client';
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -186,6 +186,29 @@ describe('API Client (cookie + proxy auth model)', () => {
         expect.stringContaining('/test/1'),
         expect.objectContaining({ method: 'DELETE' }),
       );
+    });
+  });
+
+  describe('Recommendations (#1619)', () => {
+    it('requests the caller-owned /recommendations/me route with the limit', async () => {
+      mockFetch.mockResolvedValue(ok({ userId: 'me', recommendations: [], generatedAt: '' }));
+
+      await apiClient.getRecommendations(4);
+
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/proxy/recommendations/me?limit=4');
+    });
+
+    it('updates preferences through PUT /recommendations/me/preferences', async () => {
+      mockFetch.mockResolvedValue(ok({ saved: 1 }));
+      const body = { preferences: [{ category: 'Technology', weight: 1 }] };
+
+      await apiClient.updateUserPreferences(body);
+
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/proxy/recommendations/me/preferences');
+      expect(mockFetch.mock.calls[0][1]).toMatchObject({
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
     });
   });
 

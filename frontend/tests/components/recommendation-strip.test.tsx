@@ -73,6 +73,12 @@ describe("RecommendationStrip", () => {
     expect(links[0]).toHaveTextContent("84%");
   });
 
+  it("requests the caller's own recommendations without passing a user id", async () => {
+    render(<RecommendationStrip />);
+    await waitFor(() => expect(getRecommendations).toHaveBeenCalledWith(4));
+    expect(getRecommendations).not.toHaveBeenCalledWith("user-1", 4);
+  });
+
   it("announces the number of personalised suggestions for screen readers", async () => {
     render(<RecommendationStrip />);
     await waitFor(() =>
@@ -106,6 +112,14 @@ describe("RecommendationStrip", () => {
 
   it("degrades to null on a recommendation fetch error rather than crashing the page", async () => {
     getRecommendations.mockRejectedValue(new Error("recs unavailable"));
+    const { container } = render(<RecommendationStrip />);
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it("hides the strip when the API answers 403", async () => {
+    getRecommendations.mockRejectedValue(
+      Object.assign(new Error("Forbidden"), { status: 403 }),
+    );
     const { container } = render(<RecommendationStrip />);
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });

@@ -14,7 +14,9 @@ import type {
 /**
  * "Recommended for you" strip rendered on the events directory page
  * (#1243). Pulls the ranked event suggestions for the signed-in user from
- * `GET /recommendations/:userId` and shows the top slice as tappable cards.
+ * `GET /recommendations/me` and shows the top slice as tappable cards. The
+ * anonymous visitor and 401/403 cases render nothing, so the strip never
+ * breaks or redirects public event browsing.
  *
  * Accessibility contract mirrors the rest of the directory:
  *  - section labelled `aria-label="personalized recommendations"`;
@@ -23,7 +25,7 @@ import type {
  *  - a match badge is rendered as text, never colour-only.
  */
 export function RecommendationStrip() {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [state, setState] = useState<{
     data: RecommendationResponse | null;
     error: string | null;
@@ -32,16 +34,18 @@ export function RecommendationStrip() {
   useEffect(() => {
     let cancelled = false;
 
-    if (!user?.id) {
+    if (!isAuthenticated || !user?.id) {
       setState({ data: null, error: null });
       return;
     }
 
     (async () => {
       try {
-        const data = await apiClient.getRecommendations(user.id, 4);
+        const data = await apiClient.getRecommendations(4);
         if (!cancelled) setState({ data, error: null });
       } catch (err) {
+        // 401/403 (session expired or insufficient role) and network errors all
+        // hide the strip instead of blocking the rest of the page.
         if (!cancelled)
           setState({
             data: null,
@@ -53,7 +57,7 @@ export function RecommendationStrip() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [isAuthenticated, user?.id]);
 
   const recommendationCount = state.data?.recommendations.length ?? 0;
 
@@ -64,7 +68,7 @@ export function RecommendationStrip() {
     }
   }, [recommendationCount]);
 
-  if (!user?.id) return null;
+  if (!isAuthenticated || !user?.id) return null;
   if (!state.data || recommendationCount === 0) return null;
 
   const ranked = [...state.data.recommendations].sort((a, b) => b.score - a.score);
