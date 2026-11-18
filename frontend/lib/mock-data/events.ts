@@ -2,6 +2,7 @@ import {
 	Event,
 	EventStatus,
 	EventCategory,
+	EventAgeRestriction,
 	EventFilters,
 	PaginatedResponse,
 	VipTierName,
@@ -72,6 +73,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "e1a2b3c4-d5e6-7890-abcd-ef1234567890",
 		title: "Stellar Horizons Conference 2026",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"The largest annual gathering of Stellar developers, founders, and enthusiasts. Three days of talks, workshops, and networking that will shape the future of decentralized finance.",
 		location: "San Francisco, CA",
@@ -95,6 +97,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "f2b3c4d5-e6f7-8901-bcde-f12345678901",
 		title: "Smart Contracts Bootcamp",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Intensive 2-day hands-on workshop covering Soroban smart contract development from the ground up. Perfect for developers looking to build on Stellar.",
 		location: "Austin, TX",
@@ -115,6 +118,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "a3c4d5e6-f7a8-9012-cdef-123456789012",
 		title: "Web3 Builders Meetup — Lagos",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Monthly gathering for blockchain and Web3 builders in Lagos. Lightning talks, demos, and community networking over drinks and pizza.",
 		location: "Lagos, Nigeria",
@@ -135,6 +139,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "b4d5e6f7-a8b9-0123-defa-234567890123",
 		title: "Lumens Live — Electronic Music Festival",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"A two-night electronic music festival powered by Stellar. All tickets are NFT-based and transferable on-chain. Featuring top DJs and immersive light shows.",
 		location: "Berlin, Germany",
@@ -158,6 +163,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "c5e6f7a8-b9c0-1234-efab-345678901234",
 		title: "Stellar Charity Run 5K",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Run for a cause! Participate in our charity 5K run with proceeds going to STEM education. Registration and donations handled entirely on Stellar.",
 		location: "London, UK",
@@ -179,6 +185,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "d6f7a8b9-c0d1-2345-fabc-456789012345",
 		title: "DeFi Summer Festival",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Three days of panels, hackathons, and live music celebrating decentralized finance. Learn, build, and party at the intersection of finance and technology.",
 		location: "Miami, FL",
@@ -199,6 +206,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "e7a8b9c0-d1e2-3456-abcd-567890123456",
 		title: "Intro to Stellar for Business",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"A free online workshop designed for business leaders interested in integrating Stellar blockchain into their payment and remittance workflows.",
 		location: "Online",
@@ -219,6 +227,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "f8b9c0d1-e2f3-4567-bcde-678901234567",
 		title: "NFT Art Exhibition Launch",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Experience the intersection of art and blockchain at this exclusive gallery opening. All artworks are tokenized as Stellar NFTs with on-chain provenance.",
 		location: "New York, NY",
@@ -239,6 +248,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "a9c0d1e2-f3a4-5678-cdef-789012345678",
 		title: "Blockchain Gaming Tournament",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Compete in the ultimate blockchain gaming tournament! Play-to-earn games on Stellar with real Lumen prizes. Streamed live for global audiences.",
 		location: "Tokyo, Japan",
@@ -259,6 +269,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "b0d1e2f3-a4b5-6789-defa-890123456789",
 		title: "Women in Web3 Summit",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Celebrating women builders, founders, and leaders in the Web3 space. Inspiring talks, mentorship sessions, and community building.",
 		location: "Toronto, Canada",
@@ -279,6 +290,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "c1e2f3a4-b5c6-7890-efab-901234567890",
 		title: "Stellar Developer Happy Hour",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Casual evening meetup for Stellar developers. Grab a drink, share what you're building, and connect with fellow devs in a relaxed setting.",
 		location: "Amsterdam, Netherlands",
@@ -299,6 +311,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "d2f3a4b5-c6d7-8901-fabc-012345678901",
 		title: "Cross-Border Payments Hackathon",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"48-hour hackathon focused on building innovative cross-border payment solutions using Stellar. $50,000 in prizes across multiple categories.",
 		location: "Singapore",
@@ -319,6 +332,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "e3a4b5c6-d7e8-9012-abcd-123456789abc",
 		title: "Soroban Deep Dive: Advanced Patterns",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Advanced workshop for experienced Soroban developers. Covers complex contract patterns, gas optimization, and real-world deployment strategies.",
 		location: "Denver, CO",
@@ -339,6 +353,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "f4b5c6d7-e8f9-0123-bcde-234567890bcd",
 		title: "Crypto Jazz Night",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Smooth jazz meets blockchain at this intimate evening event. Enjoy world-class jazz musicians while mingling with the crypto community.",
 		location: "New Orleans, LA",
@@ -359,6 +374,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "a5c6d7e8-f9a0-1234-cdef-345678901cde",
 		title: "Decentralized Identity Workshop",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Learn to build self-sovereign identity solutions on Stellar. Covers DIDs, verifiable credentials, and practical implementation with hands-on exercises.",
 		location: "Online",
@@ -379,6 +395,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "b6d7e8f9-a0b1-2345-defa-456789012def",
 		title: "Stellar Ecosystem Showcase",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"Annual showcase of the best projects built on Stellar. Demo day format with audience voting and investor networking. A great place to discover the next big thing.",
 		location: "Lisbon, Portugal",
@@ -399,6 +416,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "c7e8f9a0-b1c2-3456-efab-567890123efa",
 		title: "Tokenomics Masterclass",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"A comprehensive one-day masterclass on designing token economies. Covers incentive design, governance tokens, and sustainable tokenomics frameworks.",
 		location: "Dubai, UAE",
@@ -419,6 +437,7 @@ const MOCK_EVENTS: Event[] = [
 	{
 		id: "d8f9a0b1-c2d3-4567-fabc-678901234fab",
 		title: "Stellar Community Day — Nairobi",
+		ageRestriction: EventAgeRestriction.NONE,
 		description:
 			"A full day of learning, building, and connecting with the Stellar community in East Africa. Beginner-friendly with sessions in English and Swahili.",
 		location: "Nairobi, Kenya",

@@ -89,7 +89,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     setShowInstallPrompt(false);
     try {
-      const publicKey = await getConnector(walletType).connect(state.network);
+      const connector = getConnector(walletType);
+      if (!(await connector.isAvailable())) {
+        setShowInstallPrompt(true);
+        throw new Error('Wallet is not installed');
+      }
+      const publicKey = await connector.connect(state.network);
 
       const next: WalletState = {
         ...state, isConnected: true, publicKey, walletType, isLoading: false, error: null,
