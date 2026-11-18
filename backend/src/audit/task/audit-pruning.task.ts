@@ -27,7 +27,7 @@ export class AuditPruningTask {
       );
 
     const deleted =
-      await this.auditService.pruneLogs(
+      await this.auditService.prune(
         retentionDays,
       );
 
