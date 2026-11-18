@@ -791,6 +791,32 @@ export class RefundService {
   /**
    * Refund a single confirmed payment. Used for individual registration cancellations.
    */
+  /** Refund every confirmed payment of a cancelled event. */
+  async refundEvent(eventId: string): Promise<RefundResultDto[]> {
+    return this.refundAllForEvent(eventId);
+  }
+
+  /**
+   * Refund one payment. `userId` is the payment owner and is verified so a
+   * caller cannot trigger a refund for somebody else's payment.
+   */
+  async processRefund(
+    paymentId: string,
+    userId?: string,
+  ): Promise<RefundResultDto> {
+    if (userId !== undefined) {
+      const payment = await this.paymentsRepository.findOne({
+        where: { id: paymentId },
+      });
+      if (payment && payment.userId !== userId) {
+        throw new BadRequestException(
+          `Payment "${paymentId}" does not belong to user "${userId}".`,
+        );
+      }
+    }
+    return this.refundSinglePayment(paymentId);
+  }
+
   async refundSinglePayment(paymentId: string): Promise<RefundResultDto> {
     const payment = await this.paymentsRepository.findOne({
       where: { id: paymentId },
@@ -887,7 +913,6 @@ export class RefundService {
         user.stellarPublicKey,
         String(amount),
         payment.currency,
-        undefined,
         payment.id,
       );
 

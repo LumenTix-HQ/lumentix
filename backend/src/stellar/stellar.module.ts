@@ -9,6 +9,8 @@ import { SorobanService } from './soroban.service';
 import { UsersModule } from '../users/users.module';
 import { Payment } from '../payments/entities/payment.entity';
 import { AuditModule } from '../audit/audit.module';
+import { PersistedXdr } from './entities/persisted-xdr.entity';
+import { StellarXdrReplayProcessor } from './jobs/stellar-xdr.processor';
 import { RetryPaymentJob } from '../payments/jobs/retry-payment.job';
 
 @Module({
@@ -16,7 +18,8 @@ import { RetryPaymentJob } from '../payments/jobs/retry-payment.job';
     ConfigModule.forFeature(stellarConfig),
     UsersModule,
     AuditModule,
-    TypeOrmModule.forFeature([Payment]),
+    TypeOrmModule.forFeature([Payment, PersistedXdr]),
+    BullModule.registerQueue({ name: 'stellar-xdr-replay' }),
     BullModule.registerQueue({
       name: PAYMENT_RETRY_QUEUE,
       defaultJobOptions: {
@@ -29,7 +32,12 @@ import { RetryPaymentJob } from '../payments/jobs/retry-payment.job';
     }),
   ],
   controllers: [StellarController],
-  providers: [StellarService, RetryPaymentJob, SorobanService],
+  providers: [
+    StellarService,
+    RetryPaymentJob,
+    SorobanService,
+    StellarXdrReplayProcessor,
+  ],
   exports: [StellarService, SorobanService],
 })
 export class StellarModule {}

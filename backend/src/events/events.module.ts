@@ -24,6 +24,8 @@ import { StellarModule } from '../stellar';
 import { CalendarModule } from '../calendar/calendar.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 
+import { StorageModule } from '../common/storage/storage.module';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([Event, EventSeries, EventHistory, User, TicketEntity, Payment, SponsorContribution]),
@@ -34,6 +36,7 @@ import { SchedulingModule } from '../scheduling/scheduling.module';
     forwardRef(() => RefundModule),
     WebhooksModule,
     StellarModule,
+    StorageModule,
     CalendarModule,
     SchedulingModule,
     BullModule.registerQueue({

@@ -111,9 +111,7 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
             'attempt to reconnect automatically. ' +
             'Use POST /admin/stellar/reconnect to restart manually.',
         );
-        this.notificationService.emit('STELLAR_STREAM_DEAD', {
-          attempts: this.reconnectAttempts,
-        });
+        // No NotificationService.emit exists; the CRITICAL log above is the alert.
         return;
       }
 
@@ -153,6 +151,54 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ─── Dead-letter queue public accessors ──────────────────────────────────
+
+  // ─── Dead-letter queue (in-memory) ────────────────────────────────────────
+
+  private static readonly DLQ_MAX_ITEMS = 1000;
+  private static readonly DLQ_MAX_RETRIES = 5;
+  private static readonly DLQ_PROCESS_INTERVAL_MS = 60_000;
+
+  /** Park an unmatched on-chain payment so it can be retried later. */
+  private enqueueDlq(
+    payment: Horizon.ServerApi.PaymentOperationRecord,
+    reason: string,
+  ): void {
+    if (this.deadLetterQueue.length >= StellarWebhookService.DLQ_MAX_ITEMS) {
+      this.deadLetterQueue.shift(); // drop the oldest rather than grow forever
+    }
+    this.deadLetterQueue.push({
+      id: `${payment.transaction_hash}:${Date.now()}`,
+      transactionHash: payment.transaction_hash,
+      type: 'unmatched_payment',
+      payload: { ...(payment as unknown as Record<string, unknown>) },
+      retryCount: 0,
+      enqueuedAt: new Date().toISOString(),
+      lastError: reason,
+    });
+  }
+
+  /** Periodically retry parked items, giving up after DLQ_MAX_RETRIES. */
+  private startDlqProcessor(): void {
+    if (this.dlqProcessingInterval) return;
+    this.dlqProcessingInterval = setInterval(() => {
+      void this.processDlq();
+    }, StellarWebhookService.DLQ_PROCESS_INTERVAL_MS);
+    this.dlqProcessingInterval.unref?.();
+  }
+
+  private stopDlqProcessor(): void {
+    if (this.dlqProcessingInterval) {
+      clearInterval(this.dlqProcessingInterval);
+      this.dlqProcessingInterval = null;
+    }
+  }
+
+  private async processDlq(): Promise<void> {
+    for (const item of [...this.deadLetterQueue]) {
+      if (item.retryCount >= StellarWebhookService.DLQ_MAX_RETRIES) continue;
+      await this.retryDlqItem(item.id);
+    }
+  }
 
   getDlq(): DlqItem[] {
     return [...this.deadLetterQueue];
@@ -226,7 +272,10 @@ export class StellarWebhookService implements OnModuleInit, OnModuleDestroy {
 
   private async tryConfirmPayment(transactionHash: string): Promise<boolean> {
     try {
-      await this.paymentsService.confirmPayment(transactionHash, 'system');
+      await this.paymentsService.confirmPayment(
+        { transactionHash },
+        'system',
+      );
       this.logger.log(
         `Payment confirmed via stream: txHash=${transactionHash}`,
       );

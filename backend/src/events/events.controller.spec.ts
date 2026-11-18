@@ -1,3 +1,4 @@
+import { StorageService } from '../common/storage/storage.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -72,6 +73,7 @@ describe('EventsController', () => {
       providers: [
         { provide: EventsService, useValue: mockEventsService },
         { provide: TicketsService, useValue: mockTicketsService },
+        { provide: StorageService, useValue: { uploadFile: jest.fn() } },
         RolesGuard,
         Reflector,
       ],
