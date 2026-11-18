@@ -37,20 +37,20 @@ describe('Organizer audit trail page auth gating', () => {
   });
 
   it('redirects home when the user is neither organizer nor admin', async () => {
-    useAuth.mockReturnValue({ user: { id: 'u1', email: 'u1@example.com', role: 'user' }, isLoading: false });
+    useAuth.mockReturnValue({ user: { id: 'u1', email: 'u1@example.com', role: 'EVENT_GOER' }, isLoading: false });
     render(<AuditLogPage />);
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
   });
 
   it('renders the audit log viewer for an authenticated organizer', async () => {
-    useAuth.mockReturnValue({ user: { id: 'u1', email: 'org@example.com', role: 'organizer' }, isLoading: false });
+    useAuth.mockReturnValue({ user: { id: 'u1', email: 'org@example.com', role: 'ORGANIZER' }, isLoading: false });
     const { findByText } = render(<AuditLogPage />);
     expect(await findByText('audit logs')).toBeInTheDocument();
     expect(replace).not.toHaveBeenCalled();
   });
 
   it('renders the audit log viewer for an authenticated admin', async () => {
-    useAuth.mockReturnValue({ user: { id: 'u1', email: 'admin@example.com', role: 'admin' }, isLoading: false });
+    useAuth.mockReturnValue({ user: { id: 'u1', email: 'admin@example.com', role: 'ADMIN' }, isLoading: false });
     const { findByText } = render(<AuditLogPage />);
     expect(await findByText('audit logs')).toBeInTheDocument();
     expect(replace).not.toHaveBeenCalled();

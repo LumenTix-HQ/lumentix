@@ -215,15 +215,22 @@ async function request<T>(
     },
   });
 
-  if (res.status === 401 && !isRetry) {
-    const refreshRes = await fetch("/api/auth/refresh", { method: "POST" });
-    if (refreshRes.ok) {
-      return request<T>(endpoint, options, true);
+  if (res.status === 401) {
+    if (!isRetry) {
+      const refreshRes = await fetch("/api/auth/refresh", { method: "POST" });
+      if (refreshRes.ok) {
+        return request<T>(endpoint, options, true);
+      }
     }
-    if (typeof window !== "undefined") {
-      window.location.href = "/login";
+
+    // Only an already-authenticated user had a session to expire. Anonymous
+    // visitors on public pages get a plain 401 so the caller can hide its
+    // widget instead of being bounced to /login.
+    if (authenticatedSession) {
+      redirectToLogin();
+      throw new ApiProxyError(401, "Session expired. Redirecting to login.");
     }
-    throw new ApiProxyError(401, "Session expired. Redirecting to login.");
+    throw new ApiProxyError(401, "Authentication required.");
   }
 
   if (!res.ok) {
@@ -243,6 +250,34 @@ async function request<T>(
 
 /** Low-level proxied request, exposed so callers (and tests) can pass custom options. */
 export const apiRequest = request;
+
+/**
+ * Whether the current browser session is backed by an authenticated user.
+ * Sync is owned by AuthContext; the API client cannot read the HttpOnly cookie
+ * itself. Anonymous visitors must never be redirected to /login just because a
+ * public page called a guarded endpoint (#1616).
+ */
+let authenticatedSession = false;
+
+export function setApiAuthState(isAuthenticated: boolean): void {
+  authenticatedSession = isAuthenticated;
+}
+
+export function isApiAuthenticated(): boolean {
+  return authenticatedSession;
+}
+
+function currentLocationPath(): string {
+  if (typeof window === "undefined") return "/";
+  const pathname = window.location.pathname || "/";
+  const search = window.location.search || "";
+  return `${pathname}${search}`;
+}
+
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  window.location.href = `/login?redirect=${encodeURIComponent(currentLocationPath())}`;
+}
 
 export async function apiGet<T>(path: string): Promise<T> {
   return request<T>(path, { method: "GET" });

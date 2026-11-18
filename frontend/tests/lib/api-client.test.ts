@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiGet, apiPost, apiPatch, apiDelete, apiRequest } from '@/lib/api-client';
+import {
+  apiGet,
+  apiPost,
+  apiPatch,
+  apiDelete,
+  apiRequest,
+  setApiAuthState,
+} from '@/lib/api-client';
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -22,6 +29,7 @@ describe('API Client (cookie + proxy auth model)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLocation.href = '';
+    setApiAuthState(false);
   });
 
   afterEach(() => {
@@ -58,7 +66,7 @@ describe('API Client (cookie + proxy auth model)', () => {
       expect(mockFetch.mock.calls[2][0]).toBe('/api/proxy/test-endpoint');
     });
 
-    it('redirects to /login and throws a 401 ApiProxyError when the refresh fails', async () => {
+    it('does not redirect anonymous visitors on a 401 (public pages keep rendering)', async () => {
       mockFetch
         .mockResolvedValueOnce({ ok: false, status: 401 })
         .mockResolvedValueOnce({ ok: false, status: 401 });
@@ -66,13 +74,26 @@ describe('API Client (cookie + proxy auth model)', () => {
       const error = await apiGet('/test-endpoint').catch((err: unknown) => err);
 
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).name).toBe('ApiProxyError');
       expect((error as { status: number }).status).toBe(401);
-      expect((error as Error).message).toContain('Session expired');
-      expect(mockLocation.href).toBe('/login');
+      expect((error as Error).message).not.toContain('Session expired');
+      expect(mockLocation.href).toBe('');
     });
 
-    it('does not retry a second time when the retried request is still unauthorized', async () => {
+    it('redirects an authenticated session to /login with the current path', async () => {
+      setApiAuthState(true);
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 401 })
+        .mockResolvedValueOnce({ ok: false, status: 401 });
+
+      const error = await apiGet('/test-endpoint').catch((err: unknown) => err);
+
+      expect((error as Error).name).toBe('ApiProxyError');
+      expect((error as Error).message).toContain('Session expired');
+      expect(mockLocation.href).toBe(`/login?redirect=${encodeURIComponent('/')}`);
+    });
+
+    it('treats a 401 on the retried call after a successful refresh as an expired session', async () => {
+      setApiAuthState(true);
       mockFetch
         .mockResolvedValueOnce({ ok: false, status: 401 })
         .mockResolvedValueOnce({ ok: true, status: 200 })
@@ -82,6 +103,7 @@ describe('API Client (cookie + proxy auth model)', () => {
 
       // original, refresh, retry (not refreshed again)
       expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(mockLocation.href).toBe(`/login?redirect=${encodeURIComponent('/')}`);
     });
   });
 

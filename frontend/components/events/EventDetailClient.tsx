@@ -14,6 +14,7 @@ import {
 } from "@/lib/utils/datetime";
 import { announceCartUpdate, injectAriaLabels, validateA11yCompliance } from "@/lib/a11y";
 import { SponsorBanner } from "@/components/SponsorBanner";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface EventDetailClientProps {
   event: Event;
@@ -27,6 +28,7 @@ const TIER_BADGES: Record<string, string> = {
 };
 
 export default function EventDetailClient({ event }: EventDetailClientProps) {
+  const { isAuthenticated } = useAuth();
   const [selectedSeatId, setSelectedSeatId] = useState<string | undefined>();
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
 
@@ -91,7 +93,7 @@ export default function EventDetailClient({ event }: EventDetailClientProps) {
             <p className="text-gray-400 leading-relaxed">{event.description}</p>
           </div>
 
-          {event.id && <SentimentPanel eventId={event.id} />}
+          {event.id && isAuthenticated && <SentimentPanel eventId={event.id} />}
 
           {event.location && (
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl overflow-hidden">

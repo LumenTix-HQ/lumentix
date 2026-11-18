@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AuditLogViewer } from '@/components/AuditLogViewer';
 import { useAuth } from '@/contexts/AuthContext';
+import { isOrganizerOrAdmin } from '@/lib/auth/roles';
 
 export default function AuditLogPage() {
   const router = useRouter();
@@ -17,12 +18,12 @@ export default function AuditLogPage() {
       return;
     }
     // Only organizers (and admins) should see audit logs.
-    if (user.role !== 'organizer' && user.role !== 'admin') {
+    if (!isOrganizerOrAdmin(user.role)) {
       router.replace('/');
     }
   }, [isLoading, user, router]);
 
-  if (isLoading || !user || (user.role !== 'organizer' && user.role !== 'admin')) {
+  if (isLoading || !user || !isOrganizerOrAdmin(user.role)) {
     return null;
   }
 

@@ -64,4 +64,13 @@ describe('SentimentPanel (#1159)', () => {
 
     expect(await screen.findByText(/event not found/i)).toBeInTheDocument();
   });
+
+  it('hides itself for anonymous 401/403 responses instead of redirecting', async () => {
+    getEventSentiment.mockRejectedValue(
+      Object.assign(new Error('Authentication required.'), { status: 401 }),
+    );
+    const { container } = render(<SentimentPanel eventId="evt-1" />);
+
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
 });

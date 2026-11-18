@@ -33,13 +33,13 @@ describe('AdminLayout auth gating', () => {
   });
 
   it('redirects to home when the role is not admin', async () => {
-    useAuth.mockReturnValue({ user: { id: 'u1', email: 'u1@example.com', role: 'user' }, isLoading: false });
+    useAuth.mockReturnValue({ user: { id: 'u1', email: 'u1@example.com', role: 'EVENT_GOER' }, isLoading: false });
     render(<AdminLayout><div>secret</div></AdminLayout>);
     await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
   });
 
   it('renders children for an authenticated admin user', async () => {
-    useAuth.mockReturnValue({ user: { id: 'u1', email: 'admin@example.com', role: 'admin' }, isLoading: false });
+    useAuth.mockReturnValue({ user: { id: 'u1', email: 'admin@example.com', role: 'ADMIN' }, isLoading: false });
     const { findByText } = render(<AdminLayout><div>secret</div></AdminLayout>);
     expect(await findByText('secret')).toBeInTheDocument();
     expect(push).not.toHaveBeenCalled();

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isTokenExpired, decodeJwtRole } from '@/lib/auth/token';
+import { hasRole, ROLES } from '@/lib/auth/roles';
 
 export const config = {
   matcher: ['/create', '/my-tickets', '/organizer/:path*', '/profile', '/admin/:path*'],
@@ -17,7 +18,7 @@ export default function middleware(req: NextRequest) {
 
   if (req.nextUrl.pathname.startsWith('/organizer')) {
     const role = decodeJwtRole(token);
-    if (role !== 'organizer' && role !== 'admin') {
+    if (!hasRole(role, ROLES.ORGANIZER, ROLES.ADMIN)) {
       url.pathname = '/';
       url.searchParams.delete('redirect');
       return NextResponse.redirect(url);
@@ -26,7 +27,7 @@ export default function middleware(req: NextRequest) {
 
   if (req.nextUrl.pathname.startsWith('/admin')) {
     const role = decodeJwtRole(token);
-    if (role !== 'admin') {
+    if (!hasRole(role, ROLES.ADMIN)) {
       url.pathname = '/';
       url.searchParams.delete('redirect');
       return NextResponse.redirect(url);
