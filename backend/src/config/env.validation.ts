@@ -24,8 +24,14 @@ export const envValidationSchema = Joi.object({
   PLATFORM_SECRET_KEY: Joi.string().required(),
 
   // Redis
+  // REDIS_URL takes precedence over the discrete variables when set.
+  REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).optional(),
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
+  REDIS_USERNAME: Joi.string().allow('').optional(),
+  REDIS_PASSWORD: Joi.string().allow('').optional(),
+  REDIS_DB: Joi.number().integer().min(0).default(0),
+  REDIS_TLS: Joi.boolean().default(false),
 
   // Public API protection
   RATE_LIMIT_WINDOW_SECONDS: Joi.number().integer().positive().default(60),

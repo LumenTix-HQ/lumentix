@@ -299,8 +299,15 @@ SMTP_PASS=your_smtp_password
 MAIL_FROM=no-reply@example.com
 
 # Redis
+# REDIS_URL takes precedence over the discrete values when set:
+#   rediss://default:password@host:6380/0
+REDIS_URL=
 REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_USERNAME=
+REDIS_PASSWORD=
+REDIS_DB=0
+REDIS_TLS=false
 
 # CORS
 CORS_ORIGIN=http://localhost:3000

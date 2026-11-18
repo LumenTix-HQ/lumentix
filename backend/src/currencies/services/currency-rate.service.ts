@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   Logger,
 } from '@nestjs/common';
@@ -6,6 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 import Redis from 'ioredis';
+
+import { REDIS_CLIENT } from '../../common/redis/redis.provider';
 
 import {
   CURRENCY_RATE_CACHE_KEY,
@@ -19,16 +22,14 @@ export class CurrencyRateService {
   private readonly logger =
     new Logger(CurrencyRateService.name);
 
-  private readonly redis: Redis;
-
   constructor(
     private readonly provider: FxProviderService,
     private readonly configService: ConfigService,
-  ) {
-    this.redis = new Redis(
-      process.env.REDIS_URL ?? 'redis://localhost:6379',
-    );
-  }
+    // Shared connection so currency caching inherits the same AUTH/TLS/db
+    // configuration as the rest of the app (#1608).
+    @Inject(REDIS_CLIENT)
+    private readonly redis: Redis,
+  ) {}
 
   async getRates() {
     const cached =

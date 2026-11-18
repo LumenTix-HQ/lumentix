@@ -6,6 +6,7 @@ import {
 } from '@nestjs/terminus';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { buildRedisOptions } from '../../common/redis/redis-options';
 
 @Injectable()
 export class RedisHealthIndicator extends HealthIndicator {
@@ -18,8 +19,7 @@ export class RedisHealthIndicator extends HealthIndicator {
   async isHealthy(key: string): Promise<HealthIndicatorResult> {
     try {
       const redis = new Redis({
-        host: this.configService.get<string>('REDIS_HOST') ?? 'localhost',
-        port: this.configService.get<number>('REDIS_PORT') ?? 6379,
+        ...buildRedisOptions(this.configService),
         connectTimeout: 2000,
         lazyConnect: true,
       });
