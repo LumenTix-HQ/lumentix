@@ -296,6 +296,9 @@ mod upgrade_auction_tests;
 mod gdpr_tests;
 
 #[cfg(test)]
+mod age_verification_tests;
+
+#[cfg(test)]
 mod referral_offline_tests;
 
 pub use contract::TicketContract;
