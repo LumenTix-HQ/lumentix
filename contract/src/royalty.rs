@@ -89,7 +89,10 @@ pub fn get_royalty_splits(env: &Env, event_id: u64) -> Result<Map<Address, u32>,
 /// Fails with `InvalidAmount` if `total_amount` is not positive,
 /// `RoyaltySplitsNotConfigured` if no splits exist for the event, and
 /// `InsufficientEscrow` if the event's escrow balance is lower than
-/// `total_amount`.
+/// `total_amount`, and `NotInitialized` if no settlement token is configured
+/// (escrow is never debited, nor the ledger credited, for a pay-out that
+/// cannot be transferred). Fails with `InvalidAmount` if an artist's share
+/// would overflow `i128`.
 ///
 /// Returns a map of `artist_address → amount_distributed`, where the returned
 /// amounts always sum to exactly `total_amount` (the division remainder from
@@ -114,7 +117,10 @@ pub fn distribute_royalties(
     let mut largest_bps: u32 = 0;
 
     for (artist, bps) in splits.iter() {
-        let share = total_amount * i128::from(bps) / i128::from(ROYALTY_TOTAL_BPS);
+        let share = total_amount
+            .checked_mul(i128::from(bps))
+            .ok_or(LumentixError::InvalidAmount)?
+            / i128::from(ROYALTY_TOTAL_BPS);
         distributions.set(artist.clone(), share);
         assigned = assigned.saturating_add(share);
         if bps > largest_bps {
@@ -135,13 +141,16 @@ pub fn distribute_royalties(
     // transfer is executed.
     storage::deduct_escrow(env, event_id, total_amount)?;
 
-    if let Ok(token_address) = storage::get_token_result(env) {
-        let token_client = soroban_sdk::token::Client::new(env, &token_address);
-        for (artist, share) in distributions.iter() {
-            let share: i128 = share;
-            if share > 0 {
-                token_client.transfer(&env.current_contract_address(), &artist, &share);
-            }
+    // Without a settlement token nothing can be paid out. Previously this was
+    // skipped silently while escrow was still debited and the ledger still
+    // credited, recording royalties that no artist ever received. Returning
+    // an error reverts the escrow deduction above.
+    let token_address = storage::get_token_result(env)?;
+    let token_client = soroban_sdk::token::Client::new(env, &token_address);
+    for (artist, share) in distributions.iter() {
+        let share: i128 = share;
+        if share > 0 {
+            token_client.transfer(&env.current_contract_address(), &artist, &share);
         }
     }
 

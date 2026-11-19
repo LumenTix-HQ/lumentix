@@ -7848,6 +7848,81 @@ fn test_royalty_ledger_empty_before_any_distribution() {
     assert_eq!(client.query_royalty_ledger(&event_id).len(), 0);
 }
 
+// Issue #1515: a distribution with no settlement token used to debit escrow
+// and credit the ledger without paying anyone.
+#[test]
+fn test_distribute_royalties_without_token_rejected_and_escrow_kept() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let artist_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a, 10000u32)]);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+    client.deposit_funds(&organizer, &event_id, &500i128);
+
+    let result = client.try_distribute_royalties(&organizer, &event_id, &500i128);
+    assert_eq!(result, Err(Ok(LumentixError::NotInitialized)));
+
+    // Nothing was recorded as paid and the escrow is untouched.
+    assert_eq!(client.get_escrow_balance(&event_id), 500i128);
+    assert_eq!(client.query_royalty_ledger(&event_id).len(), 0);
+}
+
+#[test]
+fn test_distribute_royalties_share_overflow_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (_, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let artist_a = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a, 10000u32)]);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+
+    let result = client.try_distribute_royalties(&organizer, &event_id, &i128::MAX);
+    assert_eq!(result, Err(Ok(LumentixError::InvalidAmount)));
+}
+
+#[test]
+fn test_royalty_ledger_accumulates_across_distributions() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (admin, client) = create_test_contract(&env);
+    let organizer = Address::generate(&env);
+    let event_id = create_and_publish_event(&env, &client, &organizer);
+
+    let token_admin = Address::generate(&env);
+    let token_address = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    let token_client = token::Client::new(&env, &token_address);
+    token::StellarAssetClient::new(&env, &token_address).mint(&organizer, &10_000i128);
+    client.set_token(&admin, &token_address);
+
+    let artist_a = Address::generate(&env);
+    let artist_b = Address::generate(&env);
+    let splits = Map::from_array(&env, [(artist_a.clone(), 7500u32), (artist_b.clone(), 2500u32)]);
+    client.set_royalty_splits(&organizer, &event_id, &splits);
+    client.deposit_funds(&organizer, &event_id, &2_000i128);
+
+    client.distribute_royalties(&organizer, &event_id, &1_200i128);
+    client.distribute_royalties(&organizer, &event_id, &800i128);
+
+    let ledger = client.query_royalty_ledger(&event_id);
+    assert_eq!(ledger.get(artist_a.clone()).unwrap(), 1_500i128);
+    assert_eq!(ledger.get(artist_b.clone()).unwrap(), 500i128);
+    assert_eq!(token_client.balance(&artist_a), 1_500i128);
+    assert_eq!(token_client.balance(&artist_b), 500i128);
+    assert_eq!(client.get_escrow_balance(&event_id), 0i128);
+}
+
 // ============================================================================
 // VENUE CAPACITY (Issue #1245)
 // ============================================================================
