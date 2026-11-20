@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -316,6 +317,37 @@ export class TaxReceiptsService {
 
     this.logger.log(`Tax receipt ${receiptId} emailed to ${toEmail}`);
     return this.toDto(saved);
+  }
+
+  /**
+   * Build the PDF for a generated receipt so the API can serve a real file
+   * download instead of a placeholder URL (#1551).
+   */
+  async downloadTaxReceiptPdf(
+    userId: string,
+    receiptId: string,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const receipt = await this.receiptRepo.findOne({
+      where: { id: receiptId },
+    });
+    if (!receipt) {
+      throw new NotFoundException(`Tax receipt "${receiptId}" not found.`);
+    }
+    if (receipt.userId !== userId) {
+      throw new ForbiddenException(
+        'You can only download your own tax receipts.',
+      );
+    }
+    if (receipt.status === TaxReceiptStatus.PENDING) {
+      throw new BadRequestException(
+        'Receipt PDF has not been generated yet. Call generate_tax_receipt first.',
+      );
+    }
+
+    return {
+      buffer: await this._buildPdf(receipt.receiptData ?? {}),
+      fileName: `tax-receipt-${receiptId}.pdf`,
+    };
   }
 
   /** List all receipts for the authenticated user. */
