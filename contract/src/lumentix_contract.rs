@@ -7991,7 +7991,7 @@ impl LumentixContract {
             return Err(LumentixError::Unauthorized);
         }
 
-        if rules.regions.is_empty() {
+        if rules.enabled && rules.regions.is_empty() {
             return Err(LumentixError::InvalidGeoFenceRules);
         }
 

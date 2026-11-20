@@ -82,6 +82,12 @@ fn set_geo_fence_rules_validates_input() {
         Err(Ok(LumentixError::InvalidGeoFenceRules))
     );
 
+    let disabled_empty = make_rules(&env, GeoRestrictionMode::Allowlist, &[], false);
+    client.set_geo_fence_rules(&organizer, &event_id, &disabled_empty);
+    let stored = client.get_geo_fence_rules(&event_id).unwrap();
+    assert!(!stored.enabled);
+    assert!(stored.regions.is_empty());
+
     // Region codes must be ISO 3166-1 alpha-2.
     let malformed = make_rules(&env, GeoRestrictionMode::Allowlist, &["USA"], true);
     assert_eq!(

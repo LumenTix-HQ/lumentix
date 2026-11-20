@@ -1190,7 +1190,10 @@ pub fn get_demand_velocity_per_hour(env: &Env, event_id: u64) -> u64 {
     }
 
     let now = env.ledger().timestamp();
-    let elapsed = now.saturating_sub(window.window_start).min(DEMAND_WINDOW_SECONDS);
+    let elapsed = now.saturating_sub(window.window_start);
+    if elapsed >= DEMAND_WINDOW_SECONDS {
+        return 0;
+    }
     if elapsed == 0 {
         // Purchases recorded in the same ledger second as the caller: treat
         // the window as full-length so early sales are not over-weighted.
