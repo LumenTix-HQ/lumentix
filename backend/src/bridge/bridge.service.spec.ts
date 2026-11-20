@@ -215,4 +215,52 @@ describe('BridgeService (#1463)', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
+
+  describe('snake_case aliases (#1550)', () => {
+    it('initiate_bridge_transfer delegates to the camelCase pipeline', async () => {
+      mockTicketRepo.findOne.mockResolvedValue(makeTicket());
+      mockBridgeRepo.findOne.mockResolvedValue(null);
+      mockBridgeRepo.save.mockImplementation(async (e) => ({
+        ...e,
+        id: 'xfer-001',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }));
+
+      const result = await service.initiate_bridge_transfer('user-abc', {
+        ticketId: 'ticket-001',
+        sourceChain: SupportedChain.STELLAR,
+        destinationChain: SupportedChain.ETHEREUM,
+        sourceAddress: 'GSTELLARADDRESS',
+        destinationAddress: '0xETHADDRESS',
+      });
+
+      expect(result.status).toBe(BridgeTransferStatus.PENDING);
+    });
+
+    it('lock_source_token delegates to the camelCase pipeline', async () => {
+      mockBridgeRepo.findOne.mockResolvedValue(makePendingTransfer());
+      mockBridgeRepo.save.mockImplementation(async (e) => ({ ...e }));
+
+      const result = await service.lock_source_token('xfer-001', 'user-abc');
+
+      expect(result.status).toBe(BridgeTransferStatus.SOURCE_LOCKED);
+      expect(result.lockTransactionHash).toBeTruthy();
+    });
+
+    it('mint_bridged_token delegates to the camelCase pipeline', async () => {
+      mockBridgeRepo.findOne.mockResolvedValue(
+        makePendingTransfer({
+          status: BridgeTransferStatus.SOURCE_LOCKED,
+          lockTransactionHash: 'lock-hash-abc',
+        }),
+      );
+      mockBridgeRepo.save.mockImplementation(async (e) => ({ ...e }));
+
+      const result = await service.mint_bridged_token('xfer-001', 'user-abc');
+
+      expect(result.status).toBe(BridgeTransferStatus.COMPLETED);
+      expect(result.mintTransactionHash).toBeTruthy();
+    });
+  });
 });

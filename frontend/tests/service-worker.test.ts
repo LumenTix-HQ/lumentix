@@ -112,7 +112,18 @@ function loadServiceWorker(
       .calls[0][0] as Promise<unknown>;
   };
 
-  return { listeners, addCalls, runInstall, runFetch, runMessage, cache, caches, fetchImpl };
+  const workerScope = self as unknown as Record<string, unknown>;
+  return {
+    listeners,
+    addCalls,
+    runInstall,
+    runFetch,
+    runMessage,
+    cache,
+    caches,
+    fetchImpl,
+    self: workerScope,
+  };
 }
 
 describe('service worker install', () => {
@@ -231,5 +242,15 @@ describe('service worker caching rules (#1613)', () => {
 
     expect(caches.delete).toHaveBeenCalledWith('lumentix-data-v1');
     expect(caches.delete).not.toHaveBeenCalledWith('lumentix-v3');
+  });
+});
+
+describe('offline event browsing aliases (#1549)', () => {
+  it('exposes the three issue-named service worker functions', () => {
+    const { self } = loadServiceWorker();
+
+    expect(typeof self.precache_event_data).toBe('function');
+    expect(typeof self.serve_offline_listing).toBe('function');
+    expect(typeof self.queue_background_sync).toBe('function');
   });
 });

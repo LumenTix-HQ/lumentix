@@ -91,4 +91,5 @@ export async function serveOfflineListing(request: Request | string): Promise<Re
   const cache = await caches.open('lumentix-data-v1');
   return (await cache.match(request)) ?? null;
 }
+export const serve_offline_listing = serveOfflineListing;
 

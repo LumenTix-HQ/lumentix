@@ -253,6 +253,32 @@ export class BridgeService {
     return this.toDto(transfer);
   }
 
+  // ── Issue #1550 aliases ────────────────────────────────────────────────────
+
+  initiate_bridge_transfer(
+    userId: string,
+    dto: InitiateBridgeTransferDto,
+  ): Promise<BridgeTransferResponseDto> {
+    return this.initiateBridgeTransfer(userId, dto);
+  }
+
+  lock_source_token(
+    transferId: string,
+    userId: string,
+    signedLockTxXdr?: string,
+  ): Promise<BridgeTransferResponseDto> {
+    return this.lockSourceToken(transferId, userId, signedLockTxXdr);
+  }
+
+  mint_bridged_token(
+    transferId: string,
+    userId: string,
+  ): Promise<BridgeTransferResponseDto> {
+    return this.mintBridgedToken(transferId, userId);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────
+
   // ── Private helpers ────────────────────────────────────────────────────────
 
   private async assertOwned(

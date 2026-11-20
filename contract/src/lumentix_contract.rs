@@ -10,6 +10,7 @@ use crate::events::{
     AttendanceVerified, BatchTicketsDistributed, BatchTicketsPurchased, BatchTicketsTransferred, BatchTicketsUsed,
     BlockchainIdentityVerified, BridgeTransactionValidated, CarbonFootprintCalculated,
     CarbonOffsetPurchased, CheckinProofValidated, CollectibleInventoryUpdated,
+    CircuitBreakerActivated, CircuitBreakerAnomalyDetected, CircuitBreakerResumed,
     CrossChainTransferCompleted,
     CrossChainTransferInitiated, EnvironmentalImpactUpdated, EscrowReleased, EventCancelled,
     EventCapacityChanged, EventCompleted, EventCreated, EventCurrencySet, EventMetadataUpdated,
@@ -63,6 +64,7 @@ use crate::types::{
     UpgradeState, UpgradeVote, VenueLayout, VenueSection, VipTier, WaitlistOffer, PriceTier,
     PricingSchedule, MintGasUsage, StreamDeliveryConfig, StreamPerformanceMetrics,
     DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode, CircuitBreakerState,
+    AnomalyThresholdConfig,
     PERSISTENT_LIFETIME,
     VenueSpaceAllocation, SubscriptionPlan,
     SubscriptionStatus, SecurityIncident, UserPreferences,
@@ -107,6 +109,115 @@ impl LumentixContract {
         storage::set_initialized(&env);
 
         Ok(())
+    }
+
+    /// Activate the emergency circuit breaker, halting ticket sales and
+    /// transfers until the configured number of signers approves resumption.
+    pub fn activate_circuit_breaker(
+        env: Env,
+        admin: Address,
+        reason: String,
+        required_resume_signatures: u32,
+    ) -> Result<bool, LumentixError> {
+        admin.require_auth();
+        if admin != storage::get_admin(&env) {
+            return Err(LumentixError::Unauthorized);
+        }
+        validation::validate_string_not_empty(&reason)?;
+        if required_resume_signatures == 0 {
+            return Err(LumentixError::InvalidCircuitBreakerConfig);
+        }
+        if storage::is_circuit_breaker_active(&env) {
+            return Err(LumentixError::CircuitBreakerActive);
+        }
+
+        let state = CircuitBreakerState {
+            is_active: true,
+            activated_by: admin.clone(),
+            reason: reason.clone(),
+            activated_at: env.ledger().timestamp(),
+            anomaly_count: 0,
+            resume_approvals: Vec::new(&env),
+            required_resume_signatures,
+        };
+        storage::set_circuit_breaker_state(&env, &state);
+        CircuitBreakerActivated::emit(&env, admin, reason, required_resume_signatures);
+
+        Ok(true)
+    }
+
+    /// Return the current circuit breaker state, if one has ever been set.
+    pub fn get_circuit_breaker_status(env: Env) -> Option<CircuitBreakerState> {
+        storage::get_circuit_breaker_state(&env)
+    }
+
+    /// Evaluate failed-transfer and velocity counters against the configured
+    /// thresholds, tripping the breaker when either threshold is exceeded.
+    pub fn check_anomaly_threshold(
+        env: Env,
+        admin: Address,
+        failed_transfers: u32,
+        velocity: u32,
+    ) -> Result<bool, LumentixError> {
+        admin.require_auth();
+        if admin != storage::get_admin(&env) {
+            return Err(LumentixError::Unauthorized);
+        }
+
+        let config = storage::get_anomaly_threshold_config(&env);
+        let tripped = failed_transfers > config.max_failed_transfers_window
+            || velocity > config.max_velocity_per_window;
+
+        if tripped {
+            let mut state =
+                storage::get_circuit_breaker_state(&env).unwrap_or(CircuitBreakerState {
+                    is_active: false,
+                    activated_by: admin.clone(),
+                    reason: String::from_str(&env, "Anomaly threshold exceeded"),
+                    activated_at: env.ledger().timestamp(),
+                    anomaly_count: 0,
+                    resume_approvals: Vec::new(&env),
+                    required_resume_signatures: 2,
+                });
+            state.is_active = true;
+            state.anomaly_count = state.anomaly_count.saturating_add(1);
+            storage::set_circuit_breaker_state(&env, &state);
+            CircuitBreakerAnomalyDetected::emit(
+                &env,
+                failed_transfers,
+                velocity,
+                state.anomaly_count,
+            );
+        }
+
+        Ok(tripped)
+    }
+
+    /// Approve resuming operations. Returns true only once the distinct
+    /// approval count reaches the breaker's required multi-sig threshold.
+    pub fn resume_operations(env: Env, signer: Address) -> Result<bool, LumentixError> {
+        signer.require_auth();
+
+        let mut state = storage::get_circuit_breaker_state(&env)
+            .ok_or(LumentixError::CircuitBreakerNotActive)?;
+        if !state.is_active {
+            return Err(LumentixError::CircuitBreakerNotActive);
+        }
+        if state.resume_approvals.contains(&signer) {
+            return Ok(false);
+        }
+
+        state.resume_approvals.push_back(signer);
+        let approvals = state.resume_approvals.len();
+        if approvals >= state.required_resume_signatures {
+            state.is_active = false;
+            storage::set_circuit_breaker_state(&env, &state);
+            CircuitBreakerResumed::emit(&env, approvals, env.ledger().timestamp());
+            Ok(true)
+        } else {
+            storage::set_circuit_breaker_state(&env, &state);
+            Ok(false)
+        }
     }
 
     /// Create a new event in Draft status.
@@ -457,6 +568,10 @@ impl LumentixContract {
         idempotency_key: Option<BytesN<32>>,
     ) -> Result<u64, LumentixError> {
         buyer.require_auth();
+
+        if storage::is_circuit_breaker_active(&env) {
+            return Err(LumentixError::CircuitBreakerActive);
+        }
 
         // Reject duplicate submissions before any state change (Issue #1473).
         if let Some(key) = idempotency_key.as_ref() {
@@ -7002,6 +7117,9 @@ impl LumentixContract {
         from: &Address,
         enforce_blackout: bool,
     ) -> Result<(), LumentixError> {
+        if storage::is_circuit_breaker_active(env) {
+            return Err(LumentixError::CircuitBreakerActive);
+        }
         if ticket.owner != from.clone() {
             return Err(LumentixError::Unauthorized);
         }
