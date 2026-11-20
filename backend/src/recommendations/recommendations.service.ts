@@ -45,6 +45,11 @@ export interface ScoredEvent {
 }
 
 const LOCATION_WEIGHT_FACTOR = 0.6;
+/**
+ * Browsing-only events count for less than a confirmed attendance (#1552).
+ * They shape the profile but must never outweigh a real purchase.
+ */
+const BROWSING_WEIGHT_FACTOR = 0.5;
 /** Weight applied to the collaborative filtering score component (#1465). */
 const COLLABORATIVE_WEIGHT = 0.4;
 /** Weight applied to the content-based score component (#1465). */
@@ -95,7 +100,10 @@ export class RecommendationsService {
    *         derived from real purchase history (each confirmed registration
    *         adds 1 implicit point to its event's category and location).
    */
-  async buildUserProfileVector(userId: string): Promise<UserProfileVector> {
+  async buildUserProfileVector(
+    userId: string,
+    viewedEventIds: readonly string[] = [],
+  ): Promise<UserProfileVector> {
     const prefs = await this.preferencesRepo.find({ where: { userId } });
 
     const categoryWeights: Record<string, number> = {};
@@ -112,6 +120,27 @@ export class RecommendationsService {
         locationWeights[pref.location] =
           (locationWeights[pref.location] ?? 0) +
           LOCATION_WEIGHT_FACTOR * weight;
+      }
+    }
+
+    // Browsing behaviour (#1552): recently viewed events nudge the profile
+    // toward their category/location at a lower weight than a real purchase.
+    const viewedIds = Array.from(new Set(viewedEventIds.filter(Boolean)));
+    if (viewedIds.length > 0) {
+      const viewedEvents = await this.eventsRepo
+        .createQueryBuilder('event')
+        .where('event.id IN (:...ids)', { ids: viewedIds })
+        .getMany();
+      for (const event of viewedEvents) {
+        if (event.category) {
+          categoryWeights[event.category] =
+            (categoryWeights[event.category] ?? 0) + BROWSING_WEIGHT_FACTOR;
+        }
+        if (event.location) {
+          locationWeights[event.location] =
+            (locationWeights[event.location] ?? 0) +
+            LOCATION_WEIGHT_FACTOR * BROWSING_WEIGHT_FACTOR;
+        }
       }
     }
 
@@ -275,8 +304,9 @@ export class RecommendationsService {
   async generateRecommendations(
     userId: string,
     limit = 5,
+    viewedEventIds: readonly string[] = [],
   ): Promise<RecommendationResponse> {
-    const vector = await this.buildUserProfileVector(userId);
+    const vector = await this.buildUserProfileVector(userId, viewedEventIds);
     const candidates = await this.listCandidateEvents();
     const scored = await this.computeSimilarityScores(vector, candidates);
 
@@ -310,8 +340,9 @@ export class RecommendationsService {
   async rankRecommendations(
     userId: string,
     limit = 5,
+    viewedEventIds: readonly string[] = [],
   ): Promise<RecommendationResponse> {
-    return this.generateRecommendations(userId, limit);
+    return this.generateRecommendations(userId, limit, viewedEventIds);
   }
 
   /** Persist or refresh the user's explicit preference rows (#1243). */
