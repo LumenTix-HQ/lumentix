@@ -64,6 +64,6 @@ import { ResalePriceCeiling } from './resale/resale-price-ceiling.entity';
     FraudDetectionController,
     GiftingController,
   ],
-  exports: [TicketsService, ResaleService, FraudDetectionService, GiftingService],
+  exports: [TicketsService, ResaleService, FraudDetectionService, GiftingService, TicketPdfService, TicketSigningService],
 })
 export class TicketsModule {}

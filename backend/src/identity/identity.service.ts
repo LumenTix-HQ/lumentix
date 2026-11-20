@@ -401,4 +401,39 @@ export class IdentityService {
       order: { issuedAt: 'DESC' },
     });
   }
+
+  // ── Issue #1541 — snake_case aliases ──────────────────────────────────────
+
+  /**
+   * Allow users to complete KYC once and reuse their verified decentralized
+   * identity across multiple events without re-submitting documents.
+   */
+  async submit_kyc_documents(
+    userId: string,
+    dto: SubmitKycDocumentsDto,
+  ): Promise<KycDocument> {
+    return this.submitKycDocuments(userId, dto);
+  }
+
+  /**
+   * Issue a DID-based verified credential after KYC approval so the user
+   * can reuse it at every subsequent event.
+   */
+  async issue_verified_credential(
+    issuerId: string,
+    dto: IssueVerifiedCredentialDto,
+  ): Promise<VerifiedCredential> {
+    return this.issueVerifiedCredential(issuerId, dto);
+  }
+
+  /**
+   * Verify that a credential is valid (non-revoked, non-expired, correct owner),
+   * enabling cross-event KYC reuse without re-uploading documents.
+   */
+  async verify_did_credential(
+    userId: string,
+    credentialId: string,
+  ): Promise<VerifyCredentialResult> {
+    return this.verifyDidCredential(userId, credentialId);
+  }
 }
