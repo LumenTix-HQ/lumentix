@@ -59,6 +59,7 @@ import { TermsOfServiceModule } from './terms-of-service/terms-of-service.module
 import { IdentityModule } from './identity/identity.module';
 import { FraudDetectionModule } from './fraud-detection/fraud-detection.module';
 import { PassPackagesModule } from './pass-packages/pass-packages.module';
+import { PdfTicketsModule } from './pdf-tickets/pdf-tickets.module';
 import { BridgeModule } from './bridge/bridge.module';
 import { TaxReceiptsModule } from './tax-receipts/tax-receipts.module';
 import { TestingModule } from './testing/testing.module';
@@ -172,6 +173,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     InternalModule,
     InternalRoutingModule,
     IdentityModule,
+    PdfTicketsModule,
   ],
   controllers: [AppController],
   providers: [
