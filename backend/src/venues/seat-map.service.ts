@@ -267,7 +267,8 @@ export class SeatMapService {
     svg += '<circle cx="10" cy="40" r="6" fill="#ffa500"/><text x="20" y="45" font-size="12">Reserved</text>';
     svg += '<circle cx="10" cy="60" r="6" fill="#ccc"/><text x="20" y="65" font-size="12">Sold</text>';
     svg += '<circle cx="150" cy="20" r="6" fill="#4a90e2"/><text x="160" y="25" font-size="12">Premium</text>';
-    svg += '<circle cx="150" cy="40" r="6" stroke="red" stroke-width="2" fill="white"/><text x="160" y="45" font-size="12">Obstructed View</text>';
+    svg += '<circle cx="150" cy="40" r="6" fill="gold"/><text x="160" y="45" font-size="12">VIP</text>';
+    svg += '<circle cx="150" cy="60" r="6" stroke="red" stroke-width="2" fill="white"/><text x="160" y="65" font-size="12">Obstructed View</text>';
     svg += '</g>';
 
     svg += '</svg>';

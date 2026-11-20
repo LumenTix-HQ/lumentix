@@ -361,6 +361,7 @@ pub use types::{
     UserPreferences, CertificationStandard, EventCertificate,
     BiometricType, BiometricPrivacyAction, BiometricCredential, PassPackage,
     AgeProof,
+    ValidationProof, OfflineScanRecord, OfflineScanResult,
     ServiceHealthStatus, SystemHealthStatus, MetricDatapoint, TelemetryStatus,
     TokenGateConfig, TokenGateEligibility,
     DynamicPricingCurve, PricingDecision, GeoFenceRules, GeoRestrictionMode,
