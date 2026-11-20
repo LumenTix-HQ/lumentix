@@ -18,10 +18,14 @@ import {
 import { StreamingService } from './streaming.service';
 import {
   BufferingEventDto,
+  DetectViewerBandwidthDto,
   ManageContentDeliveryDto,
   OptimizeStreamQualityDto,
   StreamDeliveryResponseDto,
   StreamPerformanceResponseDto,
+  SwitchBitrateTierDto,
+  ViewerBandwidthResponseDto,
+  ViewerBitrateTierResponseDto,
 } from './dto/streaming.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -54,6 +58,40 @@ export class StreamingController {
       req.user.id,
       dto.durationMs,
       dto.bandwidthKbps,
+    );
+  }
+
+  @Post('events/:eventId/bandwidth')
+  @ApiOperation({
+    summary: 'Detect a viewer’s bandwidth and the recommended bitrate tier',
+  })
+  @ApiResponse({ status: 201, type: ViewerBandwidthResponseDto })
+  detectViewerBandwidth(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: DetectViewerBandwidthDto,
+  ): Promise<ViewerBandwidthResponseDto> {
+    return this.streamingService.detect_viewer_bandwidth(
+      eventId,
+      req.user.id,
+      dto.bandwidthKbps,
+    );
+  }
+
+  @Put('events/:eventId/bitrate-tier')
+  @ApiOperation({
+    summary: 'Switch a viewer’s bitrate tier, or restore automatic selection',
+  })
+  @ApiResponse({ status: 200, type: ViewerBitrateTierResponseDto })
+  switchBitrateTier(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: SwitchBitrateTierDto,
+  ): Promise<ViewerBitrateTierResponseDto> {
+    return this.streamingService.switch_bitrate_tier(
+      eventId,
+      req.user.id,
+      dto.tier,
     );
   }
 
