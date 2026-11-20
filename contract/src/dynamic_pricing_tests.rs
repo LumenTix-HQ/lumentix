@@ -166,6 +166,28 @@ fn demand_velocity_raises_price_in_real_time() {
 }
 
 #[test]
+fn expired_demand_window_stops_inflating_price() {
+    let env = Env::default();
+    env.ledger().with_mut(|li| li.timestamp = 1_000);
+    let client = setup(&env);
+    let organizer = Address::generate(&env);
+    let event_id = publish_event(&env, &client, &organizer, 100, 50);
+
+    let mut curve = default_curve();
+    curve.scarcity_threshold_pct = 0;
+    client.apply_price_adjustment(&organizer, &event_id, &curve);
+
+    for _ in 0..2 {
+        let buyer = Address::generate(&env);
+        client.purchase_ticket(&buyer, &event_id, &100i128);
+    }
+    assert_eq!(client.calculate_dynamic_price(&event_id, &0u32, &0u64), 110);
+
+    env.ledger().with_mut(|li| li.timestamp += crate::storage::DEMAND_WINDOW_SECONDS);
+    assert_eq!(client.calculate_dynamic_price(&event_id, &0u32, &0u64), 100);
+}
+
+#[test]
 fn platform_default_demand_tiers_apply_without_curve() {
     let env = Env::default();
     env.ledger().with_mut(|li| li.timestamp = 1_000);
