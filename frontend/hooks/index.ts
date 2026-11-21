@@ -12,3 +12,4 @@ export { useStellarWallet } from './useStellarWallet';
 export { useTheme } from './useTheme';
 export { useWalletBalance } from './useWalletBalance';
 export { useWalletConnection } from './useWalletConnection';
+export { useReferral } from './useReferral';

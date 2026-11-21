@@ -15,6 +15,11 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery } from '@ne
 import { WalletService } from './wallet.service';
 import { ChallengeRequestDto } from './dto/challenge-request.dto';
 import { VerifySignatureDto } from './dto/verify-signature.dto';
+import {
+  InitiateWalletConnectDto,
+  ApproveWalletSessionDto,
+  DisconnectWalletDto,
+} from './dto/walletconnect-session.dto';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from 'src/common/interfaces/authenticated-request.interface';
 
@@ -137,5 +142,54 @@ export class WalletController {
     @Param('publicKey') publicKey: string,
   ) {
     return this.walletService.removeWallet(req.user.id, publicKey);
+  }
+
+  // ── WalletConnect session management (#1533) ───────────────────────────
+
+  @Post('walletconnect/initiate')
+  @ApiOperation({
+    summary: 'Initiate WalletConnect session',
+    description:
+      'Generate a session ID and pairing topic for a WalletConnect v2 pairing. ' +
+      'The frontend uses these to display a QR code or pairing URI.',
+  })
+  @ApiResponse({ status: 201, description: 'Session initiated — sessionId and pairingTopic returned' })
+  async initiateWalletConnectSession(
+    @Body() dto: InitiateWalletConnectDto,
+  ) {
+    return this.walletService.initiateWalletConnectSession(dto.publicKey);
+  }
+
+  @Post('walletconnect/approve')
+  @ApiOperation({
+    summary: 'Approve WalletConnect session',
+    description:
+      'Approve a pending WalletConnect session after the wallet has scanned the pairing URI.',
+  })
+  @ApiResponse({ status: 201, description: 'Session approved' })
+  @ApiResponse({ status: 400, description: 'Session expired, already approved, or topic mismatch' })
+  async approveWalletSession(
+    @Body() dto: ApproveWalletSessionDto,
+  ) {
+    return this.walletService.approveWalletConnectSession(
+      dto.sessionId,
+      dto.publicKey,
+      dto.topic,
+    );
+  }
+
+  @Post('walletconnect/disconnect')
+  @ApiOperation({
+    summary: 'Disconnect WalletConnect session',
+    description: 'Tear down an active WalletConnect session.',
+  })
+  @ApiResponse({ status: 201, description: 'Session disconnected' })
+  async disconnectWalletSession(
+    @Body() dto: DisconnectWalletDto,
+  ) {
+    return this.walletService.disconnectWalletConnectSession(
+      dto.sessionId,
+      dto.publicKey,
+    );
   }
 }

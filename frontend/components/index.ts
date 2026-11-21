@@ -35,3 +35,5 @@ export { WalletConnect } from './WalletConnect';
 export { WalletInfo } from './WalletInfo';
 export { default as WalletInstallPrompt } from './WalletInstallPrompt';
 export { default as WalletLinkSection } from './WalletLinkSection';
+export { ReferralSection } from './ReferralSection';
+export { WalletConnectModal } from './WalletConnectModal';

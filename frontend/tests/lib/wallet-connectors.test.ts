@@ -5,6 +5,12 @@ import {
   LobstrConnector,
   WalletConnectConnector,
   registerWalletConnectClient,
+  initiate_wallet_connect,
+  approve_wallet_session,
+  disconnect_wallet,
+  initiateWalletConnect,
+  approveWalletSession,
+  disconnectWallet,
   type LobstrSignerApi,
   type WalletConnectClient,
 } from '@/lib/stellar/connectors';
@@ -88,6 +94,48 @@ describe('WalletConnectConnector', () => {
     registerWalletConnectClient(client);
     const c = new WalletConnectConnector();
     await expect(c.connect(NetworkType.TESTNET)).resolves.toBe('GWALLETCONNECTKEY');
+    registerWalletConnectClient(null);
+  });
+
+  it('initiates wallet connect session with URI and topic', async () => {
+    const c = new WalletConnectConnector(() => client);
+    const proposal = await c.initiate_wallet_connect(NetworkType.TESTNET);
+    expect(proposal.uri).toContain('wc:');
+    expect(proposal.topic).toBeTruthy();
+    expect(typeof proposal.approval).toBe('function');
+  });
+
+  it('approves wallet session successfully', async () => {
+    const c = new WalletConnectConnector(() => client);
+    const proposal = await c.initiate_wallet_connect(NetworkType.TESTNET);
+    const approved = await c.approve_wallet_session(proposal);
+    expect(approved.publicKey).toBe('GWALLETCONNECTKEY');
+  });
+
+  it('disconnects active wallet session cleanly', async () => {
+    const c = new WalletConnectConnector(() => client);
+    await c.disconnect_wallet('mock-topic');
+    expect(client.disconnect).toHaveBeenCalledWith({ topic: 'mock-topic' });
+  });
+
+  it('supports top-level initiate_wallet_connect, approve_wallet_session, and disconnect_wallet', async () => {
+    registerWalletConnectClient(client);
+    const proposal = await initiate_wallet_connect(NetworkType.TESTNET);
+    expect(proposal.uri).toContain('wc:');
+
+    const approved = await approve_wallet_session(proposal);
+    expect(approved.publicKey).toBe('GWALLETCONNECTKEY');
+
+    await disconnect_wallet('test-topic');
+    expect(client.disconnect).toHaveBeenCalled();
+
+    // Also check camelCase aliases
+    const prop2 = await initiateWalletConnect(NetworkType.MAINNET);
+    expect(prop2.uri).toContain('wc:');
+    const app2 = await approveWalletSession(prop2);
+    expect(app2.publicKey).toBe('GWALLETCONNECTKEY');
+    await disconnectWallet();
+
     registerWalletConnectClient(null);
   });
 });
