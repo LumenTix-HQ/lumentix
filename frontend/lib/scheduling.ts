@@ -63,6 +63,42 @@ export interface AttendanceImpactPrediction {
   opportunities: string[];
 }
 
+export interface ConflictingEvent {
+  id: string;
+  title: string;
+  location: string;
+  startDate: string;
+  endDate: string;
+  organizerId: string;
+  severity: 'partial' | 'full';
+  overlapStart: string;
+  overlapEnd: string;
+  overlapDurationMinutes: number;
+}
+
+export interface ScheduleConflictReport {
+  hasConflict: boolean;
+  venue: string;
+  requestedSlot: { startDate: string; endDate: string };
+  conflicts: ConflictingEvent[];
+  venueRecord?: any;
+}
+
+export interface AlternativeSlot {
+  startDate: string;
+  endDate: string;
+  shiftHours: number;
+  reason: string;
+}
+
+export interface ConflictResolution {
+  outcome: 'no_conflict' | 'alternative_available' | 'unresolved';
+  conflicts: ConflictingEvent[];
+  recommendedSlot: AlternativeSlot | null;
+  alternatives: AlternativeSlot[];
+  reasoning: string[];
+}
+
 class SchedulingService {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = localStorage.getItem('authToken');
@@ -139,6 +175,141 @@ class SchedulingService {
       recommendations: string[];
     }>(`/scheduling/competition-analysis?${params}`);
   }
+
+  async detect_schedule_conflict(
+    venue: string,
+    startDate: string,
+    endDate: string,
+    excludeEventId?: string,
+  ): Promise<ScheduleConflictReport> {
+    return this.request<ScheduleConflictReport>('/scheduling/detect-conflict', {
+      method: 'POST',
+      body: JSON.stringify({ venue, startDate, endDate, excludeEventId }),
+    });
+  }
+
+  async suggest_alternative_slots(
+    venue: string,
+    startDate: string,
+    endDate: string,
+    options: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    } = {},
+  ): Promise<AlternativeSlot[]> {
+    return this.request<AlternativeSlot[]>('/scheduling/alternative-slots', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue,
+        startDate,
+        endDate,
+        ...options,
+      }),
+    });
+  }
+
+  async resolve_conflict(
+    venue: string,
+    startDate: string,
+    endDate: string,
+    options: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    } = {},
+  ): Promise<ConflictResolution> {
+    return this.request<ConflictResolution>('/scheduling/resolve-conflict', {
+      method: 'POST',
+      body: JSON.stringify({
+        venue,
+        startDate,
+        endDate,
+        ...options,
+      }),
+    });
+  }
+
+  async detectScheduleConflict(
+    venue: string,
+    startDate: string,
+    endDate: string,
+    excludeEventId?: string,
+  ): Promise<ScheduleConflictReport> {
+    return this.detect_schedule_conflict(venue, startDate, endDate, excludeEventId);
+  }
+
+  async suggestAlternativeSlots(
+    venue: string,
+    startDate: string,
+    endDate: string,
+    options?: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    },
+  ): Promise<AlternativeSlot[]> {
+    return this.suggest_alternative_slots(venue, startDate, endDate, options);
+  }
+
+  async resolveConflict(
+    venue: string,
+    startDate: string,
+    endDate: string,
+    options?: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    },
+  ): Promise<ConflictResolution> {
+    return this.resolve_conflict(venue, startDate, endDate, options);
+  }
 }
 
 export const schedulingService = new SchedulingService();
+
+// Standalone function exports
+export async function detect_schedule_conflict(
+  venue: string,
+  startDate: string,
+  endDate: string,
+  excludeEventId?: string,
+): Promise<ScheduleConflictReport> {
+  return schedulingService.detect_schedule_conflict(venue, startDate, endDate, excludeEventId);
+}
+
+export async function suggest_alternative_slots(
+  venue: string,
+  startDate: string,
+  endDate: string,
+  options?: {
+    limit?: number;
+    stepHours?: number;
+    searchWindowDays?: number;
+    excludeEventId?: string;
+  },
+): Promise<AlternativeSlot[]> {
+  return schedulingService.suggest_alternative_slots(venue, startDate, endDate, options);
+}
+
+export async function resolve_conflict(
+  venue: string,
+  startDate: string,
+  endDate: string,
+  options?: {
+    limit?: number;
+    stepHours?: number;
+    searchWindowDays?: number;
+    excludeEventId?: string;
+  },
+): Promise<ConflictResolution> {
+  return schedulingService.resolve_conflict(venue, startDate, endDate, options);
+}
+
+export const detectScheduleConflict = detect_schedule_conflict;
+export const suggestAlternativeSlots = suggest_alternative_slots;
+export const resolveConflict = resolve_conflict;

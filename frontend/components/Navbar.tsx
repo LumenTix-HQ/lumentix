@@ -140,6 +140,24 @@ const Navbar = () => {
                       >
                         {t("myTickets")}
                       </Link>
+                      {user?.role?.toUpperCase() === 'ADMIN' && (
+                        <>
+                          <Link
+                            href="/admin/users"
+                            onClick={() => setShowProfileDropdown(false)}
+                            className="block px-4 py-2.5 text-sm text-purple-300 hover:text-purple-200 hover:bg-white/5 transition-colors"
+                          >
+                            Admin Panel
+                          </Link>
+                          <Link
+                            href="/admin/audit-logs"
+                            onClick={() => setShowProfileDropdown(false)}
+                            className="block px-4 py-2.5 text-sm text-purple-300 hover:text-purple-200 hover:bg-white/5 transition-colors"
+                          >
+                            Audit Logs
+                          </Link>
+                        </>
+                      )}
                       <button
                         onClick={handleLogout}
                         className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-white/5 transition-colors"

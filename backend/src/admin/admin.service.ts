@@ -87,10 +87,19 @@ export class AdminService {
     const saved = await this.userRepository.save(user);
     // Cut off access immediately: outstanding refresh tokens must not keep
     // minting new access tokens for a blocked user.
-    await this.refreshTokenRepository.update(
-      { userId: user.id, revoked: false },
-      { revoked: true },
-    );
+    if (this.refreshTokenRepository) {
+      await this.refreshTokenRepository.update(
+        { userId: user.id, revoked: false },
+        { revoked: true },
+      );
+    }
+
+    await this.auditService.log({
+      action: AuditAction.USER_SUSPENDED,
+      userId: user.id,
+      meta: { email: user.email },
+    });
+
     return saved;
   }
 
@@ -102,7 +111,15 @@ export class AdminService {
     }
 
     user.status = UserStatus.ACTIVE;
-    return this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+
+    await this.auditService.log({
+      action: AuditAction.USER_REACTIVATED,
+      userId: user.id,
+      meta: { email: user.email },
+    });
+
+    return saved;
   }
 
   async listUsers(dto: ListAdminUsersDto): Promise<PaginatedResult<User>> {
@@ -172,14 +189,26 @@ export class AdminService {
   ): Promise<User> {
     const user = await this.findUserOrFail(userId);
 
+    let previousRole: UserRole | undefined;
     if (dto.role !== undefined) {
       if (!Object.values(UserRole).includes(dto.role)) {
         throw new BadRequestException(`Invalid role value: ${dto.role}`);
       }
+      previousRole = user.role;
       user.role = dto.role;
     }
 
-    return this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+
+    if (dto.role !== undefined) {
+      await this.auditService.log({
+        action: AuditAction.USER_ROLE_UPDATED,
+        userId: user.id,
+        meta: { previousRole, newRole: dto.role },
+      });
+    }
+
+    return saved;
   }
 
   async softDeleteUser(userId: string): Promise<void> {

@@ -517,4 +517,35 @@ describe('SchedulingService — conflict detection (hardened)', () => {
       }
     });
   });
+
+  // ── Snake_case aliases ────────────────────────────────────────────────────
+
+  describe('snake_case function aliases', () => {
+    it('detect_schedule_conflict delegates to detectScheduleConflict', async () => {
+      eventRepo.find.mockResolvedValue([]);
+      const { start, end } = slot(0, 4);
+
+      const report = await service.detect_schedule_conflict(VENUE, start, end);
+      expect(report.hasConflict).toBe(false);
+      expect(report.venue).toBe(VENUE);
+    });
+
+    it('suggest_alternative_slots delegates to suggestAlternativeSlots', async () => {
+      eventRepo.find.mockResolvedValue([]);
+      const { start, end } = slot(0, 4);
+
+      const alternatives = await service.suggest_alternative_slots(VENUE, start, end, { limit: 2 });
+      expect(alternatives.length).toBe(2);
+      expect(alternatives[0].reason).toContain('Venue is free');
+    });
+
+    it('resolve_conflict delegates to resolveConflict', async () => {
+      eventRepo.find.mockResolvedValue([]);
+      const { start, end } = slot(0, 4);
+
+      const resolution = await service.resolve_conflict(VENUE, start, end);
+      expect(resolution.outcome).toBe('no_conflict');
+      expect(resolution.alternatives).toEqual([]);
+    });
+  });
 });

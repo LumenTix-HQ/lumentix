@@ -46,7 +46,7 @@ import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
 import { buildListEventsOptions } from './build-list-events-options';
 import { CalendarService, CalendarAttendeeContact } from '../calendar/calendar.service';
-import { SchedulingService } from '../scheduling/scheduling.service';
+import { SchedulingService, AlternativeSlot } from '../scheduling/scheduling.service';
 import { SmartRefundService } from './smart-refund.service';
 
 export interface PaginatedResult<T> {
@@ -115,7 +115,7 @@ export class EventsService {
   ): Promise<void> {
     if (!this.schedulingService) return;
 
-    const report = await this.schedulingService.detectScheduleConflict(
+    const report = await this.schedulingService.detect_schedule_conflict(
       venue,
       startDate,
       endDate,
@@ -124,12 +124,26 @@ export class EventsService {
 
     if (!report.hasConflict) return;
 
+    let suggestedSlots: AlternativeSlot[] = [];
+    try {
+      suggestedSlots = await this.schedulingService.suggest_alternative_slots(
+        venue,
+        startDate,
+        endDate,
+        { excludeEventId, limit: 3 },
+      );
+    } catch {
+      // Suggestion failure should not mask the conflict error
+    }
+
     const names = report.conflicts.map((c) => `"${c.title}"`).join(', ');
     throw new ConflictException({
       message: `Venue "${venue}" is already booked during the requested time slot. Conflicting events: ${names}.`,
       venue,
       requestedSlot: { startDate, endDate },
       conflicts: report.conflicts,
+      suggestedSlots,
+      alternatives: suggestedSlots,
     });
   }
 

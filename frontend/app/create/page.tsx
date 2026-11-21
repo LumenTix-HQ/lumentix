@@ -55,9 +55,20 @@ export default function CreateEventPage() {
         void fetchEvents();
     }, []);
 
+    const [showPreview, setShowPreview] = useState(false);
+    const [formData, setFormData] = useState<EventFormSubmitValues | null>(null);
+    const [appliedValues, setAppliedValues] = useState<Partial<CreateEventFormValues> | null>(null);
+    const [conflictData, setConflictData] = useState<{
+        message: string;
+        venue: string;
+        conflicts: Array<{ id: string; title: string; startDate: string; endDate: string; severity?: string }>;
+        suggestedSlots: Array<{ startDate: string; endDate: string; shiftHours: number; reason: string }>;
+    } | null>(null);
+
     const handleSubmit = async (values: EventFormSubmitValues) => {
         setSubmitError(null);
         setSubmitSuccess(null);
+        setConflictData(null);
         try {
             if (!publicKey) {
                 throw new Error("Connect your wallet before creating an event.");
@@ -102,13 +113,18 @@ export default function CreateEventPage() {
             }
 
             await fetchEvents();
-        } catch (error) {
+        } catch (error: any) {
+            if (error?.status === 409 && (error?.data?.conflicts || error?.data?.suggestedSlots || error?.data?.alternatives)) {
+                setConflictData({
+                    message: error.message || "A scheduling conflict occurred at this venue.",
+                    venue: error.data?.venue || "",
+                    conflicts: error.data?.conflicts || [],
+                    suggestedSlots: error.data?.suggestedSlots || error.data?.alternatives || [],
+                });
+            }
             setSubmitError(error instanceof Error ? error.message : "Event creation failed");
         }
     };
-
-    const [showPreview, setShowPreview] = useState(false);
-    const [formData, setFormData] = useState<EventFormSubmitValues | null>(null);
 
     const handlePreview = useCallback((values: EventFormSubmitValues) => {
         setFormData(values);
@@ -153,7 +169,71 @@ export default function CreateEventPage() {
                             initialPreviewUrl={imagePreview}
                         />
                     </div>
-                    <EventForm mode="create" initialValues={defaultCreateEventValues} submitLabel="Create Event" loadingLabel="Creating Event..." successMessage={submitSuccess} errorMessage={submitError} onSubmit={handleSubmit} />
+                    {conflictData && (
+                        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5">
+                            <div className="flex items-center gap-2 mb-2 text-amber-300 font-semibold text-sm">
+                                <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                                Scheduling Conflict Detected
+                            </div>
+                            <p className="text-xs text-amber-200/90 mb-3">{conflictData.message}</p>
+                            {conflictData.conflicts.length > 0 && (
+                                <div className="space-y-1.5 mb-4">
+                                    <span className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Clashing Bookings:</span>
+                                    {conflictData.conflicts.map((c, i) => (
+                                        <div key={i} className="text-xs bg-black/30 rounded p-2 text-gray-300">
+                                            <strong>{c.title}</strong>: {new Date(c.startDate).toLocaleString()} – {new Date(c.endDate).toLocaleString()}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {conflictData.suggestedSlots.length > 0 && (
+                                <div className="space-y-2">
+                                    <span className="text-xs font-semibold text-emerald-300 uppercase tracking-wide">Suggested Alternative Slots:</span>
+                                    <div className="space-y-2">
+                                        {conflictData.suggestedSlots.map((slot, i) => (
+                                            <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-2.5 bg-black/40 border border-emerald-500/30 rounded-xl text-xs">
+                                                <div>
+                                                    <span className="font-semibold text-white">
+                                                        {new Date(slot.startDate).toLocaleString()} – {new Date(slot.endDate).toLocaleString()}
+                                                    </span>
+                                                    <p className="text-emerald-400 mt-0.5">{slot.reason}</p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const toLocal = (iso: string) => {
+                                                            const d = new Date(iso);
+                                                            const pad = (n: number) => String(n).padStart(2, '0');
+                                                            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                                                        };
+                                                        setAppliedValues({
+                                                            startDate: toLocal(slot.startDate),
+                                                            endDate: toLocal(slot.endDate),
+                                                        });
+                                                        setConflictData(null);
+                                                        setSubmitError(null);
+                                                    }}
+                                                    className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3 py-1.5 rounded-lg transition"
+                                                >
+                                                    Use this slot
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    <EventForm
+                        key={appliedValues ? JSON.stringify(appliedValues) : 'default'}
+                        mode="create"
+                        initialValues={{ ...defaultCreateEventValues, ...appliedValues }}
+                        submitLabel="Create Event"
+                        loadingLabel="Creating Event..."
+                        successMessage={submitSuccess}
+                        errorMessage={submitError}
+                        onSubmit={handleSubmit}
+                    />
                 </section>
                 <section className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md sm:p-8">
                     <h2 className="mb-5 text-2xl font-bold">Recent Events</h2>
