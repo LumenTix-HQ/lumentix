@@ -23,6 +23,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
 import { StellarModule } from '../stellar';
 import { CalendarModule } from '../calendar/calendar.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
+import { SmartRefundService } from './smart-refund.service';
 
 import { StorageModule } from '../common/storage/storage.module';
 
@@ -44,7 +45,7 @@ import { StorageModule } from '../common/storage/storage.module';
     }),
   ],
   controllers: [EventsController],
-  providers: [EventsService, EventStateService, EventCacheService, CancelEventProcessor],
+  providers: [EventsService, EventStateService, EventCacheService, CancelEventProcessor, SmartRefundService],
   exports: [EventsService, EventStateService, EventCacheService],
 })
 export class EventsModule {}

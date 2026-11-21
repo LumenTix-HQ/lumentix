@@ -411,9 +411,9 @@ export class EventsController {
 
   @Post(':id/execute-mass-refund')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Execute automatic mass refund for all ticket holders' })
+  @ApiOperation({ summary: 'Execute an on-chain mass refund for all eligible ticket holders' })
   @ApiParam({ name: 'id', description: 'Event UUID' })
-  @ApiResponse({ status: 201, description: 'Mass refund execution started' })
+  @ApiResponse({ status: 201, description: 'On-chain mass refund completed' })
   executeMassRefund(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
