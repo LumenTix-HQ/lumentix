@@ -148,10 +148,12 @@ const DEFAULT_BASE_RETRY_DELAY_MS = 300;
 
 class ApiProxyError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  data?: any;
+  constructor(status: number, message: string, data?: any) {
     super(message);
     this.name = "ApiProxyError";
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -240,13 +242,15 @@ async function request<T>(
   if (!res.ok) {
     const body = await res.text();
     let message = `API error ${res.status}`;
+    let data: any = undefined;
     try {
       const parsed = JSON.parse(body);
+      data = parsed;
       message = Array.isArray(parsed.message) ? parsed.message[0] : (parsed.message ?? message);
     } catch {
       message = body || message;
     }
-    throw new ApiProxyError(res.status, message);
+    throw new ApiProxyError(res.status, message, data);
   }
   if (res.status === 204) return null as T;
   return res.json();

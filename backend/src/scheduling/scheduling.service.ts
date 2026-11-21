@@ -359,6 +359,54 @@ export class SchedulingService {
     };
   }
 
+  // ── Snake-case aliases ───────────────────────────────────────────────────
+
+  /**
+   * Alias for `detectScheduleConflict`
+   */
+  async detect_schedule_conflict(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    excludeEventId?: string,
+  ): Promise<ScheduleConflictReport> {
+    return this.detectScheduleConflict(venue, startDate, endDate, excludeEventId);
+  }
+
+  /**
+   * Alias for `suggestAlternativeSlots`
+   */
+  async suggest_alternative_slots(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    options: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    } = {},
+  ): Promise<AlternativeSlot[]> {
+    return this.suggestAlternativeSlots(venue, startDate, endDate, options);
+  }
+
+  /**
+   * Alias for `resolveConflict`
+   */
+  async resolve_conflict(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    options: {
+      limit?: number;
+      stepHours?: number;
+      searchWindowDays?: number;
+      excludeEventId?: string;
+    } = {},
+  ): Promise<ConflictResolution> {
+    return this.resolveConflict(venue, startDate, endDate, options);
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
 
   /** Shared guard used by all three public conflict methods. */
@@ -749,4 +797,46 @@ export class SchedulingService {
     if (d === 0 || d === 6) ops.push('Weekend scheduling advantage');
     return ops;
   }
+}
+
+// ── Standalone Function Exports ─────────────────────────────────────────────
+
+export async function detect_schedule_conflict(
+  service: SchedulingService,
+  venue: string,
+  startDate: Date,
+  endDate: Date,
+  excludeEventId?: string,
+): Promise<ScheduleConflictReport> {
+  return service.detect_schedule_conflict(venue, startDate, endDate, excludeEventId);
+}
+
+export async function suggest_alternative_slots(
+  service: SchedulingService,
+  venue: string,
+  startDate: Date,
+  endDate: Date,
+  options?: {
+    limit?: number;
+    stepHours?: number;
+    searchWindowDays?: number;
+    excludeEventId?: string;
+  },
+): Promise<AlternativeSlot[]> {
+  return service.suggest_alternative_slots(venue, startDate, endDate, options);
+}
+
+export async function resolve_conflict(
+  service: SchedulingService,
+  venue: string,
+  startDate: Date,
+  endDate: Date,
+  options?: {
+    limit?: number;
+    stepHours?: number;
+    searchWindowDays?: number;
+    excludeEventId?: string;
+  },
+): Promise<ConflictResolution> {
+  return service.resolve_conflict(venue, startDate, endDate, options);
 }

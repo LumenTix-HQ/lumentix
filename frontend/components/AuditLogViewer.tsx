@@ -63,6 +63,13 @@ const ACTION_TYPE_OPTIONS = [
   { value: 'REVIEW_SUBMITTED', label: 'Review Submitted' },
   { value: 'REVIEW_VERIFIED', label: 'Review Verified' },
   { value: 'REVIEW_REJECTED', label: 'Review Rejected' },
+
+  // User Management & Admin
+  { value: 'USER_ROLE_UPDATED', label: 'User Role Updated' },
+  { value: 'USER_SUSPENDED', label: 'User Suspended' },
+  { value: 'USER_REACTIVATED', label: 'User Reactivated' },
+  { value: 'ROLE_APPROVED', label: 'Role Request Approved' },
+  { value: 'ROLE_REJECTED', label: 'Role Request Rejected' },
 ];
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -97,6 +104,7 @@ function ActionBadge({ action }: { action: string }) {
     [/^CAPACITY_|^IOT_/, 'bg-cyan-900/50 text-cyan-300 border-cyan-700'],
     [/^AGE_/, 'bg-indigo-900/50 text-indigo-300 border-indigo-700'],
     [/^REVIEW_/, 'bg-pink-900/50 text-pink-300 border-pink-700'],
+    [/^USER_|^ROLE_/, 'bg-purple-900/50 text-purple-300 border-purple-700'],
   ];
   const cls =
     colorMap.find(([pattern]) => pattern.test(action))?.[1] ??

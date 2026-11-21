@@ -3,28 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, apiPatch } from '@/lib/api-client';
 import AdminNav from '@/components/AdminNav';
+import {
+  search_users,
+  update_user_role,
+  suspend_user_account,
+  reactivate_user_account,
+  type AdminRole,
+  type AdminStatus,
+  type AdminUser,
+  type AdminUserPage,
+} from '@/lib/admin';
 
-type AdminRole = 'EVENT_GOER' | 'ORGANIZER' | 'SPONSOR' | 'ADMIN';
-type AdminStatus = 'active' | 'blocked';
-
-interface AdminUser {
-  id: string;
-  email: string;
-  displayName: string | null;
-  role: AdminRole;
-  status: AdminStatus;
-  stellarPublicKey: string | null;
-  createdAt: string;
-}
-
-interface AdminUserPage {
-  data: AdminUser[];
-  total: number;
-  page: number;
-  lastPage: number;
-  hasNextPage: boolean;
-  hasPreviousPage: boolean;
-}
+export {
+  search_users,
+  update_user_role,
+  suspend_user_account,
+  reactivate_user_account,
+};
 
 const ROLE_LABELS: Record<AdminRole, string> = {
   EVENT_GOER: 'Event Goer',
@@ -95,7 +90,7 @@ export default function AdminUsersPage() {
 
   const handleRoleSave = async (userId: string) => {
     try {
-      await apiPatch(`/admin/users/${userId}`, { role: selectedRole });
+      await update_user_role(userId, selectedRole);
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, role: selectedRole } : u)),
       );
@@ -106,12 +101,16 @@ export default function AdminUsersPage() {
   };
 
   const toggleSuspend = async (user: AdminUser) => {
-    const action = user.status === 'blocked' ? 'unblock' : 'block';
+    const isBlocked = user.status === 'blocked';
     try {
-      await apiPatch(`/admin/users/${user.id}/${action}`);
+      if (isBlocked) {
+        await reactivate_user_account(user.id);
+      } else {
+        await suspend_user_account(user.id);
+      }
       setUsers((prev) =>
         prev.map((u) =>
-          u.id === user.id ? { ...u, status: action === 'block' ? 'blocked' : 'active' } : u,
+          u.id === user.id ? { ...u, status: isBlocked ? 'active' : 'blocked' } : u,
         ),
       );
       setActionUser(null);
