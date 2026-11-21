@@ -31,6 +31,37 @@ export const useWalletConnection = () => {
     setConnectionError(null);
   }, []);
 
+  const initiateWalletConnect = useCallback(
+    async (network?: any) => {
+      if (!wallet.initiate_wallet_connect) {
+        throw new Error('WalletConnect is not supported in the current context');
+      }
+      return wallet.initiate_wallet_connect(network);
+    },
+    [wallet],
+  );
+
+  const approveWalletSession = useCallback(
+    async (proposalOrApproval?: any) => {
+      if (!wallet.approve_wallet_session) {
+        throw new Error('WalletConnect approval is not supported in the current context');
+      }
+      return wallet.approve_wallet_session(proposalOrApproval);
+    },
+    [wallet],
+  );
+
+  const disconnectWalletConnect = useCallback(
+    async (topic?: string) => {
+      if (wallet.disconnect_wallet) {
+        await wallet.disconnect_wallet(topic);
+      } else {
+        wallet.disconnect();
+      }
+    },
+    [wallet],
+  );
+
   return {
     ...wallet,
     isConnecting,
@@ -38,5 +69,11 @@ export const useWalletConnection = () => {
     connectWallet,
     disconnectWallet,
     clearError,
+    initiate_wallet_connect: initiateWalletConnect,
+    approve_wallet_session: approveWalletSession,
+    disconnect_wallet: disconnectWalletConnect,
+    initiateWalletConnect,
+    approveWalletSession,
+    disconnectWalletConnect,
   };
 };

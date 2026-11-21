@@ -4,8 +4,10 @@ import { SocialProfile } from './entities/social-profile.entity';
 import { AttendeeConnection } from './entities/attendee-connection.entity';
 import { MeetupGroup } from './entities/meetup-group.entity';
 import { MeetupMember } from './entities/meetup-member.entity';
+import { Referral } from './entities/referral.entity';
 import { SocialService } from './social.service';
 import { SocialController } from './social.controller';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
 
 @Module({
   imports: [
@@ -14,7 +16,9 @@ import { SocialController } from './social.controller';
       AttendeeConnection,
       MeetupGroup,
       MeetupMember,
+      Referral,
     ]),
+    LoyaltyModule,
   ],
   controllers: [SocialController],
   providers: [SocialService],

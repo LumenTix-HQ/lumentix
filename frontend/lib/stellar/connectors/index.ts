@@ -26,5 +26,15 @@ export type { LobstrSignerApi } from './lobstr-connector';
 export {
   WalletConnectConnector,
   registerWalletConnectClient,
+  initiate_wallet_connect,
+  approve_wallet_session,
+  disconnect_wallet,
+  initiateWalletConnect,
+  approveWalletSession,
+  disconnectWallet,
 } from './walletconnect-connector';
-export type { WalletConnectClient } from './walletconnect-connector';
+export type {
+  WalletConnectClient,
+  WalletConnectSessionProposal,
+  WalletConnectApprovedSession,
+} from './walletconnect-connector';
