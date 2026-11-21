@@ -62,6 +62,13 @@ export class NotificationPreferencesService {
     };
   }
 
+  async save_notification_preferences(
+    userId: string,
+    dto: SaveNotificationPreferencesDto,
+  ) {
+    return this.saveNotificationPreferences(userId, dto);
+  }
+
   /**
    * Decides which channels a notification in `category` should go out on for
    * this user, and how long to hold it back. A channel is included unless the
@@ -76,6 +83,14 @@ export class NotificationPreferencesService {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) return { channels: [], delayMs: 0 };
     return this.resolveRoute(user, category, critical);
+  }
+
+  async route_notification(
+    userId: string,
+    category: string,
+    critical = false,
+  ): Promise<NotificationRoute> {
+    return this.routeNotification(userId, category, critical);
   }
 
   /** Same as {@link routeNotification}, for callers that already loaded the user. */
@@ -101,6 +116,13 @@ export class NotificationPreferencesService {
     now: Date = new Date(),
   ): boolean {
     return this.msUntilQuietHoursEnd(quietHours, now) > 0;
+  }
+
+  enforce_quiet_hours(
+    quietHours: QuietHours | null | undefined,
+    now: Date = new Date(),
+  ): boolean {
+    return this.enforceQuietHours(quietHours, now);
   }
 
   /**

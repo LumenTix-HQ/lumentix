@@ -17,12 +17,15 @@ Distributes recipients across variants and sends emails:
 - Deterministic assignment algorithm
 - Automatic email queuing per recipient
 - Updates variant sent counts
+- Validates that recipients are unique and exist before sending
+- Rejects negative/non-finite weights and weights for variants outside the campaign
 
 ### 3. `select_winning_variant(campaignId, requesterId)`
 Automatically selects the best performing variant:
 - Scoring formula: `score = (clickRate × 0.7) + (openRate × 0.3)`
 - Click rate weighted 70% (stronger engagement signal)
 - Open rate weighted 30% (secondary signal)
+- Winner selection is available after the campaign enters testing and emails have been sent
 - Returns winner with performance metrics
 
 ## Workflow

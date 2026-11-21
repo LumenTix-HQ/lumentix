@@ -47,6 +47,7 @@ import { UpdateImageOrderDto } from './dto/update-image-order.dto';
 import { buildListEventsOptions } from './build-list-events-options';
 import { CalendarService, CalendarAttendeeContact } from '../calendar/calendar.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
+import { SmartRefundService } from './smart-refund.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -93,6 +94,7 @@ export class EventsService {
     @InjectQueue('events') private readonly eventsQueue: Queue,
     private readonly calendarService: CalendarService,
     @Optional() private readonly schedulingService: SchedulingService,
+    private readonly smartRefundService: SmartRefundService,
   ) {}
 
   /**
@@ -479,7 +481,10 @@ export class EventsService {
       resourceId: id,
     });
 
-    const job = await this.eventsQueue.add('cancel-event', { eventId: id });
+    const job = await this.eventsQueue.add('cancel-event', { eventId: id }, {
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 5000 },
+    });
 
     this.queueLifecycleEmail(saved).catch(() => undefined);
     return { status: 'cancellation_in_progress', jobId: job.id, eventId: id };
@@ -1008,7 +1013,7 @@ export class EventsService {
     if (event.organizerId !== callerId) {
       throw new ForbiddenException('You are not the organiser of this event.');
     }
-    return { eventId: id, status: 'cancelled_on_chain', timestamp: new Date().toISOString() };
+    return this.smartRefundService.cancelEventOnChain(id);
   }
 
   async executeMassRefund(id: string, callerId: string) {
@@ -1016,53 +1021,7 @@ export class EventsService {
     if (event.organizerId !== callerId) {
       throw new ForbiddenException('You are not the organiser of this event.');
     }
-    
-    const tickets = await this.ticketRepository.find({
-      where: { eventId: id, status: 'valid' },
-    });
-
-    const results = [];
-    let successCount = 0;
-    let failedCount = 0;
-
-    for (const ticket of tickets) {
-      try {
-        const payment = await this.paymentRepository.findOne({
-          where: { transactionHash: ticket.transactionHash },
-        });
-
-        if (!payment) {
-          results.push({ ticketId: ticket.id, success: false, error: 'Payment not found' });
-          failedCount++;
-          continue;
-        }
-
-        if (payment.status === PaymentStatus.REFUNDED) {
-          results.push({ ticketId: ticket.id, paymentId: payment.id, success: true });
-          successCount++;
-          continue;
-        }
-
-        await this.refundService.processRefund(payment.id, payment.userId);
-        ticket.status = 'refunded';
-        await this.ticketRepository.save(ticket);
-
-        results.push({ ticketId: ticket.id, paymentId: payment.id, success: true });
-        successCount++;
-      } catch (error) {
-        results.push({ ticketId: ticket.id, success: false, error: (error as Error).message });
-        failedCount++;
-      }
-    }
-
-    return {
-      eventId: id,
-      totalTickets: tickets.length,
-      processedCount: results.length,
-      successCount,
-      failedCount,
-      results,
-    };
+    return this.smartRefundService.executeMassRefund(id);
   }
 
   async verifyRefundCompletion(id: string, callerId: string) {
@@ -1071,17 +1030,19 @@ export class EventsService {
       throw new ForbiddenException('You are not the organiser of this event.');
     }
 
-    const [totalTickets, refundedTickets, validTickets] = await Promise.all([
+    const [totalTickets, refundedTickets, validTickets, onChain] = await Promise.all([
       this.ticketRepository.count({ where: { eventId: id } }),
       this.ticketRepository.count({ where: { eventId: id, status: 'refunded' } }),
       this.ticketRepository.count({ where: { eventId: id, status: 'valid' } }),
+      this.smartRefundService.verifyRefundCompletion(id),
     ]);
 
     const failedCount = totalTickets - refundedTickets - validTickets;
 
     return {
       eventId: id,
-      complete: validTickets === 0,
+      complete: onChain.complete && validTickets === 0,
+      onChainComplete: onChain.complete,
       totalTickets,
       refundedCount: refundedTickets,
       pendingCount: validTickets,

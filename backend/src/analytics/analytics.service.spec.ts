@@ -140,6 +140,7 @@ describe('AnalyticsService', () => {
 		paymentRepo.find.mockResolvedValue([
 			{ amount: 100, productType: 'ticket', ticketTier: 'VIP', promoCode: 'WELCOME', createdAt: new Date('2026-04-01T01:00:00.000Z') },
 			{ amount: 50, productType: 'ticket', ticketTier: 'General', promoCode: null, createdAt: new Date('2026-04-02T01:00:00.000Z') },
+			{ amount: 40, productType: 'merch', ticketTier: null, promoCode: null, createdAt: new Date('2026-04-02T02:00:00.000Z') },
 		]);
 		merchReservationRepo.find.mockResolvedValue([
 			{ status: 'purchased', purchasedAt: new Date('2026-04-02T02:00:00.000Z'), merchItem: { eventId: 'event-1', name: 'Hoodie', price: 40 } },
@@ -156,5 +157,29 @@ describe('AnalyticsService', () => {
 		expect(report.promoCodes).toEqual([expect.objectContaining({ name: 'WELCOME', revenue: 100 })]);
 		expect(report.merchSales).toEqual([expect.objectContaining({ name: 'Hoodie', quantity: 1, revenue: 40 })]);
 		expect(report.timeSeries).toHaveLength(2);
+		expect(report.timeSeries.find((point) => point.date === '2026-04-02')?.revenue).toBe(90);
+	});
+
+	it('rejects reversed revenue date ranges', async () => {
+		eventRepo.findOne.mockResolvedValue({ id: 'event-1', organizerId: 'org-1' });
+
+		await expect(
+			service.aggregate_revenue_data('event-1', 'org-1', '2026-04-03', '2026-04-01'),
+		).rejects.toThrow('startDate must not be after endDate');
+	});
+
+	it('exports summary and daily revenue rows as CSV', async () => {
+		eventRepo.findOne.mockResolvedValue({ id: 'event-1', organizerId: 'org-1' });
+		paymentRepo.find.mockResolvedValue([
+			{ amount: 25, productType: 'ticket', ticketTier: 'General', promoCode: null, createdAt: new Date('2026-04-02T01:00:00.000Z') },
+		]);
+		merchReservationRepo.find.mockResolvedValue([]);
+
+		const report = await service.export_revenue_report('event-1', 'org-1', 'csv');
+		const csv = report.body.toString('utf8');
+
+		expect(report.contentType).toContain('text/csv');
+		expect(csv).toContain('"summary","totalRevenue","","25"');
+		expect(csv).toContain('"time-period","2026-04-02","1","25"');
 	});
 });

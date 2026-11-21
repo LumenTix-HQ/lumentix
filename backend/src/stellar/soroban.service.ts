@@ -93,6 +93,9 @@ export class SorobanService {
 
   /** Trigger LumentixContract.cancel_event so the cancellation is recorded on-chain. */
   async cancelEventOnChain(organizerSecret: string, contractEventId: string): Promise<void> {
+    const status = await this.getEventStatus(contractEventId);
+    if (status.includes('cancelled')) return;
+
     const keypair = Keypair.fromSecret(organizerSecret);
     this.logger.log(`Cancelling contract event ${contractEventId} on-chain`);
     await this.invoke(organizerSecret, 'cancel_event', [
@@ -112,10 +115,46 @@ export class SorobanService {
     return Number(result ?? 0);
   }
 
+  /** Read the contract event status so retried cancellation jobs remain idempotent. */
+  async getEventStatus(contractEventId: string): Promise<string> {
+    const contract = this.getContract();
+    const dummySource = new Account(Keypair.random().publicKey(), '0');
+    const tx = new TransactionBuilder(dummySource, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          'get_event_status',
+          nativeToScVal(BigInt(contractEventId), { type: 'u64' }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    const simulation = await this.server.simulateTransaction(tx);
+    if (rpc.Api.isSimulationError(simulation)) {
+      throw new InternalServerErrorException(
+        `Soroban simulation failed for get_event_status: ${simulation.error}`,
+      );
+    }
+
+    const retval = (simulation as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+    if (!retval) {
+      throw new InternalServerErrorException('Soroban get_event_status returned no value');
+    }
+    const status = scValToNative(retval);
+    const encodedStatus =
+      typeof status === 'string' ? status : JSON.stringify(status);
+    if (!encodedStatus) {
+      throw new InternalServerErrorException('Soroban get_event_status returned an invalid value');
+    }
+    return encodedStatus.toLowerCase();
+  }
+
   /**
    * Read-only check that every eligible ticket for a cancelled contract event
-   * has been refunded. Simulated locally (no signature/submission needed
-   * since the contract function requires no auth).
+   * has been refunded by simulating the read-only contract function over RPC.
    */
   async verifyRefundCompletion(contractEventId: string): Promise<boolean> {
     const contract = this.getContract();

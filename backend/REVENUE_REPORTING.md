@@ -23,6 +23,8 @@ Exports revenue reports in CSV or PDF format:
 - CSV: Structured data for spreadsheet analysis
 - PDF: Professional report with formatted tables
 - Date range filtering supported
+- Both exports include summary totals and daily revenue/ticket counts
+- Merchandise revenue is sourced from completed merch purchases and is not double-counted in daily totals
 
 ## API Endpoints
 

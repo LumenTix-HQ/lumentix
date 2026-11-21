@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { getQueueToken } from '@nestjs/bull';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FindOptionsWhere, Repository } from 'typeorm';
 import { EventsService } from './events.service';
@@ -20,6 +21,8 @@ import { EventCacheService } from './cache/event-cache.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { EventImage } from './entities/event-image.entity';
 import { EventSeries } from './entities/event-series.entity';
+import { SmartRefundService } from './smart-refund.service';
+import { CalendarService } from '../calendar/calendar.service';
 
 // Mock the entire RefundService module to avoid parsing broken dependencies
 jest.mock('../payments/refunds/refund.service', () => ({
@@ -176,6 +179,14 @@ describe('EventsService', () => {
           useValue: { refundEvent: jest.fn() },
         },
         {
+          provide: SmartRefundService,
+          useValue: {
+            cancelEventOnChain: jest.fn(),
+            executeMassRefund: jest.fn(),
+            verifyRefundCompletion: jest.fn(),
+          },
+        },
+        {
           provide: CurrenciesService,
           useValue: { findActiveCodes: jest.fn().mockResolvedValue(['USD', 'EUR']) },
         },
@@ -183,6 +194,8 @@ describe('EventsService', () => {
           provide: getRepositoryToken(EventSeries),
           useValue: seriesRepo,
         },
+        { provide: getQueueToken('events'), useValue: { add: jest.fn(), getJob: jest.fn() } },
+        { provide: CalendarService, useValue: {} },
       ],
     }).compile();
 
