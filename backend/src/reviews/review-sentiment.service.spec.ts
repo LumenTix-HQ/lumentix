@@ -231,4 +231,37 @@ describe('ReviewSentimentService', () => {
       expect(severe.severity).toBeGreaterThan(mild.severity);
     });
   });
+
+  describe('snake_case aliases (#1548)', () => {
+    it('analyze_review_sentiment delegates to the local NLP analysis', () => {
+      expect(service.analyze_review_sentiment('amazing venue').label).toBe(
+        'positive',
+      );
+    });
+
+    it('generate_sentiment_summary delegates to the aggregate summary', async () => {
+      mockReviewRepo.find.mockResolvedValue([
+        review({ comment: 'great venue', rating: 5 }),
+        review({ id: 'r2', comment: 'terrible queue', rating: 2 }),
+      ]);
+
+      const summary = await service.generate_sentiment_summary('e1');
+
+      expect(summary.reviewsAnalysed).toBe(2);
+      expect(summary.averageRating).toBe(3.5);
+    });
+
+    it('flag_toxic_review delegates to moderation flagging', async () => {
+      mockReviewRepo.findOne.mockResolvedValue(
+        review({ comment: 'kill yourself' }),
+      );
+
+      const result = await service.flag_toxic_review('r1');
+
+      expect(result.isToxic).toBe(true);
+      expect(mockAudit.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'REVIEW_FLAGGED_TOXIC' }),
+      );
+    });
+  });
 });

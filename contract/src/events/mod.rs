@@ -486,6 +486,40 @@ impl EventSalesResumed {
     }
 }
 
+/// Event emitted when an admin activates the emergency circuit breaker.
+pub struct CircuitBreakerActivated;
+
+impl CircuitBreakerActivated {
+    pub fn emit(env: &Env, activated_by: Address, reason: String, required_signatures: u32) {
+        env.events().publish(
+            (symbol_short!("circbrk"),),
+            (activated_by, reason, required_signatures),
+        );
+    }
+}
+
+/// Event emitted when an anomaly trips or re-trips the circuit breaker.
+pub struct CircuitBreakerAnomalyDetected;
+
+impl CircuitBreakerAnomalyDetected {
+    pub fn emit(env: &Env, failed_transfers: u32, velocity: u32, anomaly_count: u32) {
+        env.events().publish(
+            (symbol_short!("anomaly"),),
+            (failed_transfers, velocity, anomaly_count),
+        );
+    }
+}
+
+/// Event emitted once a circuit breaker has been resumed by multi-sig.
+pub struct CircuitBreakerResumed;
+
+impl CircuitBreakerResumed {
+    pub fn emit(env: &Env, approvals: u32, timestamp: u64) {
+        env.events()
+            .publish((symbol_short!("circbrkr"),), (approvals, timestamp));
+    }
+}
+
 /// Universal event emitted anytime an EventStatus switches (e.g. Draft -> Published, Active -> Cancelled).
 /// Standardizes indexer states minimizing specific listener configuration.
 pub struct GenericEventStateTransition;

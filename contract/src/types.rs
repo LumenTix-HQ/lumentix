@@ -1322,3 +1322,39 @@ pub struct IdempotencyRecord {
     /// Ledger timestamp when the key was consumed.
     pub consumed_at: u64,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Emergency Circuit Breaker (Issue #1547)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Thresholds that automatically trip the circuit breaker.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnomalyThresholdConfig {
+    /// Failed transfers tolerated inside a rolling window before tripping.
+    pub max_failed_transfers_window: u32,
+    /// Total transfer velocity tolerated inside a rolling window.
+    pub max_velocity_per_window: u32,
+    /// Length of the rolling window in seconds.
+    pub window_seconds: u32,
+}
+
+/// Persistent emergency pause state and its multi-sig resume progress.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerState {
+    /// Whether sales and transfers are currently halted.
+    pub is_active: bool,
+    /// Account that activated the breaker.
+    pub activated_by: Address,
+    /// Human-readable reason recorded at activation.
+    pub reason: String,
+    /// Ledger timestamp when the breaker was activated.
+    pub activated_at: u64,
+    /// Number of anomaly detections observed while active.
+    pub anomaly_count: u32,
+    /// Distinct signers that have approved resuming operations.
+    pub resume_approvals: Vec<Address>,
+    /// Number of distinct approvals required to resume operations.
+    pub required_resume_signatures: u32,
+}
