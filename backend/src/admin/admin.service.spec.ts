@@ -8,6 +8,8 @@ import { UserRole } from '../users/enums/user-role.enum';
 import { UserStatus } from '../users/enums/user-status.enum';
 import { RoleRequest } from '../users/entities/role-request.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '../audit/entities/audit-log.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { MailerService } from '../mailer/mailer.service';
 import { StellarWebhookService } from '../stellar/stellar-webhook.service';
 import { EventStateService } from '../events/state/event-state.service';
@@ -37,6 +39,8 @@ describe('AdminService', () => {
     createQueryBuilder?: jest.Mock;
   };
   let eventCacheService: { invalidateCacheEntry: jest.Mock };
+  let auditService: { log: jest.Mock };
+  let refreshTokenRepo: { update: jest.Mock };
 
   const makeUserQueryBuilder = (result: User | null) => ({
     select: jest.fn().mockReturnThis(),
@@ -53,6 +57,8 @@ describe('AdminService', () => {
     eventRepo = { findOne: jest.fn(), save: jest.fn() };
     userRepo = { findOne: jest.fn(), save: jest.fn() };
     eventCacheService = { invalidateCacheEntry: jest.fn() };
+    auditService = { log: jest.fn().mockResolvedValue(undefined) };
+    refreshTokenRepo = { update: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -63,7 +69,11 @@ describe('AdminService', () => {
           provide: getRepositoryToken(RoleRequest),
           useValue: { findOne: jest.fn(), save: jest.fn() },
         },
-        { provide: AuditService, useValue: { log: jest.fn() } },
+        {
+          provide: getRepositoryToken(RefreshToken),
+          useValue: refreshTokenRepo,
+        },
+        { provide: AuditService, useValue: auditService },
         { provide: MailerService, useValue: {} },
         { provide: StellarWebhookService, useValue: {} },
         EventStateService,
@@ -247,6 +257,96 @@ describe('AdminService', () => {
       await expect(service.getUserById('bad-id')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  // ── search_users ──────────────────────────────────────────────────────────
+
+  describe('search_users', () => {
+    it('returns paginated users matching criteria', async () => {
+      const user = makeUser();
+      const qb = makeUserQueryBuilder(user);
+      userRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.search_users({
+        search: 'alice',
+        role: UserRole.EVENT_GOER,
+        status: UserStatus.ACTIVE,
+        page: 1,
+        limit: 10,
+      });
+
+      expect(userRepo.createQueryBuilder).toHaveBeenCalledWith('user');
+      expect(result.data).toEqual([user]);
+      expect(result.total).toBe(1);
+    });
+  });
+
+  // ── update_user_role ──────────────────────────────────────────────────────
+
+  describe('update_user_role', () => {
+    it('updates user role and logs audit action', async () => {
+      const user = makeUser();
+      userRepo.findOne.mockResolvedValue(user);
+      userRepo.save.mockImplementation(async (u: User) => u);
+
+      const result = await service.update_user_role(
+        'user-uuid',
+        UserRole.ORGANIZER,
+      );
+
+      expect(result.role).toBe(UserRole.ORGANIZER);
+      expect(userRepo.save).toHaveBeenCalled();
+      expect(auditService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.USER_ROLE_UPDATED,
+          userId: 'user-uuid',
+          meta: { previousRole: UserRole.EVENT_GOER, newRole: UserRole.ORGANIZER },
+        }),
+      );
+    });
+
+    it('rejects an invalid role', async () => {
+      const user = makeUser();
+      userRepo.findOne.mockResolvedValue(user);
+
+      await expect(
+        service.update_user_role('user-uuid', 'SUPER_ADMIN' as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ── suspend_user_account ──────────────────────────────────────────────────
+
+  describe('suspend_user_account', () => {
+    it('suspends an active account and logs audit action', async () => {
+      const user = makeUser();
+      userRepo.findOne.mockResolvedValue(user);
+      userRepo.save.mockImplementation(async (u: User) => u);
+
+      const result = await service.suspend_user_account('user-uuid');
+
+      expect(result.status).toBe(UserStatus.BLOCKED);
+      expect(userRepo.save).toHaveBeenCalled();
+      expect(refreshTokenRepo.update).toHaveBeenCalledWith(
+        { userId: 'user-uuid', revoked: false },
+        { revoked: true },
+      );
+      expect(auditService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.USER_SUSPENDED,
+          userId: 'user-uuid',
+        }),
+      );
+    });
+
+    it('throws if user is already suspended', async () => {
+      const user = { ...makeUser(), status: UserStatus.BLOCKED };
+      userRepo.findOne.mockResolvedValue(user);
+
+      await expect(
+        service.suspend_user_account('user-uuid'),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

@@ -243,6 +243,66 @@ export class SchedulingController {
     );
   }
 
+  // ── Snake_case aliases ──────────────────────────────────────────────────────
+
+  @Post('detect_schedule_conflict')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'detect_schedule_conflict — check for venue booking overlaps',
+  })
+  @ApiResponse({ status: 201, description: 'Conflict report returned' })
+  async detect_schedule_conflict(@Body() dto: DetectScheduleConflictDto) {
+    return this.schedulingService.detect_schedule_conflict(
+      dto.venue,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+      dto.excludeEventId,
+    );
+  }
+
+  @Post('suggest_alternative_slots')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'suggest_alternative_slots — find free windows near a conflicted slot',
+  })
+  @ApiResponse({ status: 201, description: 'List of alternative slots returned' })
+  async suggest_alternative_slots(@Body() dto: SuggestAlternativeSlotsDto) {
+    return this.schedulingService.suggest_alternative_slots(
+      dto.venue,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+      {
+        limit: dto.limit,
+        stepHours: dto.stepHours,
+        searchWindowDays: dto.searchWindowDays,
+        excludeEventId: dto.excludeEventId,
+      },
+    );
+  }
+
+  @Post('resolve_conflict')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ORGANIZER, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'resolve_conflict — detect conflicts and recommend the nearest free slot',
+  })
+  @ApiResponse({ status: 201, description: 'Resolution returned' })
+  async resolve_conflict(@Body() dto: ResolveConflictDto) {
+    return this.schedulingService.resolve_conflict(
+      dto.venue,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+      {
+        limit: dto.limit,
+        stepHours: dto.stepHours,
+        searchWindowDays: dto.searchWindowDays,
+        excludeEventId: dto.excludeEventId,
+      },
+    );
+  }
+
   // ── Convenience read endpoints ─────────────────────────────────────────────
 
   /**

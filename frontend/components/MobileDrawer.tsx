@@ -79,17 +79,32 @@ const MobileDrawer = ({ isOpen, onClose, navLinks, isAuthenticated, user, onLogo
             </Link>
           ))}
           {isAuthenticated && (
-            <Link
-              href="/profile"
-              onClick={onClose}
-              className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                isActive("/profile")
-                  ? "text-white bg-white/10"
-                  : "text-gray-400 hover:text-white hover:bg-white/5"
-              }`}
-            >
-              Profile
-            </Link>
+            <>
+              <Link
+                href="/profile"
+                onClick={onClose}
+                className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                  isActive("/profile")
+                    ? "text-white bg-white/10"
+                    : "text-gray-400 hover:text-white hover:bg-white/5"
+                }`}
+              >
+                Profile
+              </Link>
+              {user?.role?.toUpperCase() === 'ADMIN' && (
+                <Link
+                  href="/admin/users"
+                  onClick={onClose}
+                  className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                    isActive("/admin")
+                      ? "text-purple-300 bg-purple-500/10"
+                      : "text-purple-400 hover:text-purple-200 hover:bg-white/5"
+                  }`}
+                >
+                  Admin Panel
+                </Link>
+              )}
+            </>
           )}
         </div>
 
