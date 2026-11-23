@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { PrivacyService } from './privacy.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -29,6 +29,20 @@ export class PrivacyController {
   })
   @ApiResponse({ status: 200, description: 'Complete GDPR data export returned' })
   exportData(@Req() req: AuthenticatedRequest) {
+    return this.privacyService.exportUserData(req.user.id);
+  }
+
+  @Get('export-data/download')
+  @Header('Content-Type', 'application/json; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="lumentix-data-export.json"')
+  @ApiOperation({
+    summary: 'Download all data held for the current user as a JSON file (GDPR Article 20)',
+    description: `Same machine-readable export as GET /privacy/export-data, but returned as a
+    downloadable .json file attachment. This implements the GDPR Article 20 right to data
+    portability in a directly consumable file format.`,
+  })
+  @ApiResponse({ status: 200, description: 'JSON file attachment returned' })
+  downloadExportData(@Req() req: AuthenticatedRequest) {
     return this.privacyService.exportUserData(req.user.id);
   }
 
