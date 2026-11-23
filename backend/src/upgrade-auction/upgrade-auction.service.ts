@@ -197,4 +197,38 @@ export class UpgradeAuctionService {
       throw new ForbiddenException('Only the event organizer can manage upgrade auctions');
     }
   }
+
+  // ── Issue #1543 — snake_case aliases ──────────────────────────────────────
+
+  /**
+   * Open a transparent auction for premium seat upgrades close to the event date.
+   */
+  async open_upgrade_auction(
+    eventId: string,
+    dto: OpenUpgradeAuctionDto,
+    requesterId: string,
+  ): Promise<UpgradeAuction> {
+    return this.openUpgradeAuction(eventId, dto, requesterId);
+  }
+
+  /**
+   * Allow a ticket holder to place a bid on an available premium seat upgrade.
+   */
+  async place_upgrade_bid(
+    auctionId: string,
+    dto: PlaceUpgradeBidDto,
+    bidderId: string,
+  ): Promise<UpgradeBid> {
+    return this.placeUpgradeBid(auctionId, dto, bidderId);
+  }
+
+  /**
+   * Close bidding and award premium seat upgrades to the highest valid bids.
+   */
+  async finalize_winning_bid(
+    auctionId: string,
+    requesterId: string,
+  ): Promise<FinalizedAuctionResult> {
+    return this.finalizeWinningBid(auctionId, requesterId);
+  }
 }
