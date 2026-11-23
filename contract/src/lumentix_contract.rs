@@ -4905,6 +4905,9 @@ impl LumentixContract {
 
         let created_at = env.ledger().timestamp();
         let voting_deadline = created_at + config.voting_period_seconds;
+        let required_yes_votes = (config.governance_members.len() as u64
+            * config.required_approval_percentage as u64
+            / 100) as u32;
 
         let proposal = UpgradeProposal {
             proposal_id,
@@ -4916,7 +4919,7 @@ impl LumentixContract {
             state: UpgradeState::Pending,
             yes_votes: 0,
             no_votes: 0,
-            required_yes_votes: 0, // computed on execution
+            required_yes_votes,
             total_voters: config.governance_members.len(),
         };
 
