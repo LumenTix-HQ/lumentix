@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
   Req,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -70,6 +72,29 @@ export class TaxReceiptsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<TaxReceiptResponseDto[]> {
     return this.taxReceiptsService.getReceiptsForUser(req.user.id);
+  }
+
+  /**
+   * Download a generated receipt as a PDF file (#1551).
+   *
+   * The PDF is rebuilt from the stored line-item data so the download works
+   * even when no external storage adapter is configured.
+   */
+  @Get(':id/pdf')
+  @Header('Content-Type', 'application/pdf')
+  @ApiOperation({ summary: 'Download a tax receipt as a PDF' })
+  @ApiParam({ name: 'id', description: 'Tax receipt UUID' })
+  @ApiResponse({ status: 200, description: 'The receipt PDF file.' })
+  async downloadTaxReceiptPdf(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<StreamableFile> {
+    const { buffer, fileName } =
+      await this.taxReceiptsService.downloadTaxReceiptPdf(req.user.id, id);
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${fileName}"`,
+    });
   }
 
   /**

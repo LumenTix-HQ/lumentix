@@ -34,6 +34,16 @@ function normalizeLimit(limit?: string): number {
   return limit ? Math.min(20, Math.max(1, Number(limit))) : 5;
 }
 
+/** Comma-separated recently viewed event ids used as a browsing signal (#1552). */
+function parseViewed(viewed?: string): string[] {
+  if (!viewed) return [];
+  return viewed
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .slice(0, 50);
+}
+
 @ApiTags('recommendations')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -57,6 +67,11 @@ export class RecommendationsController {
     required: false,
     schema: { type: 'integer', minimum: 1, maximum: 20, default: 5 },
   })
+  @ApiQuery({
+    name: 'viewed',
+    required: false,
+    description: 'Comma-separated recently viewed event ids (browsing signal)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Ranked recommendations computed from the user profile vector.',
@@ -65,10 +80,12 @@ export class RecommendationsController {
   getMyRecommendations(
     @Req() req: AuthenticatedRequest,
     @Query('limit') limit?: string,
+    @Query('viewed') viewed?: string,
   ): Promise<RecommendationResponse> {
     return this.recommendationsService.generateRecommendations(
       req.user.id,
       normalizeLimit(limit),
+      parseViewed(viewed),
     );
   }
 
@@ -86,6 +103,11 @@ export class RecommendationsController {
     required: false,
     schema: { type: 'integer', minimum: 1, maximum: 20, default: 5 },
   })
+  @ApiQuery({
+    name: 'viewed',
+    required: false,
+    description: 'Comma-separated recently viewed event ids (browsing signal)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Ranked recommendations computed from the user profile vector.',
@@ -94,10 +116,12 @@ export class RecommendationsController {
   getRecommendationsForUser(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Query('limit') limit?: string,
+    @Query('viewed') viewed?: string,
   ): Promise<RecommendationResponse> {
     return this.recommendationsService.generateRecommendations(
       userId,
       normalizeLimit(limit),
+      parseViewed(viewed),
     );
   }
 
