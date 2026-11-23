@@ -1,16 +1,37 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { DecentralizedStorageService } from './decentralized-storage.service';
+import { IpfsPinningService } from './ipfs-pinning.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Event } from '../events/entities/event.entity';
+import { Role } from '../common/decorators/roles.decorator';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import {
   UploadMediaDto,
   PinMediaDto,
   MigrateMediaDto,
+  PinToIpfsDto,
+  PinToIpfsResponseDto,
+  PinStatusResponseDto,
+  MigrateUnpinnedAssetsDto,
+  MigrateUnpinnedAssetsResponseDto,
 } from './dto/storage.dto';
 
 @ApiTags('Decentralized Storage')
@@ -98,8 +119,12 @@ export class DecentralizedStorageController {
     status: 400,
     description: 'IPFS not configured or invalid payload',
   })
-  pinToIpfs(@Body() dto: PinToIpfsDto): Promise<PinToIpfsResponseDto> {
-    return this.storageService.pin_to_ipfs(dto);
+  async pinToIpfs(
+    @Body() dto: PinToIpfsDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PinToIpfsResponseDto> {
+    await this.requireOwner(dto.eventId, req);
+    return this.pinning.pin_to_ipfs(dto.eventId, dto.hash);
   }
 
   @Get('verify-pin/:hash')
@@ -112,7 +137,7 @@ export class DecentralizedStorageController {
     type: PinStatusResponseDto,
   })
   verifyPinStatus(@Param('hash') hash: string): Promise<PinStatusResponseDto> {
-    return this.storageService.verify_pin_status(hash);
+    return this.pinning.verify_pin_status(hash);
   }
 
   @Post('migrate-unpinned')
@@ -125,9 +150,11 @@ export class DecentralizedStorageController {
     type: MigrateUnpinnedAssetsResponseDto,
   })
   @ApiResponse({ status: 400, description: 'IPFS not configured' })
-  migrateUnpinnedAssets(
+  async migrateUnpinnedAssets(
     @Body() dto: MigrateUnpinnedAssetsDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<MigrateUnpinnedAssetsResponseDto> {
-    return this.storageService.migrate_unpinned_assets(dto);
+    await this.requireOwner(dto.eventId, req);
+    return this.pinning.migrate_unpinned_assets(dto.eventId, dto.hashes);
   }
 }

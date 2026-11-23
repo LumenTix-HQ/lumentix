@@ -34,3 +34,43 @@ export class MigrateMediaDto {
   @IsString({ each: true })
   hashes: string[];
 }
+
+export class PinToIpfsDto {
+  @ApiProperty() @IsUUID() eventId: string;
+  @ApiProperty() @IsString() hash: string;
+}
+
+export class MigrateUnpinnedAssetsDto {
+  @ApiProperty() @IsUUID() eventId: string;
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  hashes: string[];
+}
+
+export class ProviderStatusDto {
+  @ApiProperty() provider: string;
+  @ApiProperty() status: string;
+  @ApiPropertyOptional() requestId?: string;
+}
+
+export class PinToIpfsResponseDto {
+  @ApiProperty() hash: string;
+  @ApiProperty() eventId: string;
+  @ApiProperty() pinned: boolean;
+  @ApiProperty({ type: [ProviderStatusDto] }) providers: ProviderStatusDto[];
+}
+
+export class PinStatusResponseDto {
+  @ApiProperty() hash: string;
+  @ApiProperty() pinned: boolean;
+  @ApiProperty({ type: [ProviderStatusDto] }) providers: ProviderStatusDto[];
+}
+
+export class MigrateUnpinnedAssetsResponseDto {
+  @ApiProperty() eventId: string;
+  @ApiProperty({ type: [PinToIpfsResponseDto] })
+  results: PinToIpfsResponseDto[];
+}

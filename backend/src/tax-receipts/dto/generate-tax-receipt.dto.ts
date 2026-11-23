@@ -33,7 +33,8 @@ export class GenerateTaxReceiptDto {
   stateCode?: string;
 
   @ApiPropertyOptional({
-    description: 'Email address to send the receipt to. Defaults to the user's registered email.',
+    description:
+      "Email address to send the receipt to. Defaults to the user's registered email.",
     example: 'buyer@example.com',
   })
   @IsString()
