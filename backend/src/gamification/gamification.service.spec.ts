@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { GamificationService } from './gamification.service';
 import { ChallengeStatus } from './entities/challenge.entity';
+import { LeaderboardPeriod } from './entities/leaderboard-entry.entity';
 
 type Repo = {
   findOne: jest.Mock;
@@ -164,6 +165,36 @@ describe('GamificationService', () => {
       badgeRepo.findOne.mockResolvedValue(null);
 
       await expect(service.getBadge('missing')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('updateLeaderboard', () => {
+    it('writes ranked snapshot entries using the repaired entity columns', async () => {
+      profileRepo.find.mockResolvedValue([{ userId: 'u1', totalXp: 120, level: 3, leaderboardRank: null }]);
+      const queryBuilder = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ userId: 'u1', count: '2' }]),
+      };
+      (userAchievementRepo as Repo & { createQueryBuilder: jest.Mock }).createQueryBuilder = jest.fn().mockReturnValue(queryBuilder);
+      userRepo.find.mockResolvedValue([{ id: 'u1', email: 'u1@example.com' }]);
+
+      const entries = await service.updateLeaderboard(LeaderboardPeriod.WEEKLY, 10);
+
+      expect(entries).toHaveLength(1);
+      expect(entries[0].periodLabel).toMatch(/^\d{4}-W\d{2}$/);
+      expect(leaderboardRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+        period: LeaderboardPeriod.WEEKLY,
+        userId: 'u1',
+        rank: 1,
+        xp: 120,
+        level: 3,
+        achievementCount: 2,
+        displayName: 'u1',
+      }));
+      expect(leaderboardRepo.save).toHaveBeenCalled();
     });
   });
 });

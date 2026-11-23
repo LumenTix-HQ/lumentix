@@ -110,7 +110,7 @@ export class TaxReceiptsController {
     name: 'to',
     required: false,
     description:
-      'Override email address. Defaults to the user's registered email.',
+      "Override email address. Defaults to the user's registered email.",
   })
   @ApiResponse({
     status: 200,
