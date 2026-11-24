@@ -254,6 +254,9 @@ mod merchandise_nft_tests;
 #[cfg(test)]
 mod certification_analytics_tests;
 
+#[cfg(test)]
+mod survey_tests;
+
 pub use contract::TicketContract;
 pub use error::LumentixError;
 pub use events::{
