@@ -2,6 +2,13 @@
 
 ## Media pinning (#1250)
 
+The pinning service exposes the issue's three operations directly as
+`pin_to_ipfs(eventId, cid)`, `verify_pin_status(cid)`, and
+`migrate_unpinned_assets(eventId, hashes)`. Each pin request is sent to every
+configured provider; provider records are queried again for verification, so
+the result remains accurate after an API restart. Migration validates the
+complete CID batch before making any writes and de-duplicates repeated CIDs.
+
 Configure `IPFS_PINNING_SERVICES` as a JSON array of at least two independent
 HTTPS IPFS Pinning Service API providers (distinct names and hostnames):
 
