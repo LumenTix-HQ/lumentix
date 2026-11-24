@@ -255,6 +255,18 @@ impl BatchTicketsTransferred {
     }
 }
 
+/// Event emitted by
+/// [`crate::lumentix_contract::LumentixContract::batch_transfer_tickets_to_recipients`].
+/// `recipients[i]` is the new owner of `ticket_ids[i]`.
+pub struct BatchTicketsDistributed;
+
+impl BatchTicketsDistributed {
+    pub fn emit(env: &Env, from: Address, ticket_ids: Vec<u64>, recipients: Vec<Address>) {
+        env.events()
+            .publish((symbol_short!("batchdst"),), (from, ticket_ids, recipients));
+    }
+}
+
 /// Event emitted when organizers update a transfer blackout window.
 pub struct TransferBlackoutUpdated;
 
@@ -471,6 +483,40 @@ impl EventSalesResumed {
             (symbol_short!("salesrsm"),),
             (event_id, organizer, timestamp),
         );
+    }
+}
+
+/// Event emitted when an admin activates the emergency circuit breaker.
+pub struct CircuitBreakerActivated;
+
+impl CircuitBreakerActivated {
+    pub fn emit(env: &Env, activated_by: Address, reason: String, required_signatures: u32) {
+        env.events().publish(
+            (symbol_short!("circbrk"),),
+            (activated_by, reason, required_signatures),
+        );
+    }
+}
+
+/// Event emitted when an anomaly trips or re-trips the circuit breaker.
+pub struct CircuitBreakerAnomalyDetected;
+
+impl CircuitBreakerAnomalyDetected {
+    pub fn emit(env: &Env, failed_transfers: u32, velocity: u32, anomaly_count: u32) {
+        env.events().publish(
+            (symbol_short!("anomaly"),),
+            (failed_transfers, velocity, anomaly_count),
+        );
+    }
+}
+
+/// Event emitted once a circuit breaker has been resumed by multi-sig.
+pub struct CircuitBreakerResumed;
+
+impl CircuitBreakerResumed {
+    pub fn emit(env: &Env, approvals: u32, timestamp: u64) {
+        env.events()
+            .publish((symbol_short!("circbrkr"),), (approvals, timestamp));
     }
 }
 
@@ -1559,6 +1605,68 @@ impl CertificationStandardUpdated {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Biometric Authentication (Issue #649)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct BiometricCredentialRegistered;
+impl BiometricCredentialRegistered {
+    pub fn emit(
+        env: &Env,
+        user: Address,
+        event_id: u64,
+        biometric_type: crate::types::BiometricType,
+    ) {
+        env.events()
+            .publish((symbol_short!("bioreg"),), (user, event_id, biometric_type));
+    }
+}
+
+pub struct BiometricAuthenticated;
+impl BiometricAuthenticated {
+    pub fn emit(env: &Env, user: Address, event_id: u64) {
+        env.events()
+            .publish((symbol_short!("bioauth"),), (user, event_id));
+    }
+}
+
+pub struct BiometricPrivacyUpdated;
+impl BiometricPrivacyUpdated {
+    pub fn emit(
+        env: &Env,
+        user: Address,
+        event_id: u64,
+        action: crate::types::BiometricPrivacyAction,
+    ) {
+        env.events()
+            .publish((symbol_short!("bioprivy"),), (user, event_id, action));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Event Pass Packages (Issue #906)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub struct PassPackageCreated;
+impl PassPackageCreated {
+    pub fn emit(env: &Env, package_id: u64, owner: Address, total_allowance: u32) {
+        env.events().publish(
+            (symbol_short!("ppkgnew"),),
+            (package_id, owner, total_allowance),
+        );
+    }
+}
+
+pub struct PassAllowanceDeducted;
+impl PassAllowanceDeducted {
+    pub fn emit(env: &Env, package_id: u64, event_id: u64, remaining_allowance: u32) {
+        env.events().publish(
+            (symbol_short!("ppkguse"),),
+            (package_id, event_id, remaining_allowance),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Anonymous Event Feedback Surveys
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1748,6 +1856,449 @@ impl OfflineScansSyncCompleted {
         env.events().publish(
             (symbol_short!("offdone"),),
             (event_id, validator, accepted, rejected),
+        );
+    }
+}
+
+/// Event emitted when an age proof is registered for an event subject
+pub struct AgeProofIssued;
+impl AgeProofIssued {
+    pub fn emit(env: &Env, subject: Address, min_age: u32, expires_at: u64) {
+        env.events()
+            .publish((symbol_short!("ageiss"),), (subject, min_age, expires_at));
+    }
+}
+
+/// Event emitted when an event age proof is verified
+pub struct AgeProofVerified;
+impl AgeProofVerified {
+    pub fn emit(env: &Env, subject: Address, min_age_required: u32, valid: bool) {
+        env.events()
+            .publish((symbol_short!("agever"),), (subject, min_age_required, valid));
+    }
+}
+
+/// Event emitted when an underage purchase is rejected
+pub struct UnderagePurchaseRejected;
+impl UnderagePurchaseRejected {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, min_age_required: u32) {
+        env.events()
+            .publish((symbol_short!("ageund"),), (event_id, buyer, min_age_required));
+    }
+}
+
+/// Event emitted when the royalty split map for an event is configured
+pub struct RoyaltySplitsSet;
+impl RoyaltySplitsSet {
+    pub fn emit(env: &Env, event_id: u64, total_bps: u32) {
+        env.events()
+            .publish((symbol_short!("royset"),), (event_id, total_bps));
+    }
+}
+
+/// Event emitted when royalties are distributed from an event's escrow
+pub struct RoyaltiesDistributed;
+impl RoyaltiesDistributed {
+    pub fn emit(env: &Env, event_id: u64, total_amount: i128) {
+        env.events()
+            .publish((symbol_short!("roydis"),), (event_id, total_amount));
+    }
+}
+
+/// Event emitted when a gamification achievement badge is minted (Issue #1208)
+pub struct AchievementBadgeMinted;
+impl AchievementBadgeMinted {
+    pub fn emit(env: &Env, badge_id: u64, owner: Address, milestone: String) {
+        env.events()
+            .publish((symbol_short!("badgmint"),), (badge_id, owner, milestone));
+    }
+}
+
+/// Event emitted when an achievement badge is revoked (Issue #1208)
+pub struct AchievementBadgeRevoked;
+impl AchievementBadgeRevoked {
+    pub fn emit(env: &Env, badge_id: u64, owner: Address) {
+        env.events()
+            .publish((symbol_short!("badgrev"),), (badge_id, owner));
+    }
+}
+
+/// Event emitted when an organizer configures the venue capacity (Issue #1245)
+pub struct VenueCapacitySet;
+impl VenueCapacitySet {
+    pub fn emit(env: &Env, event_id: u64, max_capacity: u32, minted_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "venue_capacity_set"),),
+            (event_id, max_capacity, minted_count),
+        );
+    }
+}
+
+/// Event emitted when the on-chain attendance counter advances (Issue #1245)
+pub struct AttendanceCounterIncremented;
+impl AttendanceCounterIncremented {
+    pub fn emit(env: &Env, event_id: u64, minted_count: u32, max_capacity: u32) {
+        env.events().publish(
+            (Symbol::new(env, "attendance_counter_incremented"),),
+            (event_id, minted_count, max_capacity),
+        );
+    }
+}
+
+/// Event emitted when a mint is turned away for want of venue capacity (Issue #1245)
+pub struct OverCapacityMintRejected;
+impl OverCapacityMintRejected {
+    pub fn emit(env: &Env, event_id: u64, requested: u32, max_capacity: u32) {
+        env.events().publish(
+            (Symbol::new(env, "over_capacity_mint_rejected"),),
+            (event_id, requested, max_capacity),
+        );
+    }
+}
+
+/// Event emitted when a payment split over an event's escrow is registered (Issue #1247)
+pub struct EscrowSplitCreated;
+impl EscrowSplitCreated {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128, organizers: u32) {
+        env.events().publish(
+            (Symbol::new(env, "escrow_split_created"),),
+            (split_id, event_id, total_amount, organizers),
+        );
+    }
+}
+
+/// Event emitted when escrow funds are paid out to the co-organizers (Issue #1247)
+pub struct EscrowSplitReleased;
+impl EscrowSplitReleased {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, total_amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "escrow_split_released"),),
+            (split_id, event_id, total_amount),
+        );
+    }
+}
+
+/// Event emitted when a co-organizer freezes an escrow split (Issue #1247)
+pub struct EscrowSplitDisputed;
+impl EscrowSplitDisputed {
+    pub fn emit(env: &Env, split_id: u64, event_id: u64, disputer: Address) {
+        env.events().publish(
+            (Symbol::new(env, "escrow_split_disputed"),),
+            (split_id, event_id, disputer),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Dynamic pricing curve events (Issue #1451)
+// ═══════════════════════════════════════════════════════════════════════════
+
+use crate::types::{GeoRestrictionMode, PriceTier};
+
+/// Emitted whenever an organizer applies a dynamic pricing curve adjustment.
+pub struct DynamicPricingCurveSet;
+impl DynamicPricingCurveSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        new_price: i128,
+        demand_velocity_per_hour: u64,
+        remaining_inventory: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("pricecrv"),),
+            (
+                event_id,
+                organizer,
+                new_price,
+                demand_velocity_per_hour,
+                remaining_inventory,
+            ),
+        );
+    }
+}
+
+/// Emitted every time a dynamic price decision is computed and recorded.
+pub struct PricingDecisionLogged;
+impl PricingDecisionLogged {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        base_price: i128,
+        adjusted_price: i128,
+        price_tier: PriceTier,
+        demand_velocity_per_hour: u64,
+        remaining_inventory: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("pricedec"),),
+            (
+                event_id,
+                base_price,
+                adjusted_price,
+                price_tier,
+                demand_velocity_per_hour,
+                remaining_inventory,
+            ),
+        );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Geographic purchase restriction events (Issue #1448)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Emitted when an organizer sets or replaces an event's geo-fence rules.
+pub struct GeoFenceRulesSet;
+impl GeoFenceRulesSet {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        organizer: Address,
+        enabled: bool,
+        mode: GeoRestrictionMode,
+        region_count: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("geofence"),),
+            (event_id, organizer, enabled, mode, region_count),
+        );
+    }
+}
+
+/// Emitted when a buyer's attested region passes the event's geo-fence.
+pub struct BuyerGeoVerified;
+impl BuyerGeoVerified {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, country_code: String) {
+        env.events()
+            .publish((symbol_short!("geook"),), (event_id, buyer, country_code));
+    }
+}
+
+/// Emitted when a buyer's attested region is blocked by the event's geo-fence.
+pub struct BuyerGeoRejected;
+impl BuyerGeoRejected {
+    pub fn emit(env: &Env, event_id: u64, buyer: Address, country_code: String) {
+        env.events()
+            .publish((symbol_short!("georej"),), (event_id, buyer, country_code));
+    }
+}
+
+/// Emitted when an organizer configures an event's attendee heatmap grid (Issue #1499).
+pub struct HeatmapConfigured;
+impl HeatmapConfigured {
+    pub fn emit(env: &Env, event_id: u64, grid_width: u32, grid_height: u32, tile_size: u32) {
+        env.events().publish(
+            (Symbol::new(env, "heatmap_configured"),),
+            (event_id, grid_width, grid_height, tile_size),
+        );
+    }
+}
+
+/// Emitted when a batch of scan positions is folded into the heatmap (Issue #1499).
+/// Subscribers poll `stream_heatmap_updates` with the previous sequence on seeing it.
+pub struct ScanPositionsAggregated;
+impl ScanPositionsAggregated {
+    pub fn emit(env: &Env, event_id: u64, sequence: u64, positions: u32, tiles_touched: u32) {
+        env.events().publish(
+            (Symbol::new(env, "scan_positions_aggregated"),),
+            (event_id, sequence, positions, tiles_touched),
+        );
+    }
+}
+
+/// Emitted when a heatmap tile crosses its congestion threshold (Issue #1499).
+pub struct HeatmapCongestionDetected;
+impl HeatmapCongestionDetected {
+    pub fn emit(env: &Env, event_id: u64, tile_x: u32, tile_y: u32, count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "heatmap_congestion"),),
+            (event_id, tile_x, tile_y, count),
+        );
+    }
+}
+
+/// Emitted when a buyer pins an exchange rate for checkout (Issue #1500).
+pub struct ExchangeRateLocked;
+impl ExchangeRateLocked {
+    pub fn emit(
+        env: &Env,
+        lock_id: u64,
+        event_id: u64,
+        buyer: Address,
+        buyer_currency: String,
+        rate: i128,
+        expires_at: u64,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "exchange_rate_locked"),),
+            (lock_id, event_id, buyer, buyer_currency, rate, expires_at),
+        );
+    }
+}
+
+/// Emitted when a checkout is priced in the buyer's currency (Issue #1500).
+pub struct CheckoutCurrencyConverted;
+impl CheckoutCurrencyConverted {
+    pub fn emit(
+        env: &Env,
+        event_id: u64,
+        buyer: Address,
+        buyer_currency: String,
+        buyer_amount: i128,
+        settlement_amount: i128,
+    ) {
+        env.events().publish(
+            (Symbol::new(env, "checkout_currency_converted"),),
+            (event_id, buyer, buyer_currency, buyer_amount, settlement_amount),
+        );
+    }
+}
+
+/// Emitted when an organizer sets or replaces an event's royalty splits (Issue #1206).
+pub struct RoyaltySplitsSet;
+impl RoyaltySplitsSet {
+    pub fn emit(env: &Env, event_id: u64, total_bps: u32) {
+        env.events()
+            .publish((Symbol::new(env, "royalty_splits_set"),), (event_id, total_bps));
+    }
+}
+
+/// Emitted when escrow revenue is paid out to an event's artists (Issue #1206).
+pub struct RoyaltiesDistributed;
+impl RoyaltiesDistributed {
+    pub fn emit(env: &Env, event_id: u64, total_amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "royalties_distributed"),),
+            (event_id, total_amount),
+        );
+    }
+}
+
+/// Emitted when a chat message is turned away by moderation (Issue #1501).
+/// `verdict` is 1 banned, 2 muted, 3 slow mode, 4 filtered word.
+pub struct ChatMessageModerated;
+impl ChatMessageModerated {
+    pub fn emit(env: &Env, event_id: u64, user: Address, verdict: u32) {
+        env.events().publish(
+            (Symbol::new(env, "chat_message_moderated"),),
+            (event_id, user, verdict),
+        );
+    }
+}
+
+/// Emitted when an event's chat slow-mode interval changes (Issue #1501).
+pub struct ChatSlowModeSet;
+impl ChatSlowModeSet {
+    pub fn emit(env: &Env, event_id: u64, seconds: u32) {
+        env.events()
+            .publish((Symbol::new(env, "chat_slow_mode_set"),), (event_id, seconds));
+    }
+}
+
+/// Emitted when an event's chat word filters are replaced (Issue #1501).
+pub struct ChatWordFiltersUpdated;
+impl ChatWordFiltersUpdated {
+    pub fn emit(env: &Env, event_id: u64, word_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "chat_filters_updated"),),
+            (event_id, word_count),
+        );
+    }
+}
+
+/// Emitted when a user is banned from an event's chat (Issue #1501).
+pub struct ChatUserBanned;
+impl ChatUserBanned {
+    pub fn emit(env: &Env, event_id: u64, user: Address, reason: String) {
+        env.events()
+            .publish((Symbol::new(env, "chat_user_banned"),), (event_id, user, reason));
+    }
+}
+
+/// Emitted when a user's chat ban is lifted (Issue #1501).
+pub struct ChatUserUnbanned;
+impl ChatUserUnbanned {
+    pub fn emit(env: &Env, event_id: u64, user: Address) {
+        env.events()
+            .publish((Symbol::new(env, "chat_user_unbanned"),), (event_id, user));
+    }
+}
+
+/// Emitted when a user is muted, or unmuted with `muted_until` 0 (Issue #1501).
+pub struct ChatUserMuted;
+impl ChatUserMuted {
+    pub fn emit(env: &Env, event_id: u64, user: Address, muted_until: u64) {
+        env.events().publish(
+            (Symbol::new(env, "chat_user_muted"),),
+            (event_id, user, muted_until),
+        );
+    }
+}
+
+/// Emitted when an organizer opens a premium seat upgrade auction (Issue #1456).
+pub struct UpgradeAuctionOpened;
+impl UpgradeAuctionOpened {
+    pub fn emit(env: &Env, auction_id: u64, event_id: u64, target_tier: String, ends_at: u64) {
+        env.events().publish(
+            (Symbol::new(env, "upg_auction_opened"),),
+            (auction_id, event_id, target_tier, ends_at),
+        );
+    }
+}
+
+/// Emitted for every bid on an upgrade auction, so the bidding is public (Issue #1456).
+pub struct UpgradeBidPlaced;
+impl UpgradeBidPlaced {
+    pub fn emit(env: &Env, auction_id: u64, bidder: Address, ticket_id: u64, amount: i128) {
+        env.events().publish(
+            (Symbol::new(env, "upg_bid_placed"),),
+            (auction_id, bidder, ticket_id, amount),
+        );
+    }
+}
+
+/// Emitted when an upgrade auction closes; `winning_bid` is 0 when nobody won (Issue #1456).
+pub struct UpgradeAuctionFinalized;
+impl UpgradeAuctionFinalized {
+    pub fn emit(env: &Env, auction_id: u64, winner: Option<Address>, winning_bid: i128) {
+        env.events().publish(
+            (Symbol::new(env, "upg_auction_final"),),
+            (auction_id, winner, winning_bid),
+        );
+    }
+}
+
+/// Emitted when a user exports their personal data (Issue #1452).
+pub struct UserDataExported;
+impl UserDataExported {
+    pub fn emit(env: &Env, user: Address, ticket_count: u32) {
+        env.events().publish(
+            (Symbol::new(env, "user_data_exported"),),
+            (user, ticket_count),
+        );
+    }
+}
+
+/// Emitted when a user asks for their data to be deleted (Issue #1452).
+pub struct DataDeletionRequested;
+impl DataDeletionRequested {
+    pub fn emit(env: &Env, user: Address, requested_at: u64) {
+        env.events().publish(
+            (Symbol::new(env, "data_deletion_req"),),
+            (user, requested_at),
+        );
+    }
+}
+
+/// Emitted after a batch of a user's records is anonymized (Issue #1452).
+pub struct HistoricalRecordsAnonymized;
+impl HistoricalRecordsAnonymized {
+    pub fn emit(env: &Env, user: Address, anonymized: u32, retained: u32, completed: bool) {
+        env.events().publish(
+            (Symbol::new(env, "records_anonymized"),),
+            (user, anonymized, retained, completed),
         );
     }
 }

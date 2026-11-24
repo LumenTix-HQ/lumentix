@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
+  Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +14,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 import { TermsOfServiceService } from './terms-of-service.service';
 import { SaveEventTosDto } from './dto/save-event-tos.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../users/enums/user-role.enum';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
@@ -21,8 +24,36 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 export class TermsOfServiceController {
   constructor(private readonly tosService: TermsOfServiceService) {}
 
+  @Get('templates')
+  @ApiOperation({
+    summary: 'Get customizable ToS templates for organizers',
+    description: 'Returns available pre-built ToS templates including liability disclaimers, media waivers, and refund policies.',
+  })
+  @ApiResponse({ status: 200, description: 'List of ToS templates' })
+  getTemplates() {
+    return this.tosService.getTosTemplates();
+  }
+
+  @Post('apply-template/:templateId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ORGANIZER)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Apply a customizable template to an event',
+    description: 'Organizer-only. Initializes or updates event ToS from a standard template with optional custom overrides.',
+  })
+  @ApiResponse({ status: 201, description: 'Template applied to event ToS' })
+  applyTemplate(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Param('templateId') templateId: string,
+    @Body() customOverrides: Partial<SaveEventTosDto>,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.tosService.applyTemplate(eventId, templateId, req.user.id, customOverrides);
+  }
+
   @Patch()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({
@@ -53,7 +84,7 @@ export class TermsOfServiceController {
   }
 
   @Get('history')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ORGANIZER)
   @ApiBearerAuth()
   @ApiOperation({
@@ -63,5 +94,20 @@ export class TermsOfServiceController {
   @ApiResponse({ status: 200, description: 'ToS history' })
   getHistory(@Param('eventId', ParseUUIDPipe) eventId: string) {
     return this.tosService.getEventTosHistory(eventId);
+  }
+
+  @Post('validate/:version')
+  @ApiOperation({
+    summary: 'Validate a ToS agreement version',
+    description:
+      'Public. Checks whether a specific version of the Terms of Service is active and valid for the event.',
+  })
+  @ApiResponse({ status: 201, description: 'Validation result returned' })
+  @ApiResponse({ status: 404, description: 'ToS version not found' })
+  validateTosAgreement(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Param('version', ParseIntPipe) version: number,
+  ) {
+    return this.tosService.validateTosAgreement(eventId, version);
   }
 }

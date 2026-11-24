@@ -150,7 +150,7 @@ export class NotificationService {
         });
         break;
 
-      case EventStatus.CANCELLED:
+      case EventStatus.CANCELLED: {
         // Fetch all ticket holders and email each one
         // This is a batch operation — queue one job per ticket holder
         const ticketHolderIds = await this.getTicketHolderIds(event.id);
@@ -162,6 +162,7 @@ export class NotificationService {
           });
         }
         break;
+      }
 
       case EventStatus.COMPLETED:
         // Email to organizer: "Your event has completed"
@@ -171,6 +172,40 @@ export class NotificationService {
           eventId: event.id,
         });
         break;
+    }
+  }
+
+  /** Emergency notice with the organizer's own message, sent to ticket holders. */
+  async queueEmergencyEmail(event: Event, message: string): Promise<void> {
+    const ticketHolderIds = await this.getTicketHolderIds(event.id);
+    for (const userId of ticketHolderIds) {
+      await this.notificationQueue.add('sendEmergencyEmail', {
+        userId,
+        eventTitle: event.title,
+        eventId: event.id,
+        message,
+      });
+    }
+  }
+
+  /** Tells ticket holders about the new dates after a reschedule. */
+  async queueRescheduleEmail(
+    event: Event,
+    previous: { startDate: Date; endDate: Date },
+    reason?: string | null,
+  ): Promise<void> {
+    const ticketHolderIds = await this.getTicketHolderIds(event.id);
+    for (const userId of ticketHolderIds) {
+      await this.notificationQueue.add('sendEventRescheduledEmail', {
+        userId,
+        eventTitle: event.title,
+        eventId: event.id,
+        oldStartDate: new Date(previous.startDate).toISOString(),
+        oldEndDate: new Date(previous.endDate).toISOString(),
+        newStartDate: new Date(event.startDate).toISOString(),
+        newEndDate: new Date(event.endDate).toISOString(),
+        reason: reason ?? null,
+      });
     }
   }
 

@@ -38,6 +38,7 @@ export class User {
   status: UserStatus;
 
   @Column({ nullable: true, type: 'varchar', unique: true })
+  @Exclude()
   googleId: string | null;
 
   @Column({ nullable: true, type: 'varchar' })
@@ -127,9 +128,11 @@ export class User {
   emailVerified: boolean;
 
   @Column({ nullable: true, type: 'varchar' })
+  @Exclude()
   emailVerificationToken: string | null;
 
   @Column({ nullable: true, type: 'timestamptz' })
+  @Exclude()
   emailVerificationTokenExpiresAt: Date | null;
 
   @Column({ type: 'timestamptz', nullable: true, default: null })
@@ -155,6 +158,7 @@ export class User {
     nullable: true,
     default: null,
   })
+  @Exclude()
   mfaConfig: {
     enabled?: boolean;
     method?: 'totp' | 'sms' | null;
@@ -172,6 +176,7 @@ export class User {
     nullable: true,
     default: null,
   })
+  @Exclude()
   mfaSessions: Array<{
     sessionId: string;
     createdAt: string;

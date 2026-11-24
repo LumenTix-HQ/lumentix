@@ -26,7 +26,7 @@ export interface HeatmapUpdateCallback {
  * Groups positions by their zoneId (or a grid-quantised key when zoneId is
  * absent) and returns a flat array ready for tile generation.
  */
-export function aggregate_scan_positions(
+export function aggregateScanPositions(
   positions: ScanPosition[],
   gridSize = 50,
 ): Array<{ key: string; x: number; y: number; count: number }> {
@@ -55,8 +55,8 @@ export function aggregate_scan_positions(
  * Each tile carries a `density` value between 0 and 1 relative to the
  * maximum bucket count in the current dataset.
  */
-export function generate_heatmap_tiles(
-  aggregated: ReturnType<typeof aggregate_scan_positions>,
+export function generateHeatmapTiles(
+  aggregated: ReturnType<typeof aggregateScanPositions>,
   tileSize = 50,
 ): HeatmapTile[] {
   if (aggregated.length === 0) return [];
@@ -73,33 +73,59 @@ export function generate_heatmap_tiles(
   }));
 }
 
+export interface StreamHeatmapOptions {
+  /** Grid tile size in px, forwarded to `generateHeatmapTiles` (default 50). */
+  tileSize?: number;
+  /**
+   * Called after each failed poll with the error and the current
+   * consecutive-failure count, so a consumer can surface a stale/error
+   * indicator instead of only seeing a `console.error`.
+   */
+  onError?: (error: unknown, consecutiveFailures: number) => void;
+  /** Upper bound for the exponential backoff delay in ms (default intervalMs * 8). */
+  maxBackoffMs?: number;
+}
+
 /**
  * Subscribe to simulated real-time heatmap updates.
  * In a production deployment this would open a WebSocket or SSE connection;
  * here it polls a provided `fetchPositions` function on the given interval
  * and fires `onUpdate` with fresh tiles each cycle.
  *
+ * On failure, backs off exponentially (capped at `maxBackoffMs`) instead of
+ * retrying at a fixed interval forever, and reports the failure via
+ * `onError` so callers can surface it in the UI.
+ *
  * Returns a cleanup function that stops polling.
  */
-export function stream_heatmap_updates(
+export function streamHeatmapUpdates(
   fetchPositions: () => Promise<ScanPosition[]> | ScanPosition[],
   onUpdate: HeatmapUpdateCallback,
   intervalMs = 5000,
+  options: StreamHeatmapOptions = {},
 ): () => void {
+  const { tileSize = 50, onError, maxBackoffMs = intervalMs * 8 } = options;
+
   let active = true;
+  let consecutiveFailures = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   const tick = async () => {
     if (!active) return;
     try {
       const positions = await fetchPositions();
-      const aggregated = aggregate_scan_positions(positions);
-      const tiles = generate_heatmap_tiles(aggregated);
+      const aggregated = aggregateScanPositions(positions);
+      const tiles = generateHeatmapTiles(aggregated, tileSize);
+      consecutiveFailures = 0;
       onUpdate(tiles);
     } catch (err) {
+      consecutiveFailures += 1;
       console.error('[heatmap] stream error:', err);
+      onError?.(err, consecutiveFailures);
     }
     if (active) {
-      setTimeout(tick, intervalMs);
+      const delay = Math.min(intervalMs * 2 ** consecutiveFailures, maxBackoffMs);
+      timer = setTimeout(tick, delay);
     }
   };
 
@@ -107,5 +133,6 @@ export function stream_heatmap_updates(
 
   return () => {
     active = false;
+    if (timer !== undefined) clearTimeout(timer);
   };
 }

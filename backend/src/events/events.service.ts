@@ -1,3 +1,4 @@
+import { assertPublicHttpsUrl } from '../common/security/safe-url';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import {
@@ -8,6 +9,7 @@ import {
   Logger,
   NotFoundException,
   Inject,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -39,9 +41,13 @@ import { RefundService } from '../payments/refunds/refund.service';
 import { CurrenciesService } from '../currencies/currencies.service';
 import { EventImage } from './entities/event-image.entity';
 import { EventHistory } from './entities/event-history.entity';
+import { HistoricalAnalysisDto } from './dto/historical-analysis.dto';
 import { AddEventImageDto } from './dto/add-event-image.dto';
 import { UpdateImageOrderDto } from './dto/update-image-order.dto';
 import { buildListEventsOptions } from './build-list-events-options';
+import { CalendarService, CalendarAttendeeContact } from '../calendar/calendar.service';
+import { SchedulingService, AlternativeSlot } from '../scheduling/scheduling.service';
+import { SmartRefundService } from './smart-refund.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -83,8 +89,79 @@ export class EventsService {
     private readonly currenciesService: CurrenciesService,
     @InjectRepository(EventSeries)
     private readonly eventSeriesRepository: Repository<EventSeries>,
+    @InjectRepository(EventHistory)
+    private readonly eventHistoryRepository: Repository<EventHistory>,
     @InjectQueue('events') private readonly eventsQueue: Queue,
+    private readonly calendarService: CalendarService,
+    @Optional() private readonly schedulingService: SchedulingService,
+    private readonly smartRefundService: SmartRefundService,
   ) {}
+
+  /**
+   * Runs a venue conflict check via SchedulingService and throws a
+   * ConflictException (HTTP 409) if any overlap is found.
+   *
+   * The exception message is structured JSON so callers can parse the
+   * conflict list and display meaningful suggestions to the user.
+   *
+   * No-ops gracefully when SchedulingService is not available (e.g. in
+   * unit tests that don't wire the scheduling module).
+   */
+  private async assertNoScheduleConflict(
+    venue: string,
+    startDate: Date,
+    endDate: Date,
+    excludeEventId?: string,
+  ): Promise<void> {
+    if (!this.schedulingService) return;
+
+    const report = await this.schedulingService.detect_schedule_conflict(
+      venue,
+      startDate,
+      endDate,
+      excludeEventId,
+    );
+
+    if (!report.hasConflict) return;
+
+    let suggestedSlots: AlternativeSlot[] = [];
+    try {
+      suggestedSlots = await this.schedulingService.suggest_alternative_slots(
+        venue,
+        startDate,
+        endDate,
+        { excludeEventId, limit: 3 },
+      );
+    } catch {
+      // Suggestion failure should not mask the conflict error
+    }
+
+    const names = report.conflicts.map((c) => `"${c.title}"`).join(', ');
+    throw new ConflictException({
+      message: `Venue "${venue}" is already booked during the requested time slot. Conflicting events: ${names}.`,
+      venue,
+      requestedSlot: { startDate, endDate },
+      conflicts: report.conflicts,
+      suggestedSlots,
+      alternatives: suggestedSlots,
+    });
+  }
+
+  /**
+   * Analytics #992 — distinct, non-empty attendee email/name contacts for
+   * an event, sourced from its ticket holders. Used to notify attendees of
+   * calendar-relevant changes (date/time/location updates, cancellation).
+   */
+  private async getCalendarAttendeeContacts(eventId: string): Promise<CalendarAttendeeContact[]> {
+    const tickets = await this.ticketRepository.find({ where: { eventId } });
+    const ownerIds = [...new Set(tickets.map((t) => t.ownerId))];
+    if (ownerIds.length === 0) return [];
+
+    const users = await this.userRepository.find({ where: { id: In(ownerIds) } });
+    return users
+      .filter((u) => Boolean(u.email))
+      .map((u) => ({ email: u.email, name: (u as any).displayName ?? undefined }));
+  }
 
   async createEvent(dto: CreateEventDto, organizerId: string): Promise<Event> {
     if (dto.currency) {
@@ -95,6 +172,16 @@ export class EventsService {
           `Currency "${dto.currency}" is not supported. Supported: ${codes.join(', ')}`,
         );
       }
+    }
+
+    // ── Conflict detection ──────────────────────────────────────────────────
+    if (dto.location && dto.startDate && dto.endDate) {
+      await this.assertNoScheduleConflict(
+        dto.location,
+        new Date(dto.startDate),
+        new Date(dto.endDate),
+        undefined, // no existing event to exclude on creation
+      );
     }
 
     const event = this.eventRepository.create({
@@ -114,7 +201,19 @@ export class EventsService {
     if (dto.status !== undefined && dto.status !== event.status) {
       this.eventStateService.validateTransition(event.status, dto.status);
     }
+    if (dto.webhookUrl !== undefined) {
+      try {
+        await assertPublicHttpsUrl(dto.webhookUrl);
+      } catch (err) {
+        throw new BadRequestException(
+          `Invalid webhookUrl: ${(err as Error).message}`,
+        );
+      }
+    }
     const previousStatus = event.status;
+    const previousStartDate = event.startDate;
+    const previousEndDate = event.endDate;
+    const previousLocation = event.location;
     const isPublishing = dto.status === EventStatus.PUBLISHED && dto.status !== previousStatus;
     const updates: Partial<Event> = {
       ...(dto.title !== undefined && { title: dto.title }),
@@ -126,7 +225,30 @@ export class EventsService {
       ...(!isPublishing && dto.status !== undefined && { status: dto.status }),
       ...(dto.startDate !== undefined && { startDate: new Date(dto.startDate) }),
       ...(dto.endDate !== undefined && { endDate: new Date(dto.endDate) }),
+      ...(dto.webhookUrl !== undefined && { webhookUrl: dto.webhookUrl }),
     };
+
+    // ── Conflict detection on reschedule / relocation ──────────────────────
+    // Check when the slot or venue is changing, but only for events that
+    // already hold a venue (PUBLISHED/COMPLETED) or are being published now.
+    const slotOrVenueChanging =
+      dto.location !== undefined ||
+      dto.startDate !== undefined ||
+      dto.endDate !== undefined;
+
+    const eventWillHoldVenue =
+      isPublishing ||
+      event.status === EventStatus.PUBLISHED ||
+      event.status === EventStatus.COMPLETED;
+
+    const venueForCheck = dto.location ?? event.location;
+    const startForCheck = dto.startDate ? new Date(dto.startDate) : event.startDate;
+    const endForCheck = dto.endDate ? new Date(dto.endDate) : event.endDate;
+
+    if (slotOrVenueChanging && eventWillHoldVenue && venueForCheck) {
+      await this.assertNoScheduleConflict(venueForCheck, startForCheck, endForCheck, id);
+    }
+
     Object.assign(event, updates);
     if (isPublishing) {
       await this.eventRepository.save(event);
@@ -140,7 +262,29 @@ export class EventsService {
     if (dto.status !== undefined && dto.status !== previousStatus) {
       this.queueLifecycleEmail(saved).catch(() => undefined);
     }
+
+    const scheduleOrLocationChanged =
+      saved.startDate.getTime() !== previousStartDate.getTime() ||
+      saved.endDate.getTime() !== previousEndDate.getTime() ||
+      saved.location !== previousLocation;
+    if (scheduleOrLocationChanged && saved.status === EventStatus.PUBLISHED) {
+      this.notifyCalendarUpdate(saved).catch((err) =>
+        this.logger.error(`Failed to sync calendar update for event ${id}`, err?.stack),
+      );
+    }
+
     return saved;
+  }
+
+  /**
+   * Analytics #992 — email every ticket holder an updated calendar invite
+   * (RFC 5545 METHOD:REQUEST with an incremented SEQUENCE) after the
+   * event's date/time/location changes, so calendar apps that already
+   * imported the original invite pick up the change automatically.
+   */
+  private async notifyCalendarUpdate(event: Event): Promise<void> {
+    const attendees = await this.getCalendarAttendeeContacts(event.id);
+    await this.calendarService.sync_calendar_update(event, attendees);
   }
 
   async publishEvent(id: string, callerId: string): Promise<Event> {
@@ -151,6 +295,7 @@ export class EventsService {
     this.eventStateService.validateTransition(event.status, EventStatus.PUBLISHED);
     event.status = EventStatus.PUBLISHED;
     await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
     if (!event.escrowPublicKey || !event.escrowSecretEncrypted) {
       await this.escrowService.createEscrow(event.id);
     }
@@ -184,6 +329,153 @@ export class EventsService {
     return saved;
   }
 
+  /**
+   * Archive a completed event: snapshot its history, then transition
+   * COMPLETED → ARCHIVED through the state machine. The snapshot is written
+   * before the status changes so the recorded data reflects the final state of
+   * the live event.
+   */
+  async archiveCompletedEvent(id: string, callerId: string): Promise<Event> {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+    if (event.status !== EventStatus.COMPLETED) {
+      throw new BadRequestException('Only completed events can be archived.');
+    }
+
+    this.eventStateService.validateTransition(event.status, EventStatus.ARCHIVED);
+
+    await this.preserveEventHistory(id, callerId);
+
+    event.status = EventStatus.ARCHIVED;
+    event.archivedAt = new Date();
+    const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
+
+    await this.auditService.log({
+      action: AuditAction.EVENT_ARCHIVED,
+      userId: callerId,
+      resourceId: id,
+    });
+
+    return saved;
+  }
+
+  /**
+   * Capture a durable snapshot of an event (event fields plus ticket, payment
+   * and sponsorship aggregates) in `event_history` for later analysis.
+   */
+  async preserveEventHistory(id: string, callerId: string): Promise<EventHistory> {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    const stats = await this.computeEventStats(event);
+
+    const snapshot: Record<string, unknown> = {
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      organizerId: event.organizerId,
+      category: event.category,
+      status: event.status,
+      location: event.location,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      maxAttendees: event.maxAttendees,
+      ticketPrice: event.ticketPrice,
+      currency: event.currency,
+    };
+
+    const history = this.eventHistoryRepository.create({
+      eventId: id,
+      snapshot,
+      ticketSummary: {
+        sold: stats.ticketsSold,
+        used: stats.ticketsUsed,
+        refunded: stats.ticketsRefunded,
+        remainingCapacity: stats.remainingCapacity,
+      },
+      paymentSummary: {
+        totalRevenue: stats.totalRevenue,
+        refundCount: stats.refundCount,
+      },
+      sponsorshipSummary: {
+        totalSponsorship: stats.totalSponsorship,
+      },
+      totalTicketsSold: stats.ticketsSold,
+      totalTicketsUsed: stats.ticketsUsed,
+      totalRevenue: stats.totalRevenue,
+      totalSponsorship: stats.totalSponsorship,
+    });
+
+    const saved = await this.eventHistoryRepository.save(history);
+
+    await this.auditService.log({
+      action: AuditAction.EVENT_HISTORY_PRESERVED,
+      userId: callerId,
+      resourceId: id,
+    });
+
+    return saved;
+  }
+
+  /**
+   * Query preserved event history for trend analysis. Filters map onto the
+   * event's organizer/category (via the joined event) and the archival date.
+   */
+  async enableHistoricalAnalysis(
+    filterDto: HistoricalAnalysisDto,
+  ): Promise<PaginatedResult<EventHistory>> {
+    const page = filterDto.page ?? 1;
+    const limit = filterDto.limit ?? 10;
+
+    const qb = this.eventHistoryRepository
+      .createQueryBuilder('eh')
+      .leftJoinAndSelect('eh.event', 'event');
+
+    if (filterDto.organizerId) {
+      qb.andWhere('event.organizerId = :organizerId', {
+        organizerId: filterDto.organizerId,
+      });
+    }
+
+    if (filterDto.category) {
+      qb.andWhere('event.category = :category', {
+        category: filterDto.category,
+      });
+    }
+
+    if (filterDto.search) {
+      qb.andWhere(
+        '(event.title ILIKE :search OR event.description ILIKE :search)',
+        { search: `%${filterDto.search}%` },
+      );
+    }
+
+    if (filterDto.fromDate) {
+      qb.andWhere('eh.archivedAt >= :fromDate', {
+        fromDate: new Date(filterDto.fromDate),
+      });
+    }
+
+    if (filterDto.toDate) {
+      qb.andWhere('eh.archivedAt <= :toDate', {
+        toDate: new Date(filterDto.toDate),
+      });
+    }
+
+    qb.orderBy('eh.archivedAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
+
+    return { data, total, page, limit };
+  }
+
   async cancelEvent(id: string, callerId: string): Promise<{ status: string; jobId: string | number; eventId: string }> {
     const event = await this.getEventById(id);
     if (event.organizerId !== callerId) {
@@ -203,7 +495,10 @@ export class EventsService {
       resourceId: id,
     });
 
-    const job = await this.eventsQueue.add('cancel-event', { eventId: id });
+    const job = await this.eventsQueue.add('cancel-event', { eventId: id }, {
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 5000 },
+    });
 
     this.queueLifecycleEmail(saved).catch(() => undefined);
     return { status: 'cancellation_in_progress', jobId: job.id, eventId: id };
@@ -245,15 +540,20 @@ export class EventsService {
   }
 
   async getEventById(id: string): Promise<EventWithCapacity> {
-    const cached = await this.eventCacheService.fetchCachedMetadata(id);
-    if (cached) {
-      return cached;
+    let event: Event | null =
+      await this.eventCacheService.fetchCachedMetadata(id);
+
+    if (!event) {
+      event = await this.eventRepository.findOne({ where: { id } });
+      if (!event) {
+        throw new NotFoundException(`Event with id "${id}" not found`);
+      }
+      await this.eventCacheService.cacheEventMetadata(id, event);
     }
 
-    const event = await this.eventRepository.findOne({ where: { id } });
-    if (!event) {
-      throw new NotFoundException(`Event with id "${id}" not found`);
-    }
+    // Capacity is derived from live ticket rows and is deliberately not cached:
+    // a sale or refund must be visible on the next read even when the event
+    // row itself is still cached (#1606).
     const soldTickets = await this.ticketRepository.count({
       where: { eventId: id, status: 'valid' },
     });
@@ -261,15 +561,12 @@ export class EventsService {
     const remainingCapacity =
       event.maxAttendees !== null ? event.maxAttendees - soldTickets : null;
 
-    const result = {
+    return {
       ...event,
       soldTickets,
       remainingCapacity,
       availableSpots: remainingCapacity,
     };
-
-    await this.eventCacheService.cacheEventMetadata(id, result);
-    return result;
   }
 
   async listEvents(filterDto: ListEventsDto): Promise<PaginatedResult<EventWithCapacity>> {
@@ -303,6 +600,16 @@ export class EventsService {
     const event = await this.eventRepository.findOne({ where: { id } });
     if (!event) throw new NotFoundException(`Event with id "${id}" not found`);
     if (event.organizerId !== callerId) throw new ForbiddenException('You are not the organiser of this event.');
+    return this.computeEventStats(event);
+  }
+
+  /**
+   * Aggregate ticket, payment and sponsorship figures for an already-loaded
+   * event. Split out of `getEventStats` so history snapshots can reuse the
+   * exact same numbers without re-fetching the event.
+   */
+  private async computeEventStats(event: Event): Promise<EventStatsResponseDto> {
+    const { id } = event;
     const [ticketStats, paymentStats, sponsorStats] = await Promise.all([
       this.ticketRepository
         .createQueryBuilder('t').select('t.status', 'status').addSelect('COUNT(*)', 'count')
@@ -337,7 +644,9 @@ export class EventsService {
     if (!event) throw new NotFoundException('Event not found');
     if (event.organizerId !== organizerId) throw new ForbiddenException();
     event.imageUrl = imageUrl;
-    return this.eventRepository.save(event);
+    const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(eventId);
+    return saved;
   }
 
   async trigger_emergency_protocol(
@@ -368,7 +677,7 @@ export class EventsService {
   async send_emergency_notifications(id: string, callerId: string, message: string) {
     const event = await this.getEventById(id);
     if (event.organizerId !== callerId) throw new ForbiddenException();
-    await this.notificationService.queueLifecycleEmail({ ...event, status: EventStatus.CANCELLED } as Event);
+    await this.notificationService.queueEmergencyEmail(event, message);
     return { eventId: id, message, queued: true };
   }
 
@@ -381,8 +690,10 @@ export class EventsService {
   async trigger_automatic_postponement(id: string, callerId: string, reason = 'Unsafe weather conditions') {
     const event = await this.getEventById(id);
     if (event.organizerId !== callerId) throw new ForbiddenException();
+    this.eventStateService.validateTransition(event.status, EventStatus.CANCELLED);
     event.status = EventStatus.CANCELLED;
     const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(id);
     await this.notificationService.queueLifecycleEmail(saved);
     return saved;
   }
@@ -395,10 +706,16 @@ export class EventsService {
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) {
       throw new BadRequestException('Invalid reschedule date range.');
     }
+    const previous = { startDate: event.startDate, endDate: event.endDate };
     event.startDate = startDate;
     event.endDate = endDate;
     const saved = await this.eventRepository.save(event);
-    await this.notificationService.queueLifecycleEmail(saved);
+    await this.eventCacheService.invalidateCacheEntry(id);
+    await this.notificationService.queueRescheduleEmail(
+      saved,
+      previous,
+      data.reason,
+    );
     return { ...saved, rescheduleReason: data.reason ?? null };
   }
 
@@ -537,6 +854,9 @@ export class EventsService {
       }
     }
     await this.eventRepository.save(events);
+    await Promise.all(
+      events.map((event) => this.eventCacheService.invalidateCacheEntry(event.id)),
+    );
 
     return { series: savedSeries, updatedEventsCount: events.length };
   }
@@ -562,6 +882,16 @@ export class EventsService {
       ? events.filter((e) => dto.eventIds!.includes(e.id))
       : events;
 
+    // Validate the whole batch up front so an illegal transition rejects the
+    // request before any event is mutated (#1605).
+    if (dto.status !== undefined) {
+      for (const event of targetEvents) {
+        if (event.status !== dto.status) {
+          this.eventStateService.validateTransition(event.status, dto.status);
+        }
+      }
+    }
+
     for (const event of targetEvents) {
       if (dto.status !== undefined) {
         event.status = dto.status;
@@ -572,6 +902,9 @@ export class EventsService {
     }
 
     const saved = await this.eventRepository.save(targetEvents);
+    await Promise.all(
+      saved.map((event) => this.eventCacheService.invalidateCacheEntry(event.id)),
+    );
     return { updatedEvents: saved };
   }
 
@@ -685,6 +1018,49 @@ export class EventsService {
     }
 
     await this.eventRepository.update(id, { maxAttendees });
+    await this.eventCacheService.invalidateCacheEntry(id);
     return this.getEventById(id);
+  }
+
+  async cancelEventOnChain(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+    return this.smartRefundService.cancelEventOnChain(id);
+  }
+
+  async executeMassRefund(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+    return this.smartRefundService.executeMassRefund(id);
+  }
+
+  async verifyRefundCompletion(id: string, callerId: string) {
+    const event = await this.getEventById(id);
+    if (event.organizerId !== callerId) {
+      throw new ForbiddenException('You are not the organiser of this event.');
+    }
+
+    const [totalTickets, refundedTickets, validTickets, onChain] = await Promise.all([
+      this.ticketRepository.count({ where: { eventId: id } }),
+      this.ticketRepository.count({ where: { eventId: id, status: 'refunded' } }),
+      this.ticketRepository.count({ where: { eventId: id, status: 'valid' } }),
+      this.smartRefundService.verifyRefundCompletion(id),
+    ]);
+
+    const failedCount = totalTickets - refundedTickets - validTickets;
+
+    return {
+      eventId: id,
+      complete: onChain.complete && validTickets === 0,
+      onChainComplete: onChain.complete,
+      totalTickets,
+      refundedCount: refundedTickets,
+      pendingCount: validTickets,
+      failedCount: failedCount > 0 ? failedCount : 0,
+    };
   }
 }

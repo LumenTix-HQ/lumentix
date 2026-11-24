@@ -1,24 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Category } from './entities/category.entity';
+import { CategoryEntity } from './entities/category.entity';
 
 @Injectable()
 export class CategoriesService {
   constructor(
-    @InjectRepository(Category)
-    private readonly categoryRepo: Repository<Category>,
+    @InjectRepository(CategoryEntity)
+    private readonly categoryRepo: Repository<CategoryEntity>,
   ) {}
 
-  async findAll(): Promise<(Category & { eventCount: number })[]> {
+  async findAll(): Promise<(CategoryEntity & { eventCount: number })[]> {
     const rows = await this.categoryRepo
       .createQueryBuilder('c')
       .loadRelationCountAndMap('c.eventCount', 'c.events')
       .getMany();
-    return rows as (Category & { eventCount: number })[];
+    return rows as (CategoryEntity & { eventCount: number })[];
   }
 
-  async findByIds(ids: string[]): Promise<Category[]> {
+  async findByIds(ids: string[]): Promise<CategoryEntity[]> {
     if (!ids.length) return [];
     return this.categoryRepo.findByIds(ids);
   }

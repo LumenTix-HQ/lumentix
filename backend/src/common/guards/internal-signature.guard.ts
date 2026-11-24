@@ -5,7 +5,7 @@ import {
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { Request } from 'express';
 
 /** Maximum age of a signed request before it is considered stale (30 seconds). */
@@ -58,7 +58,8 @@ export class InternalSignatureGuard implements CanActivate {
     }
 
     // Raw body is expected to have been captured by a body parser as a Buffer
-    // on `request.rawBody`. Fall back to empty string for GET / DELETE requests.
+    // on `request.rawBody` (main.ts must call NestFactory.create with
+    // `{ rawBody: true }`). Fall back to empty string for GET / DELETE requests.
     const rawBody =
       (request as unknown as { rawBody?: Buffer }).rawBody?.toString('utf8') ??
       '';
@@ -67,7 +68,7 @@ export class InternalSignatureGuard implements CanActivate {
       .update(`${timestamp}:${rawBody}`)
       .digest('hex');
 
-    if (!timingSafeEqual(expected, signature)) {
+    if (!safeCompare(expected, signature)) {
       this.logger.warn(
         `InternalSignatureGuard: invalid signature on ${request.method} ${request.path}`,
       );
@@ -81,12 +82,12 @@ export class InternalSignatureGuard implements CanActivate {
 /**
  * Constant-time string comparison to prevent timing attacks.
  */
-function timingSafeEqual(a: string, b: string): boolean {
+function safeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
   return (
     bufA.length === bufB.length &&
-    require('crypto').timingSafeEqual(bufA, bufB)
+    timingSafeEqual(bufA, bufB)
   );
 }

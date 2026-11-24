@@ -1,8 +1,38 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { DecentralizedStorageService } from './decentralized-storage.service';
+import { IpfsPinningService } from './ipfs-pinning.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { UploadMediaDto, PinMediaDto } from './dto/storage.dto';
+import { Event } from '../events/entities/event.entity';
+import { Role } from '../common/decorators/roles.decorator';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+import {
+  UploadMediaDto,
+  PinMediaDto,
+  MigrateMediaDto,
+  PinToIpfsDto,
+  PinToIpfsResponseDto,
+  PinStatusResponseDto,
+  MigrateUnpinnedAssetsDto,
+  MigrateUnpinnedAssetsResponseDto,
+} from './dto/storage.dto';
 
 @ApiTags('Decentralized Storage')
 @ApiBearerAuth()
@@ -12,15 +42,51 @@ import { UploadMediaDto, PinMediaDto } from './dto/storage.dto';
 @ApiResponse({ status: 403, description: 'Forbidden' })
 @ApiResponse({ status: 404, description: 'Stored media not found' })
 export class DecentralizedStorageController {
-  constructor(private readonly storageService: DecentralizedStorageService) {}
+  constructor(
+    private readonly storageService: DecentralizedStorageService,
+    private readonly pinning: IpfsPinningService,
+    @InjectRepository(Event) private readonly events: Repository<Event>,
+  ) {}
+
+  private async requireOwner(eventId: string, req: AuthenticatedRequest) {
+    const event = await this.events.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.organizerId !== req.user.id && req.user.role !== Role.ADMIN) {
+      throw new ForbiddenException('Only the event organizer can manage media');
+    }
+  }
+
+  @Post('migrate')
+  async migrate(
+    @Body() dto: MigrateMediaDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.requireOwner(dto.eventId, req);
+    return this.pinning.migrate_unpinned_assets(dto.eventId, dto.hashes);
+  }
+
+  @Get('status/:hash')
+  status(@Param('hash') hash: string) {
+    return this.pinning.verify_pin_status(hash);
+  }
 
   @Post('upload')
   @ApiOperation({ summary: 'Upload event media to decentralized storage' })
   @ApiResponse({ status: 201, description: 'Media uploaded' })
   @ApiResponse({ status: 400, description: 'Invalid media payload' })
   @ApiResponse({ status: 422, description: 'Media upload failed' })
-  uploadMedia(@Body() dto: UploadMediaDto) {
-    return this.storageService.upload_media_to_decentralized_storage(dto.eventId, dto.fileName, dto.mimeType, dto.content);
+  async uploadMedia(
+    @Body() dto: UploadMediaDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.requireOwner(dto.eventId, req);
+    return this.storageService.upload_media_to_decentralized_storage(
+      dto.eventId,
+      dto.fileName,
+      dto.mimeType,
+      dto.content,
+      dto.contentEncoding,
+    );
   }
 
   @Post('pin')
@@ -28,7 +94,8 @@ export class DecentralizedStorageController {
   @ApiResponse({ status: 201, description: 'Media pinned' })
   @ApiResponse({ status: 400, description: 'Invalid media hash' })
   @ApiResponse({ status: 422, description: 'Media could not be pinned' })
-  pinMedia(@Body() dto: PinMediaDto) {
+  async pinMedia(@Body() dto: PinMediaDto, @Req() req: AuthenticatedRequest) {
+    await this.requireOwner(dto.eventId, req);
     return this.storageService.pin_event_media(dto.eventId, dto.hash);
   }
 
@@ -37,5 +104,57 @@ export class DecentralizedStorageController {
   @ApiResponse({ status: 200, description: 'Stored media returned' })
   retrieveMedia(@Param('hash') hash: string) {
     return this.storageService.retrieve_media_by_hash(hash);
+  }
+
+  @Post('pin-to-ipfs')
+  @ApiOperation({
+    summary: 'Pin event media assets to IPFS with optional redundant pinning',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Asset pinned to IPFS',
+    type: PinToIpfsResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'IPFS not configured or invalid payload',
+  })
+  async pinToIpfs(
+    @Body() dto: PinToIpfsDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PinToIpfsResponseDto> {
+    await this.requireOwner(dto.eventId, req);
+    return this.pinning.pin_to_ipfs(dto.eventId, dto.hash);
+  }
+
+  @Get('verify-pin/:hash')
+  @ApiOperation({
+    summary: 'Verify whether an IPFS hash is currently pinned and accessible',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pin status returned',
+    type: PinStatusResponseDto,
+  })
+  verifyPinStatus(@Param('hash') hash: string): Promise<PinStatusResponseDto> {
+    return this.pinning.verify_pin_status(hash);
+  }
+
+  @Post('migrate-unpinned')
+  @ApiOperation({
+    summary: 'Scan for unpinned event assets and migrate them to IPFS pinning',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Migration complete',
+    type: MigrateUnpinnedAssetsResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'IPFS not configured' })
+  async migrateUnpinnedAssets(
+    @Body() dto: MigrateUnpinnedAssetsDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<MigrateUnpinnedAssetsResponseDto> {
+    await this.requireOwner(dto.eventId, req);
+    return this.pinning.migrate_unpinned_assets(dto.eventId, dto.hashes);
   }
 }

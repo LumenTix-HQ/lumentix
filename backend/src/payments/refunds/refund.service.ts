@@ -722,6 +722,7 @@ export class RefundService {
     }
 
     if (startDate) {
+      // Cutoff: no refund if the event (or first event of a season pass) starts within REFUND_CUTOFF_HOURS
       const cutoff = Number(process.env.REFUND_CUTOFF_HOURS ?? 24);
       const hoursToEvent = (new Date(startDate).getTime() - Date.now()) / 3_600_000;
       if (hoursToEvent < cutoff) {
@@ -730,14 +731,8 @@ export class RefundService {
           reason: `Too close to event start`,
           refundAmount: 0,
         };
-    // Check cutoff: no refund if event starts within REFUND_CUTOFF_HOURS
-    const event = await this.eventsRepository.findOne({
-      where: { id: payment.eventId },
-      select: ['id', 'startDate'],
-    });
+      }
 
-    if (event?.startDate) {
-      const hoursToEvent = (new Date(event.startDate).getTime() - Date.now()) / 3_600_000;
       const proximityResult = this.refundCalculator.calculateRefundByEventProximity(
         hoursToEvent,
         Number(payment.amount),
@@ -796,6 +791,32 @@ export class RefundService {
   /**
    * Refund a single confirmed payment. Used for individual registration cancellations.
    */
+  /** Refund every confirmed payment of a cancelled event. */
+  async refundEvent(eventId: string): Promise<RefundResultDto[]> {
+    return this.refundAllForEvent(eventId);
+  }
+
+  /**
+   * Refund one payment. `userId` is the payment owner and is verified so a
+   * caller cannot trigger a refund for somebody else's payment.
+   */
+  async processRefund(
+    paymentId: string,
+    userId?: string,
+  ): Promise<RefundResultDto> {
+    if (userId !== undefined) {
+      const payment = await this.paymentsRepository.findOne({
+        where: { id: paymentId },
+      });
+      if (payment && payment.userId !== userId) {
+        throw new BadRequestException(
+          `Payment "${paymentId}" does not belong to user "${userId}".`,
+        );
+      }
+    }
+    return this.refundSinglePayment(paymentId);
+  }
+
   async refundSinglePayment(paymentId: string): Promise<RefundResultDto> {
     const payment = await this.paymentsRepository.findOne({
       where: { id: paymentId },
@@ -892,7 +913,6 @@ export class RefundService {
         user.stellarPublicKey,
         String(amount),
         payment.currency,
-        undefined,
         payment.id,
       );
 

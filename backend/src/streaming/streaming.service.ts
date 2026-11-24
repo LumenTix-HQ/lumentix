@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Repository } from 'typeorm';
+import { TicketEntity } from '../tickets/entities/ticket.entity';
+import { In, Repository } from 'typeorm';
 import { Event } from '../events/entities/event.entity';
 import { StreamingConfig } from './entities/streaming-config.entity';
 import {
@@ -14,7 +15,18 @@ import {
   OptimizeStreamQualityDto,
   StreamDeliveryResponseDto,
   StreamPerformanceResponseDto,
+  ViewerBandwidthResponseDto,
+  ViewerBitrateTierResponseDto,
 } from './dto/streaming.dto';
+
+const BITRATE_TIERS = {
+  '1080p': 4_500,
+  '720p': 2_500,
+  '480p': 800,
+} as const;
+
+type BitrateTier = keyof typeof BITRATE_TIERS;
+type ViewerBitrateTier = 'auto' | BitrateTier;
 
 @Injectable()
 export class StreamingService {
@@ -26,7 +38,105 @@ export class StreamingService {
     @InjectRepository(Event)
     private readonly eventRepo: Repository<Event>,
     private readonly configService: ConfigService,
+    @InjectRepository(TicketEntity)
+    private readonly ticketRepo: Repository<TicketEntity>,
   ) {}
+
+  async viewerPlayback(eventId: string, viewerId: string) {
+    const event = await this.eventRepo.findOne({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (
+      event.organizerId !== viewerId &&
+      !(await this.ticketRepo.exists({
+        where: { eventId, ownerId: viewerId, status: In(['valid', 'used']) },
+      }))
+    )
+      throw new ForbiddenException('A ticket is required to watch this event');
+    const config = await this.streamingRepo.findOne({ where: { eventId } });
+    if (!config?.streamUrl)
+      throw new NotFoundException('The event stream is not available yet');
+    return this.toDeliveryResponse(config);
+  }
+
+  async report_buffering_event(
+    eventId: string,
+    viewerId: string,
+    durationMs: number,
+    bandwidthKbps: number,
+  ) {
+    await this.viewerPlayback(eventId, viewerId);
+    // Structured telemetry for the deployment's log/metrics collector.
+    this.logger.log({
+      metric: 'stream_buffering',
+      eventId,
+      durationMs,
+      bandwidthKbps,
+    });
+    return { accepted: true };
+  }
+
+  /**
+   * Convert a viewer's measured bandwidth into the highest tier that should
+   * play without starving the buffer (#1557). The ticket check in
+   * `viewerPlayback` keeps this telemetry eligible viewers only.
+   */
+  async detect_viewer_bandwidth(
+    eventId: string,
+    viewerId: string,
+    bandwidthKbps: number,
+  ): Promise<ViewerBandwidthResponseDto> {
+    await this.viewerPlayback(eventId, viewerId);
+
+    const measured = Math.max(0, bandwidthKbps);
+    const recommendedTier: BitrateTier =
+      measured >= BITRATE_TIERS['1080p']
+        ? '1080p'
+        : measured >= BITRATE_TIERS['720p']
+          ? '720p'
+          : '480p';
+
+    this.logger.log({
+      metric: 'viewer_bandwidth_detected',
+      eventId,
+      viewerId,
+      bandwidthKbps: measured,
+      recommendedTier,
+    });
+
+    return { bandwidthKbps: measured, recommendedTier };
+  }
+
+  /**
+   * Apply a viewer's manual tier override, or restore `auto` (#1557).
+   * `auto` resolves to the ladder's 720p rung until a fresh measurement
+   * recommends another tier.
+   */
+  async switch_bitrate_tier(
+    eventId: string,
+    viewerId: string,
+    tier: ViewerBitrateTier,
+  ): Promise<ViewerBitrateTierResponseDto> {
+    await this.viewerPlayback(eventId, viewerId);
+
+    const bitrateKbps =
+      tier === 'auto' ? BITRATE_TIERS['720p'] : BITRATE_TIERS[tier];
+
+    this.logger.log({
+      metric: 'viewer_bitrate_tier_switched',
+      eventId,
+      viewerId,
+      tier,
+      bitrateKbps,
+    });
+
+    return {
+      eventId,
+      viewerId,
+      tier,
+      bitrateKbps,
+      adaptive: tier === 'auto',
+    };
+  }
 
   async manageContentDelivery(
     eventId: string,
@@ -63,7 +173,7 @@ export class StreamingService {
     dto: OptimizeStreamQualityDto,
   ): Promise<StreamDeliveryResponseDto> {
     const event = await this.requireOrganizerEvent(eventId, organizerId);
-    let config = await this.streamingRepo.findOne({ where: { eventId } });
+    const config = await this.streamingRepo.findOne({ where: { eventId } });
 
     if (!config || !config.streamUrl) {
       throw new NotFoundException(
@@ -97,7 +207,9 @@ export class StreamingService {
 
     const config = await this.streamingRepo.findOne({ where: { eventId } });
     if (!config) {
-      throw new NotFoundException('No streaming configuration found for this event');
+      throw new NotFoundException(
+        'No streaming configuration found for this event',
+      );
     }
 
     const stored = config.performanceMetrics ?? {};
@@ -175,7 +287,9 @@ export class StreamingService {
     return 'poor';
   }
 
-  private toDeliveryResponse(config: StreamingConfig): StreamDeliveryResponseDto {
+  private toDeliveryResponse(
+    config: StreamingConfig,
+  ): StreamDeliveryResponseDto {
     const cdn =
       config.cdnBaseUrl ??
       this.configService.get<string>('CDN_BASE_URL') ??

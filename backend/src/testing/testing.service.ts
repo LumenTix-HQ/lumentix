@@ -59,12 +59,15 @@ export class TestingService {
     this.logger.log(`Starting event lifecycle test for event ${eventId}`);
     const results: TestResult[] = [];
     const startTime = Date.now();
+    let event: Event | null = null;
+    let originalStatus: EventStatus | undefined;
 
     try {
-      const event = await this.eventRepository.findOne({ where: { id: eventId } });
+      event = await this.eventRepository.findOne({ where: { id: eventId } });
       if (!event) {
         throw new Error('Event not found');
       }
+      originalStatus = event.status;
 
       // Test 1: Draft to Published transition
       results.push(await this.testStateTransition(event, EventStatus.DRAFT, EventStatus.PUBLISHED));
@@ -99,6 +102,13 @@ export class TestingService {
         duration: Date.now() - startTime,
         error: error.message,
       });
+    } finally {
+      // The transition tests drive the real event through DRAFT → … → CANCELLED;
+      // put it back so running the suite never leaves a live event cancelled.
+      if (event && originalStatus !== undefined && event.status !== originalStatus) {
+        event.status = originalStatus;
+        await this.eventRepository.save(event);
+      }
     }
 
     const passedTests = results.filter((r) => r.passed).length;
@@ -544,7 +554,7 @@ export class TestingService {
     const testName = 'concurrent_purchases';
     try {
       // Simulate concurrent ticket purchases
-      const promises = Array.from({ length: 5 }, () =>
+      const tickets = Array.from({ length: 5 }, () =>
         this.ticketRepository.create({
           eventId: event.id,
           userId: 'test-user-id',
@@ -554,7 +564,9 @@ export class TestingService {
         }),
       );
 
-      await Promise.all(promises);
+      if (tickets.length !== 5) {
+        throw new Error('Expected 5 simulated ticket purchases');
+      }
       return {
         testCase: testName,
         passed: true,

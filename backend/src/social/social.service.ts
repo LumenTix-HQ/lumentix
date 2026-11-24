@@ -5,9 +5,12 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import { randomBytes, randomInt } from 'crypto';
 import {
   ProfileVisibility,
   SocialProfile,
@@ -21,9 +24,14 @@ import {
   MeetupGroupStatus,
 } from './entities/meetup-group.entity';
 import { MeetupMember, MeetupMemberRole } from './entities/meetup-member.entity';
+import { Referral, ReferralStatus, RewardType } from './entities/referral.entity';
 import { EnableSocialFeaturesDto } from './dto/enable-social-features.dto';
 import { ConnectAttendeesDto } from './dto/connect-attendees.dto';
 import { CreateMeetupGroupDto } from './dto/create-meetup-group.dto';
+import { GenerateReferralLinkDto } from './dto/generate-referral-link.dto';
+import { TrackReferralConversionDto } from './dto/track-referral-conversion.dto';
+import { IssueReferralRewardDto } from './dto/issue-referral-reward.dto';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 
 @Injectable()
 export class SocialService {
@@ -38,6 +46,12 @@ export class SocialService {
     private readonly meetupGroupRepo: Repository<MeetupGroup>,
     @InjectRepository(MeetupMember)
     private readonly meetupMemberRepo: Repository<MeetupMember>,
+    @InjectRepository(Referral)
+    private readonly referralRepo: Repository<Referral>,
+    @Optional()
+    private readonly loyaltyService?: LoyaltyService,
+    @Optional()
+    private readonly configService?: ConfigService,
   ) {}
 
   // ── Enable / Update Social Features ───────────────────────────────────────
@@ -490,5 +504,267 @@ export class SocialService {
       where: { groupId },
       order: { joinedAt: 'ASC' },
     });
+  }
+
+  // ── Social Referral Incentive Program (#1536) ──────────────────────────────
+
+  /**
+   * Generates a unique, collision-resistant referral code.
+   */
+  private generateUniqueReferralCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = 'REF-';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(randomInt(0, chars.length));
+    }
+    return code;
+  }
+
+  /**
+   * Generates a unique social share referral link for a user.
+   * Rewarding users when their shared links result in new ticket purchases.
+   */
+  async generate_referral_link(
+    userId: string,
+    dto: GenerateReferralLinkDto = {},
+  ): Promise<Referral> {
+    if (!userId) {
+      throw new BadRequestException('User ID is required to generate a referral link');
+    }
+
+    let code = '';
+    let isUnique = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      code = this.generateUniqueReferralCode();
+      const existing = await this.referralRepo.findOne({ where: { code } });
+      if (!existing) {
+        isUnique = true;
+        break;
+      }
+    }
+
+    if (!isUnique) {
+      code = `REF-${randomBytes(4).toString('hex').toUpperCase()}`;
+    }
+
+    const baseUrl =
+      this.configService?.get<string>('FRONTEND_URL') ||
+      process.env.FRONTEND_URL ||
+      'https://lumentix.com';
+
+    const queryParams = new URLSearchParams({ ref: code });
+    if (dto.eventId) {
+      queryParams.set('eventId', dto.eventId);
+    }
+    const link = `${baseUrl}/tickets?${queryParams.toString()}`;
+
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days validity
+
+    const rewardType = dto.rewardType ?? RewardType.LOYALTY_POINTS;
+    const rewardValue = rewardType === RewardType.DISCOUNT_CODE ? 10 : 100;
+
+    const referral = this.referralRepo.create({
+      referrerId: userId,
+      code,
+      link,
+      status: ReferralStatus.PENDING,
+      rewardIssued: false,
+      rewardType,
+      rewardValue,
+      eventId: dto.eventId ?? null,
+      expiresAt,
+    });
+
+    const saved = await this.referralRepo.save(referral);
+    this.logger.log(`Generated referral link ${code} for user ${userId}`);
+    return saved;
+  }
+
+  /**
+   * Tracks a conversion when a referred friend purchases a ticket.
+   * Enforces that referrers cannot refer themselves and codes are not expired.
+   */
+  async track_referral_conversion(
+    refereeId: string,
+    dto: TrackReferralConversionDto,
+  ): Promise<Referral> {
+    if (!refereeId) {
+      throw new BadRequestException('Referee ID is required');
+    }
+
+    const referral = await this.referralRepo.findOne({
+      where: { code: dto.referralCode },
+    });
+
+    if (!referral) {
+      throw new NotFoundException(`Referral code "${dto.referralCode}" not found`);
+    }
+
+    if (referral.referrerId === refereeId) {
+      throw new BadRequestException('Self-referrals are not permitted; referrer cannot be referee');
+    }
+
+    if (referral.status === ReferralStatus.CONVERTED) {
+      throw new BadRequestException('Referral code has already been converted');
+    }
+
+    if (referral.expiresAt && referral.expiresAt.getTime() < Date.now()) {
+      referral.status = ReferralStatus.EXPIRED;
+      await this.referralRepo.save(referral);
+      throw new BadRequestException('Referral code has expired');
+    }
+
+    referral.refereeId = refereeId;
+    referral.ticketId = dto.ticketId;
+    if (dto.eventId) {
+      referral.eventId = dto.eventId;
+    }
+    referral.status = ReferralStatus.CONVERTED;
+    referral.convertedAt = new Date();
+
+    const updated = await this.referralRepo.save(referral);
+    this.logger.log(
+      `Referral ${referral.code} converted for ticket ${dto.ticketId} by referee ${refereeId}`,
+    );
+
+    // Automatically trigger reward issuance for the referrer
+    try {
+      await this.issue_referral_reward(referral.id);
+    } catch (err) {
+      this.logger.warn(
+        `Automated reward issuance postponed for referral ${referral.id}: ${(err as Error).message}`,
+      );
+    }
+
+    return updated;
+  }
+
+  /**
+   * Issues referral rewards (loyalty points or discount codes) to the referrer.
+   */
+  async issue_referral_reward(
+    referralId: string,
+    rewardType?: RewardType,
+  ): Promise<{
+    referral: Referral;
+    rewardDetails: { type: RewardType; value: number; discountCode?: string };
+  }> {
+    const referral = await this.referralRepo.findOne({ where: { id: referralId } });
+    if (!referral) {
+      throw new NotFoundException(`Referral with ID "${referralId}" not found`);
+    }
+
+    if (referral.status !== ReferralStatus.CONVERTED) {
+      throw new BadRequestException('Referral must be in CONVERTED status before issuing reward');
+    }
+
+    if (referral.rewardIssued) {
+      return {
+        referral,
+        rewardDetails: {
+          type: referral.rewardType,
+          value: referral.rewardValue,
+          discountCode: referral.discountCode ?? undefined,
+        },
+      };
+    }
+
+    const resolvedType = rewardType ?? referral.rewardType;
+    let discountCode: string | undefined = undefined;
+
+    if (resolvedType === RewardType.LOYALTY_POINTS) {
+      const pointsToAward = referral.rewardValue || 100;
+      if (this.loyaltyService) {
+        try {
+          await this.loyaltyService.awardLoyaltyPoints({
+            userId: referral.referrerId,
+            points: pointsToAward,
+            eventId: referral.eventId ?? undefined,
+            description: `Referral bonus for code ${referral.code}`,
+          });
+        } catch (err) {
+          this.logger.warn(
+            `Failed to credit loyalty points via LoyaltyService: ${(err as Error).message}`,
+          );
+        }
+      }
+    } else if (resolvedType === RewardType.DISCOUNT_CODE) {
+      discountCode = `REF-${randomBytes(3).toString('hex').toUpperCase()}`;
+      referral.discountCode = discountCode;
+    }
+
+    referral.rewardIssued = true;
+    referral.rewardType = resolvedType;
+    const saved = await this.referralRepo.save(referral);
+
+    this.logger.log(
+      `Issued referral reward (${resolvedType}) for referral ${referral.id} to user ${referral.referrerId}`,
+    );
+
+    return {
+      referral: saved,
+      rewardDetails: {
+        type: resolvedType,
+        value: referral.rewardValue,
+        discountCode,
+      },
+    };
+  }
+
+  // CamelCase aliases
+  generateReferralLink = this.generate_referral_link.bind(this);
+  trackReferralConversion = this.track_referral_conversion.bind(this);
+  issueReferralReward = this.issue_referral_reward.bind(this);
+
+  /**
+   * Retrieves all referrals created by a specific user.
+   */
+  async getMyReferrals(userId: string): Promise<Referral[]> {
+    return this.referralRepo.find({
+      where: { referrerId: userId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Validates and retrieves referral info by code.
+   */
+  async getReferralByCode(code: string): Promise<Referral> {
+    const referral = await this.referralRepo.findOne({ where: { code } });
+    if (!referral) {
+      throw new NotFoundException(`Referral code "${code}" not found`);
+    }
+    return referral;
+  }
+
+  /**
+   * Retrieves summary statistics of referrals and earned rewards for a user.
+   */
+  async getReferralStats(userId: string): Promise<{
+    totalCreated: number;
+    convertedCount: number;
+    pendingCount: number;
+    totalPointsEarned: number;
+    discountCodesEarned: number;
+  }> {
+    const referrals = await this.getMyReferrals(userId);
+    const converted = referrals.filter((r) => r.status === ReferralStatus.CONVERTED);
+    const pending = referrals.filter((r) => r.status === ReferralStatus.PENDING);
+    const pointsRewards = converted.filter(
+      (r) => r.rewardIssued && r.rewardType === RewardType.LOYALTY_POINTS,
+    );
+    const discountRewards = converted.filter(
+      (r) => r.rewardIssued && r.rewardType === RewardType.DISCOUNT_CODE,
+    );
+
+    const totalPointsEarned = pointsRewards.reduce((sum, r) => sum + (r.rewardValue || 0), 0);
+
+    return {
+      totalCreated: referrals.length,
+      convertedCount: converted.length,
+      pendingCount: pending.length,
+      totalPointsEarned,
+      discountCodesEarned: discountRewards.length,
+    };
   }
 }

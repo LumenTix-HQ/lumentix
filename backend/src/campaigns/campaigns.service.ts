@@ -77,6 +77,14 @@ export class CampaignsService {
     return this.variantRepository.save(variant);
   }
 
+  async create_ab_test_variant(
+    campaignId: string,
+    dto: CreateAbTestVariantDto,
+    requesterId: string,
+  ): Promise<EmailCampaignVariant> {
+    return this.createAbTestVariant(campaignId, dto, requesterId);
+  }
+
   async listVariants(campaignId: string): Promise<EmailCampaignVariant[]> {
     return this.variantRepository.find({ where: { campaignId } });
   }
@@ -98,13 +106,33 @@ export class CampaignsService {
       throw new BadRequestException('At least two variants are required to split an audience');
     }
 
-    const weights = variants.map(
-      (v) => dto.variantWeights?.[v.id] ?? 1,
-    );
+    if (dto.recipientUserIds.length === 0) {
+      throw new BadRequestException('At least one recipient is required to split an audience');
+    }
+
+    if (new Set(dto.recipientUserIds).size !== dto.recipientUserIds.length) {
+      throw new BadRequestException('Recipient user ids must be unique');
+    }
+
+    const variantIds = new Set(variants.map((variant) => variant.id));
+    for (const [variantId, weight] of Object.entries(dto.variantWeights ?? {})) {
+      if (!variantIds.has(variantId)) {
+        throw new BadRequestException(`Variant "${variantId}" does not belong to this campaign`);
+      }
+      if (!Number.isFinite(weight) || weight < 0) {
+        throw new BadRequestException('Variant weights must be finite, non-negative numbers');
+      }
+    }
+
+    const weights = variants.map((v) => dto.variantWeights?.[v.id] ?? 1);
     const totalWeight = weights.reduce((sum, w) => sum + w, 0);
     if (totalWeight <= 0) {
       throw new BadRequestException('Variant weights must sum to a positive number');
     }
+
+    const users = await Promise.all(
+      dto.recipientUserIds.map((userId) => this.usersService.findById(userId)),
+    );
 
     const cumulative: number[] = [];
     let runningTotal = 0;
@@ -122,8 +150,7 @@ export class CampaignsService {
       const variantIndex = cumulative.findIndex((threshold) => position < threshold);
       const variant = variants[variantIndex === -1 ? variants.length - 1 : variantIndex];
 
-      const user = await this.usersService.findById(userId).catch(() => null);
-      if (!user) continue;
+      const user = users[i];
 
       const recipient = this.recipientRepository.create({
         campaignId,
@@ -161,6 +188,14 @@ export class CampaignsService {
     };
   }
 
+  async split_audience(
+    campaignId: string,
+    dto: SplitAudienceDto,
+    requesterId: string,
+  ): Promise<AudienceSplitResult> {
+    return this.splitAudience(campaignId, dto, requesterId);
+  }
+
   async selectWinningVariant(
     campaignId: string,
     requesterId: string,
@@ -168,9 +203,16 @@ export class CampaignsService {
     const campaign = await this.getCampaignById(campaignId);
     this.assertOwner(campaign, requesterId);
 
+    if (campaign.status !== 'testing') {
+      throw new BadRequestException('A winner can only be selected after the audience has been split');
+    }
+
     const variants = await this.variantRepository.find({ where: { campaignId } });
     if (variants.length === 0) {
       throw new BadRequestException('This campaign has no variants');
+    }
+    if (!variants.some((variant) => variant.sentCount > 0)) {
+      throw new BadRequestException('No campaign emails have been sent yet');
     }
 
     const scores = variants.map((v) => {
@@ -188,6 +230,13 @@ export class CampaignsService {
     await this.campaignRepository.save(campaign);
 
     return { campaign, winner, scores };
+  }
+
+  async select_winning_variant(
+    campaignId: string,
+    requesterId: string,
+  ): Promise<WinningVariantResult> {
+    return this.selectWinningVariant(campaignId, requesterId);
   }
 
   async trackOpen(recipientId: string): Promise<void> {

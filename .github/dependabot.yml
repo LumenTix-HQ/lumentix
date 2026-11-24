@@ -9,3 +9,7 @@ updates:
     labels:
       - dependencies
       - security
+    groups:
+      nestjs:
+        patterns:
+          - "@nestjs/*"

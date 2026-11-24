@@ -1,12 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsEmail,
-  IsEnum,
-  IsOptional,
-  IsString,
-  MinLength,
-} from 'class-validator';
-import { UserRole } from '../../users/enums/user-role.enum';
+import { IsEmail, IsString, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({ example: 'user@example.com' })
@@ -17,9 +10,4 @@ export class RegisterDto {
   @IsString()
   @MinLength(8)
   password: string;
-
-  @ApiProperty({ enum: UserRole, required: false, default: UserRole.ADMIN })
-  @IsOptional()
-  @IsEnum(UserRole)
-  role?: UserRole;
 }

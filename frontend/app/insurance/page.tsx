@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   InsurancePolicy,
   InsurancePolicyStatus,
@@ -11,12 +12,6 @@ import {
 } from '@/types/insurance';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-function getToken(): string {
-  return typeof window !== 'undefined'
-    ? localStorage.getItem('lumentix_access_token') ?? ''
-    : '';
-}
 
 const STATUS_STYLES: Record<InsurancePolicyStatus, string> = {
   [InsurancePolicyStatus.ACTIVE]:    'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
@@ -121,10 +116,7 @@ function ClaimModal({
     setLoading(true);
     setError(null);
     try {
-      await apiClient.fileInsuranceClaim(
-        { ticketId: policy.ticketId, cancellationReason: reason },
-        getToken(),
-      );
+      await apiClient.fileInsuranceClaim({ ticketId: policy.ticketId, cancellationReason: reason });
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to file claim.');
@@ -195,7 +187,7 @@ function PurchaseForm({ onSuccess }: { onSuccess: () => void }) {
     setError(null);
     setSuccess(null);
     try {
-      const policy = await apiClient.purchaseInsurance({ ticketId: ticketId.trim() }, getToken()) as InsurancePolicy;
+      const policy = await apiClient.purchaseInsurance({ ticketId: ticketId.trim() });
       setSuccess(`Policy created! Premium: ${Number(policy.premiumPaid).toFixed(4)} ${policy.currency}`);
       setTicketId('');
       onSuccess();
@@ -243,28 +235,26 @@ export default function InsurancePage() {
   const [pool, setPool] = useState<InsurancePool | null>(null);
   const [loading, setLoading] = useState(true);
   const [claimTarget, setClaimTarget] = useState<InsurancePolicy | null>(null);
-  const [token, setToken] = useState('');
-
-  useEffect(() => {
-    setToken(getToken());
-  }, []);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const t = getToken();
-    if (!t) { setLoading(false); return; }
+    if (!isAuthenticated) { setLoading(false); return; }
     setLoading(true);
+    setError(null);
     try {
       const [p, pool] = await Promise.all([
-        apiClient.getMyInsurancePolicies(t) as Promise<InsurancePolicy[]>,
-        apiClient.getInsurancePool(t) as Promise<InsurancePool>,
+        apiClient.getMyInsurancePolicies(),
+        apiClient.getInsurancePool(),
       ]);
       setPolicies(p);
       setPool(pool);
-    } catch { /* show empty state */ }
-    finally { setLoading(false); }
-  }, []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load insurance policies.');
+    } finally { setLoading(false); }
+  }, [isAuthenticated]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (!authLoading) load(); }, [authLoading, load]);
 
   const handleClaimSuccess = () => {
     setClaimTarget(null);
@@ -293,7 +283,7 @@ export default function InsurancePage() {
         {pool && <PoolStats pool={pool} />}
 
         {/* Auth gate */}
-        {!token ? (
+        {!isAuthenticated && !authLoading ? (
           <div className="text-center py-16 text-gray-500">
             <div className="text-4xl mb-4">🔒</div>
             <p>Connect your wallet and sign in to manage insurance policies.</p>
@@ -303,6 +293,12 @@ export default function InsurancePage() {
             <PurchaseForm onSuccess={load} />
 
             <h2 className="text-lg font-semibold text-white mb-4">My Policies</h2>
+
+            {error && (
+              <div role="alert" className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
 
             {loading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

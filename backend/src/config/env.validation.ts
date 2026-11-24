@@ -24,14 +24,23 @@ export const envValidationSchema = Joi.object({
   PLATFORM_SECRET_KEY: Joi.string().required(),
 
   // Redis
+  // REDIS_URL takes precedence over the discrete variables when set.
+  REDIS_URL: Joi.string().uri({ scheme: ['redis', 'rediss'] }).optional(),
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
+  REDIS_USERNAME: Joi.string().allow('').optional(),
+  REDIS_PASSWORD: Joi.string().allow('').optional(),
+  REDIS_DB: Joi.number().integer().min(0).default(0),
+  REDIS_TLS: Joi.boolean().default(false),
 
   // Public API protection
   RATE_LIMIT_WINDOW_SECONDS: Joi.number().integer().positive().default(60),
   RATE_LIMIT_PER_IP: Joi.number().integer().positive().default(100),
   RATE_LIMIT_PER_API_KEY: Joi.number().integer().positive().default(1000),
   RATE_LIMIT_BLOCK_SECONDS: Joi.number().integer().positive().default(900),
+
+  // Age proof signing (falls back to JWT_SECRET when unset)
+  ZKP_SIGNING_SECRET: Joi.string().min(32).optional(),
 
   // Ticket Signing
   TICKET_SIGNING_SECRET: Joi.string().required(),
@@ -48,8 +57,18 @@ export const envValidationSchema = Joi.object({
   CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
 
   // Refund policy
-  REFUND_CUTOFF_HOURS: Joi.number().default(24),
-  FULL_REFUND_WINDOW_HOURS: Joi.number().default(48),
+  // The full-refund window must end before the cutoff, otherwise the partial
+  // tier never applies.
+  FULL_REFUND_WINDOW_HOURS: Joi.number().default(24),
+  REFUND_CUTOFF_HOURS: Joi.number()
+    .greater(Joi.ref('FULL_REFUND_WINDOW_HOURS'))
+    .default(72),
+
+  // Loyalty: balances expire after this many days without activity
+  LOYALTY_POINTS_INACTIVITY_DAYS: Joi.number().integer().min(1).default(365),
+
+  // Insurance: claims with coverage above this always go to a human reviewer
+  INSURANCE_AUTO_APPROVE_MAX_COVERAGE: Joi.number().min(0).default(500),
   PARTIAL_REFUND_RATE: Joi.number().default(0.5),
 
   // Audit retention
@@ -57,4 +76,18 @@ export const envValidationSchema = Joi.object({
 
   // Multi-signature payout
   MULTISIG_REQUIRED_SIGNATURES: Joi.number().default(2).min(1).max(10),
+
+  // Webhook delivery
+  WEBHOOK_SECRET: Joi.string().required(),
+
+  // Internal service-to-service
+  INTERNAL_SECRET: Joi.string().required(),
+
+  // Google OAuth
+  GOOGLE_CLIENT_ID: Joi.string().required(),
+  GOOGLE_CLIENT_SECRET: Joi.string().required(),
+  GOOGLE_CALLBACK_URL: Joi.string().uri().required(),
+
+  // Escrow encryption
+  ESCROW_ENCRYPTION_SECRET: Joi.string().required(),
 });

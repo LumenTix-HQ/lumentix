@@ -1,6 +1,5 @@
 import {
   Controller,
-  ForbiddenException,
   Get,
   Post,
   Put,
@@ -30,7 +29,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Express } from 'express';
+import { StorageService } from '../common/storage/storage.service';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -48,7 +47,6 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { TicketsService } from '../tickets/tickets.service';
-import { WebhooksService } from '../webhooks/webhooks.service';
 import { Event } from './entities/event.entity';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 
@@ -65,7 +63,7 @@ export class EventsController {
     private readonly eventsService: EventsService,
     @Inject(forwardRef(() => TicketsService))
     private readonly ticketsService: TicketsService,
-    private readonly webhooksService: WebhooksService,
+    private readonly storageService: StorageService,
   ) {}
 
   @Post()
@@ -186,7 +184,7 @@ export class EventsController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: AuthenticatedRequest,
   ) {
-    const { url } = await this.storageService.upload(file, `events/${id}`);
+    const url = await this.storageService.uploadFile(file, `events/${id}`);
     return this.eventsService.updateEventImage(id, url, req.user.id);
   }
 
@@ -399,6 +397,42 @@ export class EventsController {
     return this.eventsService.getCancellationStatus(id, req.user.id);
   }
 
+  @Post(':id/cancel-on-chain')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Cancel event on-chain for smart contract refunds' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'On-chain cancellation initiated' })
+  cancelOnChain(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.cancelEventOnChain(id, req.user.id);
+  }
+
+  @Post(':id/execute-mass-refund')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Execute an on-chain mass refund for all eligible ticket holders' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 201, description: 'On-chain mass refund completed' })
+  executeMassRefund(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.executeMassRefund(id, req.user.id);
+  }
+
+  @Get(':id/verify-refund-completion')
+  @Roles(Role.ORGANIZER)
+  @ApiOperation({ summary: 'Verify all refunds completed for cancelled event' })
+  @ApiParam({ name: 'id', description: 'Event UUID' })
+  @ApiResponse({ status: 200, description: 'Refund completion status' })
+  verifyRefundCompletion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.eventsService.verifyRefundCompletion(id, req.user.id);
+  }
+
   @Get(':id/stats')
   @Roles(Role.ORGANIZER)
   @ApiOperation({
@@ -571,26 +605,5 @@ export class EventsController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.eventsService.deleteEventImage(id, imageId, req.user.id);
-  }
-
-  @Get(':id/webhooks/deliveries')
-  @Roles(Role.ORGANIZER)
-  @ApiOperation({
-    summary: 'Get webhook delivery history',
-    description: 'Organizer-only. Returns the last 50 outbound webhook deliveries for this event.',
-  })
-  @ApiParam({ name: 'id', description: 'Event UUID' })
-  @ApiResponse({ status: 200, description: 'Webhook delivery records' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  @ApiResponse({ status: 404, description: 'Event not found' })
-  async getWebhookDeliveries(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    const event = await this.eventsService.getEventById(id);
-    if (event.organizerId !== req.user.id) {
-      throw new ForbiddenException();
-    }
-    return this.webhooksService.getDeliveries(id);
   }
 }

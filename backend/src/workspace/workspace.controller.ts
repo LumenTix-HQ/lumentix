@@ -69,4 +69,27 @@ export class WorkspaceController {
   ) {
     return this.workspaceService.syncWorkspaceChanges(id, req.user.id, dto.changes);
   }
+
+  @Get('workspace/:id/changes')
+  @ApiOperation({ summary: 'Get workspace changes history for real-time sync' })
+  @ApiParam({ name: 'id', description: 'Workspace UUID' })
+  @ApiResponse({ status: 200, description: 'Change history' })
+  getChanges(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.workspaceService.getWorkspaceChanges(id, req.user.id);
+  }
+
+  @Post('workspace/:id/resolve-conflict')
+  @ApiOperation({ summary: 'Manually resolve edit conflict' })
+  @ApiParam({ name: 'id', description: 'Workspace UUID' })
+  @ApiResponse({ status: 201, description: 'Conflict resolved' })
+  resolveConflict(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { field: string; resolution: 'accept' | 'reject'; payload?: any },
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.workspaceService.resolveEditConflictManual(id, req.user.id, dto.field, dto.resolution, dto.payload);
+  }
 }

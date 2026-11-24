@@ -1,12 +1,12 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import {
@@ -25,13 +25,16 @@ import {
   ResaleTransaction,
   ResaleStatus,
 } from './resale-transaction.entity';
+import { ResalePriceCeiling } from './resale-price-ceiling.entity';
 import { ListTicketForResaleDto } from './dto/list-ticket-resale.dto';
 import { BuyResaleTicketDto } from './dto/buy-resale-ticket.dto';
 import { SetPriceCeilingDto } from './dto/set-price-ceiling.dto';
 import { VerifyResalePriceDto } from './dto/verify-resale-price.dto';
 import { EnforceResaleComplianceDto } from './dto/enforce-resale-compliance.dto';
+import { FraudDetectionService } from './fraud-detection/fraud-detection.service';
+import { FraudRiskLevel } from './fraud-detection/fraud-flag.entity';
 
-const DEFAULT_DEFAULT_MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
+const DEFAULT_MAX_RESALE_MULTIPLIER = 1.5; // 150% of original price
 const ORGANIZER_FEE_BPS = 500; // 5% = 500 basis points
 
 /** #861: marketplace cache lifetime. The issue specifies 60s. */
@@ -50,9 +53,12 @@ export class ResaleService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(ResaleTransaction)
     private readonly resaleTransactionRepo: Repository<ResaleTransaction>,
+    @InjectRepository(ResalePriceCeiling)
+    private readonly ceilingRepo: Repository<ResalePriceCeiling>,
     private readonly stellarService: StellarService,
     private readonly auditService: AuditService,
     private readonly notificationService: NotificationService,
+    private readonly fraudDetectionService: FraudDetectionService,
     @Inject(CACHE_MANAGER)
     private readonly cache: Cache,
   ) {}
@@ -72,11 +78,11 @@ export class ResaleService {
     if (!event) throw new NotFoundException('Event not found');
 
     const originalPrice = Number(event.ticketPrice);
-    const maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
+    const maxAllowed = await this.getMaxAllowedPrice(ticket.eventId, originalPrice);
 
     if (dto.price > maxAllowed) {
       throw new BadRequestException(
-        `Resale price cannot exceed ${DEFAULT_MAX_RESALE_MULTIPLIER * 100}% of the original ticket price. ` +
+        `Resale price cannot exceed the maximum set for this event. ` +
         `Original price: ${originalPrice} ${event.currency}, max allowed: ${maxAllowed.toFixed(2)} ${dto.currency}.`,
       );
     }
@@ -127,7 +133,7 @@ export class ResaleService {
     const salePrice = Number(ticket.listingPrice);
     const originalPrice = Number(event.ticketPrice);
 
-    const maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
+    const maxAllowed = await this.getMaxAllowedPrice(ticket.eventId, originalPrice);
     if (salePrice > maxAllowed) {
       throw new BadRequestException(
         'This listing exceeds the maximum allowed resale price and has been invalidated.',
@@ -137,12 +143,47 @@ export class ResaleService {
     const organizerFee = parseFloat((salePrice * (ORGANIZER_FEE_BPS / 10000)).toFixed(7));
     const sellerPayout = parseFloat((salePrice - organizerFee).toFixed(7));
 
+    // #908: run fraud heuristics before final settlement. Low-risk trades
+    // proceed untouched; medium-risk trades are flagged for audit but not
+    // blocked (avoids unnecessarily blocking legitimate trades); high-risk
+    // trades are flagged, held, and rejected here so settlement never occurs.
+    const { analysis, flag } = await this.fraudDetectionService.evaluateTrade({
+      ticketId: ticket.id,
+      eventId: ticket.eventId,
+      buyerId,
+      sellerId,
+      price: salePrice,
+    });
+    if (analysis.riskLevel === FraudRiskLevel.HIGH) {
+      throw new ForbiddenException(
+        `Trade held for fraud review (flag ${flag?.id}). Reasons: ${analysis.reasons.join(', ')}.`,
+      );
+    }
+
     let txRecord: Awaited<ReturnType<StellarService['getTransaction']>>;
     try {
       txRecord = await this.stellarService.getTransaction(dto.transactionHash);
     } catch {
       throw new BadRequestException('Transaction not found on Stellar network');
     }
+
+    // A transaction hash may fund only one purchase.
+    const reused = await this.resaleTransactionRepo.findOne({
+      where: { transactionHash: dto.transactionHash },
+    });
+    if (reused) {
+      throw new BadRequestException(
+        'This transaction has already been used for a purchase',
+      );
+    }
+
+    const buyerWallet = await this.userRepo
+      .findOne({ where: { id: buyerId }, select: ['stellarPublicKey'] })
+      .then((u) => u?.stellarPublicKey);
+    if (!buyerWallet) {
+      throw new BadRequestException('Buyer has no linked Stellar wallet');
+    }
+    const listingCurrency = ticket.listingCurrency ?? 'XLM';
 
     const operations = await this.resolvePaymentOperations(txRecord);
     const sellerWallet = await this.userRepo
@@ -151,7 +192,17 @@ export class ResaleService {
 
     if (!sellerWallet) throw new BadRequestException('Seller has no linked Stellar wallet');
 
-    const matchingOp = operations.find((op) => op.to === sellerWallet);
+    const matchingOp = operations.find(
+      (op) =>
+        op.type === 'payment' &&
+        op.to === sellerWallet &&
+        // The payment must come from the buyer's own wallet...
+        (op.from ?? op.source_account) === buyerWallet &&
+        // ...in the listing's currency.
+        (listingCurrency === 'XLM'
+          ? op.asset_type === 'native'
+          : op.asset_code === listingCurrency),
+    );
     if (!matchingOp) throw new BadRequestException('Payment destination does not match seller wallet');
 
     const onChainAmount = parseFloat(matchingOp.amount);
@@ -378,8 +429,19 @@ export class ResaleService {
 
   // ── Price Ceiling Management ──────────────────────────────────────────────
 
-  /** Per-event price ceiling overrides: eventId -> ceilingMultiplierBps */
-  private readonly priceCeilings: Map<string, { ceilingMultiplierBps: number; absoluteCeiling: number }> = new Map();
+  /**
+   * Single source of truth for the resale price cap of an event: the
+   * organizer-configured ceiling (persisted in `resale_price_ceilings`) when
+   * one exists, otherwise the default multiplier of the original price.
+   */
+  private async getMaxAllowedPrice(eventId: string, originalPrice: number): Promise<number> {
+    const ceiling = await this.ceilingRepo.findOne({ where: { eventId } });
+    if (!ceiling) return originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
+
+    const multiplierMax = originalPrice * (Number(ceiling.ceilingMultiplierBps) / 10000);
+    const absoluteCeiling = Number(ceiling.absoluteCeiling);
+    return absoluteCeiling > 0 ? Math.min(multiplierMax, absoluteCeiling) : multiplierMax;
+  }
 
   /**
    * Set a custom price ceiling for an event.
@@ -405,10 +467,13 @@ export class ResaleService {
       throw new BadRequestException('ceilingMultiplierBps must be between 100 (1%) and 100000 (1000%)');
     }
 
-    this.priceCeilings.set(dto.eventId, {
-      ceilingMultiplierBps: multiplier,
-      absoluteCeiling: dto.absoluteCeiling,
-    });
+    await this.ceilingRepo.save(
+      this.ceilingRepo.create({
+        eventId: dto.eventId,
+        ceilingMultiplierBps: multiplier,
+        absoluteCeiling: dto.absoluteCeiling ?? 0,
+      }),
+    );
 
     const effectiveMaxMultiple = multiplier / 10000;
 
@@ -447,18 +512,7 @@ export class ResaleService {
     if (!event) throw new NotFoundException('Event not found');
 
     const originalPrice = Number(event.ticketPrice);
-    const ceiling = this.priceCeilings.get(dto.eventId);
-
-    let maxAllowed: number;
-
-    if (ceiling) {
-      const multiplierMax = originalPrice * (ceiling.ceilingMultiplierBps / 10000);
-      maxAllowed = ceiling.absoluteCeiling > 0
-        ? Math.min(multiplierMax, ceiling.absoluteCeiling)
-        : multiplierMax;
-    } else {
-      maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
-    }
+    const maxAllowed = await this.getMaxAllowedPrice(dto.eventId, originalPrice);
 
     const compliant = dto.proposedPrice <= maxAllowed;
 
@@ -489,18 +543,7 @@ export class ResaleService {
     if (!event) throw new NotFoundException('Event not found');
 
     const originalPrice = Number(event.ticketPrice);
-    const ceiling = this.priceCeilings.get(dto.eventId);
-
-    let maxAllowed: number;
-
-    if (ceiling) {
-      const multiplierMax = originalPrice * (ceiling.ceilingMultiplierBps / 10000);
-      maxAllowed = ceiling.absoluteCeiling > 0
-        ? Math.min(multiplierMax, ceiling.absoluteCeiling)
-        : multiplierMax;
-    } else {
-      maxAllowed = originalPrice * DEFAULT_MAX_RESALE_MULTIPLIER;
-    }
+    const maxAllowed = await this.getMaxAllowedPrice(dto.eventId, originalPrice);
 
     const wasAdjusted = dto.proposedPrice > maxAllowed;
     const enforcedPrice = wasAdjusted ? maxAllowed : dto.proposedPrice;
@@ -528,7 +571,17 @@ export class ResaleService {
 
   private async resolvePaymentOperations(
     txRecord: Awaited<ReturnType<StellarService['getTransaction']>>,
-  ): Promise<Array<{ type: string; to: string; amount: string; asset_type: string; asset_code?: string }>> {
+  ): Promise<
+    Array<{
+      type: string;
+      to: string;
+      from?: string;
+      source_account?: string;
+      amount: string;
+      asset_type: string;
+      asset_code?: string;
+    }>
+  > {
     try {
       const operationsHref = (txRecord as any)._links?.operations?.href;
       if (!operationsHref) return [];
@@ -536,7 +589,7 @@ export class ResaleService {
       if (!response.ok) return [];
       const payload = (await response.json()) as { _embedded: { records: any[] } };
       return payload._embedded.records.filter(
-        (operation: any) => operation.type === 'payment' || operation.type === 'create_account',
+        (operation: any) => operation.type === 'payment',
       );
     } catch {
       return [];

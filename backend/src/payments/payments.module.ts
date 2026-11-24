@@ -22,6 +22,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
 import { PaymentAnalyticsController } from './controllers/payment-analytics.controller';
 import { PaymentAnalyticsService } from './services/payment-analytics.service';
 import { OrganizerGuard } from './guards/organizer.guard';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { OrganizerGuard } from './guards/organizer.guard';
     AuditModule,
     NotificationModule,
     MultisigModule,
+    RedisModule,
     EscrowModule,
     forwardRef(() => RefundModule),
     WebhooksModule,

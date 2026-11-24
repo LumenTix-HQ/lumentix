@@ -33,7 +33,7 @@ export class SendEmailProcessor {
     }
 
     this.logger.debug(`Sending email: to=${to} subject="${subject}"`);
-    await this.mailerService.send(to, subject, html);
+    await this.mailerService.send({ to, subject, html });
     this.logger.log(`Email sent: to=${to}`);
   }
 

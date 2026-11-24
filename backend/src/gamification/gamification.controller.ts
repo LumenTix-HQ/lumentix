@@ -18,22 +18,45 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { GamificationService } from './gamification.service';
-import { CreateBadgeDto } from './dto/create-badge.dto';
-import { LeaderboardPeriod } from './entities/leaderboard-entry.entity';
+
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles, Role } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
-import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
+
+import { GamificationService } from './gamification.service';
+import { AwardAchievementDto } from './dto/award-achievement.dto';
+import { CreateAchievementDto } from './dto/create-achievement.dto';
+import { CreateBadgeDto } from './dto/create-badge.dto';
+import { CreateChallengeDto } from './dto/create-challenge.dto';
+import { RecordActivityDto } from './dto/record-activity.dto';
+import { LeaderboardPeriod } from './entities/leaderboard-entry.entity';
 
 @ApiTags('Gamification')
+@ApiBearerAuth()
 @Controller('gamification')
+@UseGuards(JwtAuthGuard)
 export class GamificationController {
   constructor(private readonly gamificationService: GamificationService) {}
 
-  // ── Badges ───────────────────────────────────────────────────────────────
+  // ── Profile ───────────────────────────────────────────────────────────────
+
+  @Get(['profile', 'profile/me'])
+  @ApiOperation({ summary: 'Get my gamification profile', description: 'Returns XP, level, counters, and leaderboard rank for the current user.' })
+  @ApiResponse({ status: 200, description: 'Gamification profile' })
+  getMyProfile(@Req() req: AuthenticatedRequest) {
+    return this.gamificationService.getProfile(req.user.id);
+  }
+
+  @Get('profile/:userId')
+  @ApiOperation({ summary: 'Get a user\'s gamification profile (public)' })
+  @ApiParam({ name: 'userId', description: 'User UUID' })
+  @ApiResponse({ status: 200, description: 'Gamification profile' })
+  getProfile(@Param('userId', ParseUUIDPipe) userId: string) {
+    return this.gamificationService.getProfile(userId);
+  }
+
+  // ── Badge catalogue ───────────────────────────────────────────────────────
 
   @Get('badges')
   @ApiOperation({ summary: 'List all badge definitions' })
@@ -52,8 +75,7 @@ export class GamificationController {
   }
 
   @Post('badges')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
   @ApiOperation({ summary: '[Admin] Create a badge definition' })
   @ApiResponse({ status: 201, description: 'Badge created.' })
@@ -61,80 +83,11 @@ export class GamificationController {
     return this.gamificationService.createBadge(dto);
   }
 
-  // ── User profile ─────────────────────────────────────────────────────────
-
-  @Get('profile/me')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiOperation({ summary: 'Get my gamification profile (XP, badges, rank)' })
-  @ApiResponse({ status: 200, description: 'User gamification profile.' })
-  getMyProfile(@Req() req: AuthenticatedRequest) {
-    return this.gamificationService.getUserProfile(req.user.id);
-  }
-
   @Get('profile/me/badges')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiOperation({ summary: 'List my earned badges' })
   @ApiResponse({ status: 200, description: 'Array of earned badges.' })
   getMyBadges(@Req() req: AuthenticatedRequest) {
     return this.gamificationService.getMyBadges(req.user.id);
-  }
-
-  @Get('profile/:userId')
-  @ApiOperation({ summary: "Get any user's gamification profile" })
-  @ApiParam({ name: 'userId', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'User gamification profile.' })
-  getUserProfile(@Param('userId', ParseUUIDPipe) userId: string) {
-    return this.gamificationService.getUserProfile(userId);
-  }
-
-  // ── Leaderboard ──────────────────────────────────────────────────────────
-
-  @Get('leaderboard')
-  @ApiOperation({ summary: 'Get leaderboard' })
-  @ApiQuery({ name: 'period', enum: LeaderboardPeriod, required: false })
-  @ApiQuery({ name: 'page', type: Number, required: false })
-  @ApiQuery({ name: 'limit', type: Number, required: false })
-  @ApiResponse({ status: 200, description: 'Leaderboard page.' })
-  getLeaderboard(
-    @Query('period') period?: LeaderboardPeriod,
-    @Query('page') page?: string,
-
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Roles, Role } from '../common/decorators/roles.decorator';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
-
-import { GamificationService } from './gamification.service';
-import { AwardAchievementDto } from './dto/award-achievement.dto';
-import { CreateAchievementDto } from './dto/create-achievement.dto';
-import { CreateChallengeDto } from './dto/create-challenge.dto';
-import { RecordActivityDto } from './dto/record-activity.dto';
-import { LeaderboardPeriod } from './entities/leaderboard-entry.entity';
-
-@ApiTags('Gamification')
-@ApiBearerAuth()
-@Controller('gamification')
-@UseGuards(JwtAuthGuard)
-export class GamificationController {
-  constructor(private readonly gamificationService: GamificationService) {}
-
-  // ── Profile ───────────────────────────────────────────────────────────────
-
-  @Get('profile')
-  @ApiOperation({ summary: 'Get my gamification profile', description: 'Returns XP, level, counters, and leaderboard rank for the current user.' })
-  @ApiResponse({ status: 200, description: 'Gamification profile' })
-  getMyProfile(@Req() req: AuthenticatedRequest) {
-    return this.gamificationService.getProfile(req.user.id);
-  }
-
-  @Get('profile/:userId')
-  @ApiOperation({ summary: 'Get a user\'s gamification profile (public)' })
-  @ApiParam({ name: 'userId', description: 'User UUID' })
-  @ApiResponse({ status: 200, description: 'Gamification profile' })
-  getProfile(@Param('userId', ParseUUIDPipe) userId: string) {
-    return this.gamificationService.getProfile(userId);
   }
 
   // ── Achievements ──────────────────────────────────────────────────────────
@@ -253,10 +206,6 @@ export class GamificationController {
   ) {
     return this.gamificationService.getLeaderboard(
       period ?? LeaderboardPeriod.ALL_TIME,
-      page ? Number(page) : 1,
-      limit ? Number(limit) : 20,
-    );
-  }
       limit ? parseInt(limit, 10) : 50,
     );
   }

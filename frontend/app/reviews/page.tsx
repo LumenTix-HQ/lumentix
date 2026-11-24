@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { EventReview, ReviewStatus, ReputationScore, PaginatedReviews } from '@/types/review';
+import { SentimentPanel } from '@/components/reviews/SentimentPanel';
 
 function getToken(): string {
   return typeof window !== 'undefined'
@@ -164,7 +165,6 @@ function SubmitReviewForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       await apiClient.submitReview(
         { eventId: eventId.trim(), ticketId: ticketId.trim(), rating, comment: comment || undefined },
-        getToken(),
       );
       setSuccess('Review submitted and attendance verified!');
       setEventId(''); setTicketId(''); setComment(''); setRating(5);
@@ -271,7 +271,7 @@ function ReputationLookup() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiClient.getOrganizerReputation(orgId.trim(), getToken()) as ReputationScore;
+      const data = await apiClient.getOrganizerReputation(orgId.trim()) as ReputationScore;
       setRep(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Not found.');
@@ -304,6 +304,30 @@ function ReputationLookup() {
   );
 }
 
+// ── Sentiment section (issue #1159) ───────────────────────────────────────────
+
+function SentimentSection() {
+  const [eventId, setEventId] = useState('');
+
+  return (
+    <div className="mb-10">
+      <div className="flex flex-col gap-3 mb-4">
+        <label className="block text-xs text-gray-400" htmlFor="sentiment-event-id">
+          Event UUID to analyse
+        </label>
+        <input
+          id="sentiment-event-id"
+          value={eventId}
+          onChange={e => setEventId(e.target.value)}
+          placeholder="550e8400-…"
+          className="w-full sm:max-w-xs bg-white/[0.05] border border-white/[0.1] rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500/50"
+        />
+      </div>
+      <SentimentPanel eventId={eventId} />
+    </div>
+  );
+}
+
 // ── page ──────────────────────────────────────────────────────────────────────
 
 export default function ReviewsPage() {
@@ -318,7 +342,7 @@ export default function ReviewsPage() {
     if (!t) { setLoading(false); return; }
     setLoading(true);
     try {
-      const data = await apiClient.getMyReviews(t) as PaginatedReviews;
+      const data = await apiClient.getMyReviews() as PaginatedReviews;
       setMyReviews(data.data ?? []);
     } catch { /* empty */ }
     finally { setLoading(false); }
@@ -367,6 +391,8 @@ export default function ReviewsPage() {
           <>
             <SubmitReviewForm onSuccess={loadMyReviews} />
             <ReputationLookup />
+
+            <SentimentSection />
 
             <h2 className="text-lg font-semibold text-white mb-4">My Reviews</h2>
             {loading ? (

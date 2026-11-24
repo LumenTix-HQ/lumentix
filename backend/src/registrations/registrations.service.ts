@@ -159,8 +159,22 @@ export class RegistrationsService {
       throw new BadRequestException('Registration cannot be cancelled');
     }
 
-    reg.status = RegistrationStatus.CANCELLED;
-    const saved = await this.repo.save(reg);
+    // Policy: plain self-service cancellation does not refund. The ticket is
+    // made non-scannable in the same transaction so it cannot be used at the
+    // gate after the seat is handed to the waitlist. Use cancelWithRefund for
+    // the refund path.
+    const saved = await this.dataSource.transaction(async (em) => {
+      reg.status = RegistrationStatus.CANCELLED;
+      const result = await em.save(Registration, reg);
+      if (reg.ticketId) {
+        await em.update(
+          TicketEntity,
+          { id: reg.ticketId },
+          { status: 'cancelled' },
+        );
+      }
+      return result;
+    });
 
     if (wasConfirmed) {
       await this.promoteFromWaitlist(reg.eventId);

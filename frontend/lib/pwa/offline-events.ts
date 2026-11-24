@@ -63,6 +63,16 @@ export function replayQueuedRequests(): void {
 }
 
 /**
+ * Ask the worker to drop everything it cached for the signed-in user.
+ *
+ * Called on logout (#1613). Event/ticket responses live in a dedicated cache,
+ * so clearing it is enough; the app shell is not user data and stays.
+ */
+export function clearOfflineEventData(): void {
+  controller()?.postMessage({ type: 'CLEAR_USER_CACHES' });
+}
+
+/**
  * Build the endpoint list for a set of events, so a listing page can hand the
  * worker exactly the detail pages a user might open next.
  */
@@ -72,3 +82,14 @@ export function eventDataUrls(eventIds: string[], apiBase = ''): string[] {
     ...eventIds.map((id) => `${apiBase}/api/events/${id}`),
   ];
 }
+
+// Aliases for Issue #1462
+export const precache_event_data = precacheEventData;
+export const queue_background_sync = replayQueuedRequests;
+export async function serveOfflineListing(request: Request | string): Promise<Response | null> {
+  if (typeof caches === 'undefined') return null;
+  const cache = await caches.open('lumentix-data-v1');
+  return (await cache.match(request)) ?? null;
+}
+export const serve_offline_listing = serveOfflineListing;
+

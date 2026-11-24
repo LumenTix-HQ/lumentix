@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule } from '@nestjs/config';
 import { AuditLog } from './entities/audit-log.entity';
 import { AuditService } from './audit.service';
+import { AuditController } from './audit.controller';
 import { AuditPruningJob } from './jobs/audit-pruning.job';
 
 @Module({
@@ -12,6 +13,7 @@ import { AuditPruningJob } from './jobs/audit-pruning.job';
     ScheduleModule.forRoot(),
     ConfigModule,
   ],
+  controllers: [AuditController],
   providers: [AuditService, AuditPruningJob],
   exports: [AuditService],
 })

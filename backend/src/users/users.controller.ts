@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -26,14 +27,15 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestRoleDto } from './dto/request-role.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
-import { Roles } from 'src/admin/roles.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from './enums/user-role.enum';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
 @ApiResponse({ status: 429, description: 'Too Many Requests' })
 export class UsersController {
@@ -160,15 +162,19 @@ export class UsersController {
   }
 
   @Get(':id')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Find a user by ID',
-    description: 'Retrieves user details.',
+    description:
+      'Admin-only. Retrieves user details; sensitive columns are excluded from the response.',
   })
   @ApiParam({ name: 'id', description: 'User UUID' })
   @ApiResponse({ status: 200, description: 'User found.' })
+  @ApiResponse({ status: 400, description: 'Invalid user id.' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Requires Admin role.' })
   @ApiResponse({ status: 404, description: 'User not found.' })
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.findById(id);
   }
 }

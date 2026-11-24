@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { EncryptionService } from './encryption.service';
+import { EncryptionService, ENCRYPTION_PROVIDER } from './encryption.service';
 import { LocalEncryptionProvider } from './providers/local-encryption.provider';
-import { ENCRYPTION_PROVIDER } from './encryption.service';
 
 const ENCRYPTION_SECRET = 'test-encryption-secret-for-sha256-derivation!';
 

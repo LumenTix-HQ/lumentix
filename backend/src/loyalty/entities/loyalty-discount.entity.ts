@@ -8,6 +8,8 @@ import {
 
 export enum DiscountStatus {
   ACTIVE = 'active',
+  /** Held against a pending payment; becomes USED once it is confirmed. */
+  RESERVED = 'reserved',
   USED = 'used',
   EXPIRED = 'expired',
 }
@@ -48,6 +50,10 @@ export class LoyaltyDiscount {
   /** Set when the discount is applied to a payment */
   @Column({ nullable: true, type: 'uuid' })
   usedOnEventId: string | null;
+
+  /** When the code was reserved for a pending payment. */
+  @Column({ nullable: true, type: 'timestamptz' })
+  reservedAt: Date | null;
 
   @CreateDateColumn()
   createdAt: Date;

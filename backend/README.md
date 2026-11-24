@@ -26,7 +26,7 @@ If it involves business logic, data, or blockchain operations — it happens her
 
 - **Framework:** NestJS
 - **Language:** TypeScript
-- **Runtime:** Node.js 18+
+- **Runtime:** Node.js 20+ (22 recommended — enforced by `engines`)
 - **Database:** PostgreSQL
 - **ORM:** TypeORM
 - **Blockchain SDK:** stellar-sdk
@@ -41,7 +41,7 @@ If it involves business logic, data, or blockchain operations — it happens her
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20+ (22 recommended; see `engines` in `package.json`)
 - PostgreSQL 14+
 - npm / yarn / pnpm
 - Stellar testnet account + test XLM
@@ -59,7 +59,7 @@ cp .env.example .env
 
 # update env values
 # then run migrations
-npm run typeorm:migration:run
+npm run migration:run
 
 # start dev server
 npm run start:dev
@@ -68,13 +68,13 @@ npm run start:dev
 API runs at:
 
 ```
-http://localhost:3000
+http://localhost:3001
 ```
 
 Swagger docs:
 
 ```
-http://localhost:3000/api-docs
+http://localhost:3001/api
 ```
 
 ---
@@ -266,7 +266,8 @@ Copy `.env.example` to `.env` and fill in the required values. The full list bel
 
 ```env
 # App
-PORT=3000
+# Keep the API off 3000 so it does not collide with `next dev`.
+PORT=3001
 NODE_ENV=development
 
 # Postgres
@@ -299,11 +300,18 @@ SMTP_PASS=your_smtp_password
 MAIL_FROM=no-reply@example.com
 
 # Redis
+# REDIS_URL takes precedence over the discrete values when set:
+#   rediss://default:password@host:6380/0
+REDIS_URL=
 REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_USERNAME=
+REDIS_PASSWORD=
+REDIS_DB=0
+REDIS_TLS=false
 
 # CORS
-CORS_ORIGIN=http://localhost:3000
+CORS_ORIGIN=http://localhost:3001
 ```
 
 ---
@@ -330,8 +338,11 @@ Swagger is enabled in `main.ts`:
 Docs available at:
 
 ```
-/api-docs
+http://localhost:3001/api
 ```
+
+Swagger is mounted only when `NODE_ENV !== 'production'` (`src/main.ts`), so it
+is not available on production deployments.
 
 ---
 
@@ -361,13 +372,16 @@ Docs available at:
 
 ```bash
 # generate migration
-npm run typeorm:migration:generate -- src/database/migrations/init
+npm run migration:generate -- -n Init
 
-# run migration
-npm run typeorm:migration:run
+# run pending migrations
+npm run migration:run
 
-# revert
-npm run typeorm:migration:revert
+# revert the last migration
+npm run migration:revert
+
+# verify no entity change is missing a migration (what CI runs)
+npm run check-migrations
 ```
 
 ---

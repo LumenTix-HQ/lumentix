@@ -1,3 +1,4 @@
+import { REDIS_CLIENT } from '../common/redis/redis.provider';
 import { Test, TestingModule } from '@nestjs/testing';
 import { RegistrationsController } from './registrations.controller';
 import { RegistrationsService } from './registrations.service';
@@ -24,6 +25,10 @@ describe('RegistrationsController', () => {
         {
           provide: RegistrationsService,
           useValue: mockRegistrationsService,
+        },
+        {
+          provide: REDIS_CLIENT,
+          useValue: { incr: jest.fn(), expire: jest.fn() },
         },
       ],
     }).compile();

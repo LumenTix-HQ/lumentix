@@ -8,6 +8,8 @@ import {
   Keypair,
   Asset,
   BASE_FEE,
+  Memo,
+  Operation,
 } from "@stellar/stellar-sdk";
 
 interface StellarPaymentProps {
@@ -57,13 +59,14 @@ export default function StellarPayment({
         fee: BASE_FEE,
         networkPassphrase: Networks.TESTNET,
       })
-        .addOperation({
-          type: "payment",
-          destination: destinationAddress,
-          asset: Asset.native(),
-          amount: amount,
-        })
-        .addMemo(Horizon.Memo.text(`Event Registration: ${eventId}`))
+        .addOperation(
+          Operation.payment({
+            destination: destinationAddress,
+            asset: Asset.native(),
+            amount: amount,
+          }),
+        )
+        .addMemo(Memo.text(`Event Registration: ${eventId}`))
         .setTimeout(30)
         .build();
 

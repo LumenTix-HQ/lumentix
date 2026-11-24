@@ -47,14 +47,33 @@ export class MerchPreorderService {
     return this.variantRepository.find({ where: { merchItemId } });
   }
 
+  /**
+   * Reserves `quantity` units of stock for a variant.
+   *
+   * Uses a single atomic `UPDATE ... WHERE stockReserved + :qty <= stockTotal`
+   * instead of a read-then-write, so two concurrent reservations can't both
+   * pass an in-memory availability check before either write commits and
+   * oversell the variant.
+   */
   async reserveVariantStock(variantId: string, quantity: number): Promise<MerchVariant> {
-    const variant = await this.getVariantById(variantId);
-    const available = variant.stockTotal - variant.stockReserved;
-    if (quantity > available) {
+    const result = await this.variantRepository
+      .createQueryBuilder()
+      .update(MerchVariant)
+      .set({ stockReserved: () => '"stockReserved" + :quantity' })
+      .where('id = :variantId AND "stockReserved" + :quantity <= "stockTotal"', {
+        variantId,
+        quantity,
+      })
+      .execute();
+
+    if (!result.affected) {
+      // Either the variant doesn't exist, or the reservation would exceed
+      // stockTotal — distinguish the two for a clearer error message.
+      await this.getVariantById(variantId);
       throw new BadRequestException('Not enough stock available for this variant');
     }
-    variant.stockReserved += quantity;
-    return this.variantRepository.save(variant);
+
+    return this.getVariantById(variantId);
   }
 
   async createMerchPreorder(
@@ -116,5 +135,18 @@ export class MerchPreorderService {
     if (event.organizerId !== requesterId) {
       throw new ForbiddenException('Only the event organizer can manage merchandise pre-orders');
     }
+  }
+
+  // ── Aliases for Issue #1455 ───────────────────────────────────────────
+  async create_merch_preorder(dto: CreateMerchPreorderDto, userId: string): Promise<MerchPreorder> {
+    return this.createMerchPreorder(dto, userId);
+  }
+
+  async reserve_variant_stock(variantId: string, quantity: number): Promise<MerchVariant> {
+    return this.reserveVariantStock(variantId, quantity);
+  }
+
+  async confirm_preorder_pickup(preorderId: string, organizerId: string): Promise<MerchPreorder> {
+    return this.confirmPreorderPickup(preorderId, organizerId);
   }
 }

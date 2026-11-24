@@ -1,0 +1,5 @@
+{
+  "storageKey": "theme",
+  "defaultTheme": "dark",
+  "script": "(function(){try{var t=localStorage.getItem(\"theme\");if(t!=='light'&&t!=='dark')t=\"dark\";var r=document.documentElement;r.setAttribute('data-theme',t);r.classList.toggle('dark',t==='dark');r.style.colorScheme=t;}catch(e){}})();"
+}

@@ -28,4 +28,11 @@ export interface WalletContextType extends WalletState {
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
   networkMismatch: boolean;
+
+  // WalletConnect protocol session methods
+  initiate_wallet_connect?: (network?: NetworkType) => Promise<{ uri: string; topic: string; approval: () => Promise<any> }>;
+  approve_wallet_session?: (proposalOrApproval?: any) => Promise<{ publicKey: string; topic?: string }>;
+  disconnect_wallet?: (topic?: string) => Promise<void>;
+  initiateWalletConnect?: (network?: NetworkType) => Promise<{ uri: string; topic: string; approval: () => Promise<any> }>;
+  approveWalletSession?: (proposalOrApproval?: any) => Promise<{ publicKey: string; topic?: string }>;
 }

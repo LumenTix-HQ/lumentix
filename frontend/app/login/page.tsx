@@ -12,24 +12,27 @@ export default function LoginPage() {
   const t = useTranslations('Auth');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get('redirect') || '/events';
+  // Only allow same-site relative redirects (no open redirect to //host or http://host).
+  const requestedRedirect = searchParams.get('redirect');
+  const redirectUrl =
+    requestedRedirect && requestedRedirect.startsWith('/') && !requestedRedirect.startsWith('//')
+      ? requestedRedirect
+      : '/events';
 
   const [serverError, setServerError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) {
-      setError(t('fillAllFields'));
-      return;
-    }
-
-    setLoading(true);
-    setError('');
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginFormValues>({ resolver: zodResolver(loginSchema) });
 
   const onSubmit = handleSubmit(async ({ email, password }) => {
     setServerError('');
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/auth/login`, {
+      // The Next.js route forwards the credentials to the API and sets the HttpOnly
+      // lumentix_* session cookies, so no token ever reaches client-side JS.
+      const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -40,8 +43,6 @@ export default function LoginPage() {
         throw new Error('Login failed. Please try again.');
       }
 
-      const data = await res.json();
-      document.cookie = `access_token=${data.access_token}; path=/`;
       router.push(redirectUrl);
     } catch (err) {
       setServerError(err instanceof Error ? err.message : 'Login failed');
@@ -69,8 +70,9 @@ export default function LoginPage() {
 
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <div>
-            <label className="block text-xs font-semibold text-gray-300 mb-1">{t('emailAddress')}</label>
+            <label htmlFor="email" className="block text-xs font-semibold text-gray-300 mb-1">{t('emailAddress')}</label>
             <input
+              id="email"
               type="email"
               className={inputClass(!!errors.email)}
               placeholder="user@example.com"
@@ -80,8 +82,9 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-300 mb-1">{t('password')}</label>
+            <label htmlFor="password" className="block text-xs font-semibold text-gray-300 mb-1">{t('password')}</label>
             <input
+              id="password"
               type="password"
               className={inputClass(!!errors.password)}
               placeholder="••••••••"
@@ -95,7 +98,7 @@ export default function LoginPage() {
             disabled={isSubmitting}
             className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition"
           >
-            {loading ? t('signingIn') : t('signIn')}
+            {isSubmitting ? t('signingIn') : t('signIn')}
           </button>
         </form>
 

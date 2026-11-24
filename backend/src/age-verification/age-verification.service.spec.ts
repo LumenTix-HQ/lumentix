@@ -1,134 +1,180 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AgeVerificationService } from './age-verification.service';
+import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { AgeVerification, AgeRestriction, VerificationStatus } from './entities/age-verification.entity';
-import { Event, EventStatus } from '../events/entities/event.entity';
-import { User } from '../users/entities/user.entity';
-import { AuditService } from '../audit/audit.service';
-import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { createHmac } from 'crypto';
+import { AgeProofService } from './age-verification.service';
+import { AgeProofVerifier } from './entities/age-proof-verifier.entity';
+import { KycDocument, KycStatus } from '../identity/entities/kyc-document.entity';
 
-describe('AgeVerificationService', () => {
-  let service: AgeVerificationService;
-  let mockAgeRepo: { find: jest.Mock; findOne: jest.Mock; create: jest.Mock; save: jest.Mock };
-  let mockEventRepo: { findOne: jest.Mock; save: jest.Mock };
-  let mockUserRepo: { findOne: jest.Mock };
-  let mockAuditService: { log: jest.Mock };
+const SECRET = 'unit-test-signing-secret-unit-test-signing-secret';
+
+const sign = (encodedPayload: string): string =>
+  createHmac('sha256', SECRET)
+    .update(encodedPayload)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+const encode = (value: unknown): string =>
+  Buffer.from(JSON.stringify(value))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+describe('AgeProofService', () => {
+  let service: AgeProofService;
+  let kycRepository: { findOne: jest.Mock };
+  let verifierRepository: { findOne: jest.Mock; create: jest.Mock; save: jest.Mock };
 
   beforeEach(async () => {
-    mockAgeRepo = {
-      find: jest.fn().mockResolvedValue([]),
-      findOne: jest.fn(),
-      create: jest.fn(() => ({})),
-      save: jest.fn((r) => Promise.resolve({ ...r, id: 'av1', verifiedAt: new Date() })),
+    kycRepository = { findOne: jest.fn() };
+    verifierRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((entity) => entity),
+      save: jest.fn((entity) =>
+        Promise.resolve({ ...entity, registeredAt: new Date() }),
+      ),
     };
-    mockEventRepo = {
-      findOne: jest.fn(),
-      save: jest.fn((e) => Promise.resolve(e)),
-    };
-    mockUserRepo = { findOne: jest.fn() };
-    mockAuditService = { log: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        AgeVerificationService,
-        { provide: getRepositoryToken(AgeVerification), useValue: mockAgeRepo },
-        { provide: getRepositoryToken(Event), useValue: mockEventRepo },
-        { provide: getRepositoryToken(User), useValue: mockUserRepo },
-        { provide: AuditService, useValue: mockAuditService },
+        AgeProofService,
+        { provide: getRepositoryToken(KycDocument), useValue: kycRepository },
+        {
+          provide: getRepositoryToken(AgeProofVerifier),
+          useValue: verifierRepository,
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) =>
+              key === 'ZKP_SIGNING_SECRET' ? SECRET : undefined,
+          },
+        },
       ],
     }).compile();
 
-    service = module.get<AgeVerificationService>(AgeVerificationService);
+    service = module.get<AgeProofService>(AgeProofService);
   });
 
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
 
-  describe('verifyAge', () => {
-    it('should throw NotFoundException when event not found', async () => {
-      mockEventRepo.findOne.mockResolvedValue(null);
+  describe('generateAgeProof', () => {
+    it('derives age from the verified KYC record and issues a signed proof', async () => {
+      kycRepository.findOne.mockResolvedValue({
+        userId: 'user1',
+        status: KycStatus.APPROVED,
+        dateOfBirth: `${new Date().getUTCFullYear() - 25}-01-01`,
+      });
 
-      await expect(
-        service.verifyAge('u1', { eventId: 'e1', dateOfBirth: '2000-01-01' } as any),
-      ).rejects.toThrow(NotFoundException);
+      const result = await service.generateAgeProof('user1', 18);
+
+      expect(kycRepository.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'user1', status: KycStatus.APPROVED },
+        }),
+      );
+      expect(result.generated).toBe(true);
+      expect(result.minimumAge).toBe(18);
+      expect(result.proof.split('.')).toHaveLength(3);
+      expect(service.verifyAgeProof(result.proof, 18).valid).toBe(true);
     });
 
-    it('should return compliant when event has no age restriction', async () => {
-      mockEventRepo.findOne.mockResolvedValue({ id: 'e1', ageRestriction: undefined });
-
-      const result = await service.verifyAge('u1', { eventId: 'e1' } as any);
-
-      expect(result.isCompliant).toBe(true);
-      expect(result.requiredRestriction).toBe(AgeRestriction.NONE);
+    it('throws when the user has no approved identity record', async () => {
+      kycRepository.findOne.mockResolvedValue(null);
+      await expect(service.generateAgeProof('user1', 18)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
-    it('should throw ForbiddenException when user is underage', async () => {
-      mockEventRepo.findOne.mockResolvedValue({ id: 'e1', ageRestriction: AgeRestriction.EIGHTEEN_PLUS });
-      mockUserRepo.findOne.mockResolvedValue({ id: 'u1' });
-
-      const currentYear = new Date().getFullYear();
-      await expect(
-        service.verifyAge('u1', { eventId: 'e1', dateOfBirth: `${currentYear - 10}-01-01` } as any),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('should succeed when user meets age requirement', async () => {
-      mockEventRepo.findOne.mockResolvedValue({ id: 'e1', ageRestriction: AgeRestriction.EIGHTEEN_PLUS });
-      mockUserRepo.findOne.mockResolvedValue({ id: 'u1' });
-      mockAgeRepo.findOne.mockResolvedValue(null);
-
-      const result = await service.verifyAge('u1', {
-        eventId: 'e1',
-        dateOfBirth: '1990-01-01',
-      } as any);
-
-      expect(result.isCompliant).toBe(true);
-      expect(mockAuditService.log).toHaveBeenCalled();
-    });
-
-    it('should throw BadRequestException when DOB not provided and no existing record', async () => {
-      mockEventRepo.findOne.mockResolvedValue({ id: 'e1', ageRestriction: AgeRestriction.EIGHTEEN_PLUS });
-      mockAgeRepo.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.verifyAge('u1', { eventId: 'e1' } as any),
-      ).rejects.toThrow(BadRequestException);
+    it('throws when the verified age is below the requested minimum', async () => {
+      kycRepository.findOne.mockResolvedValue({
+        userId: 'user1',
+        status: KycStatus.APPROVED,
+        dateOfBirth: `${new Date().getUTCFullYear() - 15}-01-01`,
+      });
+      await expect(service.generateAgeProof('user1', 18)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
   });
 
-  describe('setAgeRestriction', () => {
-    it('should throw NotFoundException when event not found', async () => {
-      mockEventRepo.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.setAgeRestriction('e1', 'org1', { ageRestriction: AgeRestriction.EIGHTEEN_PLUS }),
-      ).rejects.toThrow(NotFoundException);
+  describe('verifyAgeProof', () => {
+    beforeEach(() => {
+      kycRepository.findOne.mockResolvedValue({
+        userId: 'user1',
+        status: KycStatus.APPROVED,
+        dateOfBirth: `${new Date().getUTCFullYear() - 30}-01-01`,
+      });
     });
 
-    it('should throw ForbiddenException for non-organizer', async () => {
-      mockEventRepo.findOne.mockResolvedValue({ id: 'e1', organizerId: 'org1', status: EventStatus.DRAFT });
+    it('rejects a forged proof that claims a higher age threshold', async () => {
+      const { proof } = await service.generateAgeProof('user1', 18);
+      const [version, , signature] = proof.split('.');
+      const forgedPayload = encode({
+        sub: 'user1',
+        ageGte: 21,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 600,
+      });
+      const forged = `${version}.${forgedPayload}.${signature}`;
 
-      await expect(
-        service.setAgeRestriction('e1', 'other', { ageRestriction: AgeRestriction.EIGHTEEN_PLUS }),
-      ).rejects.toThrow(ForbiddenException);
+      expect(service.verifyAgeProof(forged, 21).valid).toBe(false);
     });
 
-    it('should throw BadRequestException when event is not DRAFT', async () => {
-      mockEventRepo.findOne.mockResolvedValue({ id: 'e1', organizerId: 'org1', status: EventStatus.PUBLISHED });
+    it('rejects a proof signed with the wrong secret', async () => {
+      const payload = encode({
+        sub: 'user1',
+        ageGte: 21,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 600,
+      });
+      const bogusSignature = createHmac('sha256', 'attacker-secret')
+        .update(payload)
+        .digest('base64');
 
-      await expect(
-        service.setAgeRestriction('e1', 'org1', { ageRestriction: AgeRestriction.EIGHTEEN_PLUS }),
-      ).rejects.toThrow(BadRequestException);
+      expect(service.verifyAgeProof(`v1.${payload}.${bogusSignature}`, 21).valid).toBe(
+        false,
+      );
     });
 
-    it('should set age restriction on DRAFT event', async () => {
-      mockEventRepo.findOne.mockResolvedValue({ id: 'e1', organizerId: 'org1', status: EventStatus.DRAFT });
+    it('rejects an expired proof', () => {
+      const now = Math.floor(Date.now() / 1000);
+      const payload = encode({
+        sub: 'user1',
+        ageGte: 21,
+        iat: now - 1200,
+        exp: now - 600,
+      });
+      expect(service.verifyAgeProof(`v1.${payload}.${sign(payload)}`, 21).valid).toBe(
+        false,
+      );
+    });
 
-      const result = await service.setAgeRestriction('e1', 'org1', { ageRestriction: AgeRestriction.TWENTY_ONE_PLUS });
+    it('rejects garbage input', () => {
+      expect(service.verifyAgeProof('not-a-proof', 18).valid).toBe(false);
+    });
+  });
 
-      expect(result.ageRestriction).toBe(AgeRestriction.TWENTY_ONE_PLUS);
-      expect(mockEventRepo.save).toHaveBeenCalled();
+  describe('registerVerifier', () => {
+    it('persists a verifier', async () => {
+      const result = await service.registerVerifier('v1', 'AgeVerifier', 'admin-1');
+      expect(verifierRepository.save).toHaveBeenCalled();
+      expect(result.verifierId).toBe('v1');
+      expect(result.name).toBe('AgeVerifier');
+      expect(result.registered).toBe(true);
+    });
+
+    it('rejects a duplicate verifier', async () => {
+      verifierRepository.findOne.mockResolvedValue({ id: 'existing' });
+      await expect(
+        service.registerVerifier('v1', 'AgeVerifier', 'admin-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

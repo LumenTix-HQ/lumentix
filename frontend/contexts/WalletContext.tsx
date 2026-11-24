@@ -89,7 +89,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
     setShowInstallPrompt(false);
     try {
-      const publicKey = await getConnector(walletType).connect(state.network);
+      const connector = getConnector(walletType);
+      if (!(await connector.isAvailable())) {
+        setShowInstallPrompt(true);
+        throw new Error('Wallet is not installed');
+      }
+      const publicKey = await connector.connect(state.network);
 
       const next: WalletState = {
         ...state, isConnected: true, publicKey, walletType, isLoading: false, error: null,
@@ -187,6 +192,52 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     } catch { /* non-fatal */ }
   }, [state.publicKey, state.network]);
 
+  /**
+   * WalletConnect protocol session methods
+   */
+  const initiate_wallet_connect = useCallback(async (network?: NetworkType) => {
+    const connector = getConnector(WalletType.WALLET_CONNECT) as any;
+    if (typeof connector.initiate_wallet_connect === 'function') {
+      return connector.initiate_wallet_connect(network ?? state.network);
+    }
+    throw new Error('WalletConnect connector initiate_wallet_connect not supported');
+  }, [state.network]);
+
+  const approve_wallet_session = useCallback(async (proposalOrApproval?: any) => {
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    try {
+      const connector = getConnector(WalletType.WALLET_CONNECT) as any;
+      const res = await connector.approve_wallet_session(proposalOrApproval);
+      const next: WalletState = {
+        ...state,
+        isConnected: true,
+        publicKey: res.publicKey,
+        walletType: WalletType.WALLET_CONNECT,
+        isLoading: false,
+        error: null,
+      };
+      setState(next);
+      saveWalletData({
+        walletType: WalletType.WALLET_CONNECT,
+        publicKey: res.publicKey,
+        network: state.network,
+      });
+      return res;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to approve wallet session';
+      setState(prev => ({ ...prev, isLoading: false, error: msg }));
+      throw err;
+    }
+  }, [state]);
+
+  const disconnect_wallet = useCallback(async (topic?: string) => {
+    const connector = getConnector(WalletType.WALLET_CONNECT) as any;
+    if (typeof connector.disconnect_wallet === 'function') {
+      await connector.disconnect_wallet(topic);
+    }
+    disconnect();
+  }, [disconnect]);
+
   const value: WalletContextType = {
     ...state,
     connect,
@@ -196,6 +247,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     connectWallet: () => connect(WalletType.FREIGHTER),
     disconnectWallet: disconnect,
     networkMismatch,
+    initiate_wallet_connect,
+    approve_wallet_session,
+    disconnect_wallet,
+    initiateWalletConnect: initiate_wallet_connect,
+    approveWalletSession: approve_wallet_session,
   };
 
   return (

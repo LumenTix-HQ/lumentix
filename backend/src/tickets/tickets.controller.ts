@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -122,6 +123,34 @@ export class TicketsController {
     return this.ticketsService.findOne(id, req.user.id);
   }
 
+  @Get(':id/provenance')
+  @ApiOperation({
+    summary: 'Get ticket ownership chain',
+    description:
+      'Authenticated. Returns the complete chain of ownership for ticket authenticity verification.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 200, description: 'Provenance chain retrieved' })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  getProvenance(@Param('id') id: string) {
+    return this.ticketsService.fetch_provenance_chain(id);
+  }
+
+  @Get(':id/provenance/timeline')
+  @ApiOperation({
+    summary: 'Get ticket provenance timeline (HTML)',
+    description:
+      'Authenticated. Returns an HTML timeline view of ticket ownership history for buyers on secondary market.',
+  })
+  @ApiParam({ name: 'id', description: 'Ticket UUID' })
+  @ApiResponse({ status: 200, description: 'HTML timeline', type: String })
+  @ApiResponse({ status: 404, description: 'Ticket not found' })
+  async getProvenanceTimeline(@Param('id') id: string, @Req() req: any) {
+    const html = await this.ticketsService.render_provenance_timeline(id);
+    req.res.setHeader('Content-Type', 'text/html');
+    return html;
+  }
+
   @Post(':id/transfer')
   @ApiOperation({
     summary: 'Initiate a ticket transfer',
@@ -183,8 +212,12 @@ export class TicketsController {
   @ApiResponse({ status: 400, description: 'Invalid QR data' })
   @ApiResponse({ status: 401, description: 'Unauthorized or invalid signature' })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
-  verifyQr(@Body('qrData') qrData: string) {
-    return this.ticketsService.verifyQrCheckIn(qrData);
+  verifyQr(
+    @Body('qrData') qrData: string,
+    @Body('eventId') eventId: string | undefined,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.ticketsService.verifyQrCheckIn(qrData, req.user, eventId);
   }
 }
 

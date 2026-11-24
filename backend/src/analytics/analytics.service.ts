@@ -7,11 +7,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, In } from 'typeorm';
-import { Event } from '../events/entities/event.entity';
+import { Event, EventStatus } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { Registration, RegistrationStatus } from '../registrations/entities/registration.entity';
-import { AgeVerification } from '../age-verification/entities/age-verification.entity';
 import { User } from '../users/entities/user.entity';
 
 import {
@@ -44,11 +43,18 @@ import {
   RevenueDashboardDto,
   CurrencyRevenue,
   RevenueTimePoint,
+  RevenueBreakdownRow,
+  RevenueReportDto,
 } from './dto/revenue-dashboard.dto';
-import { EventStatus } from '../events/entities/event.entity';
 import { MerchItem } from '../merch/entities/merch-item.entity';
 import { MerchReservation } from '../merch/entities/merch-reservation.entity';
-import { RevenueBreakdownRow, RevenueReportDto } from './dto/revenue-dashboard.dto';
+import * as PDFDocument from 'pdfkit';
+
+/** Minimal shape analyzeAgeDemographics needs; the age-verification module that supplied it was retired (#1023). */
+interface AgeRecord {
+  dateOfBirth: Date | string | null;
+  status: string;
+}
 
 @Injectable()
 export class AnalyticsService {
@@ -63,8 +69,6 @@ export class AnalyticsService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(Registration)
     private readonly registrationRepository: Repository<Registration>,
-    @InjectRepository(AgeVerification)
-    private readonly ageVerificationRepository: Repository<AgeVerification>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(MerchItem)
@@ -256,12 +260,9 @@ export class AnalyticsService {
         r.status === RegistrationStatus.PENDING,
     );
 
-    // Get age verifications
-    const ageVerifications = await this.ageVerificationRepository.find({
-      where: { eventId },
-    });
-
-    const demographics = this.analyzeAgeDemographics(ageVerifications);
+    // No date-of-birth source since age verification was retired (#1023), so
+    // the age buckets report zero; the response shape is kept for clients.
+    const demographics = this.analyzeAgeDemographics([]);
 
     // Get currency breakdown
     const payments = await this.paymentRepository.find({
@@ -308,7 +309,7 @@ export class AnalyticsService {
   }
 
   private analyzeAgeDemographics(
-    ageVerifications: AgeVerification[],
+    ageVerifications: AgeRecord[],
   ): DemographicBreakdown {
     const today = new Date();
     const ages: number[] = [];
@@ -792,6 +793,9 @@ export class AnalyticsService {
     if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime()))) {
       throw new BadRequestException('Invalid revenue report date range');
     }
+    if (start && end && start > end) {
+      throw new BadRequestException('Revenue report startDate must not be after endDate');
+    }
 
     const payments = await this.paymentRepository.find({ where: { eventId, status: PaymentStatus.CONFIRMED }, order: { createdAt: 'ASC' } });
     const filteredPayments = payments.filter((payment) => (!start || payment.createdAt >= start) && (!end || payment.createdAt <= end));
@@ -813,9 +817,10 @@ export class AnalyticsService {
     const merchRevenue = merchRows.reduce((sum, row) => sum + row.amount, 0);
     const timeSeriesMap = new Map<string, RevenueTimePoint>();
     for (const payment of filteredPayments) {
+      if (payment.productType === 'merch') continue;
       const date = payment.createdAt.toISOString().slice(0, 10);
       const point = timeSeriesMap.get(date) ?? { date, ticketsSold: 0, revenue: 0 };
-      point.ticketsSold += payment.productType === 'merch' ? 0 : 1;
+      point.ticketsSold += 1;
       point.revenue += Number(payment.amount);
       timeSeriesMap.set(date, point);
     }
@@ -841,29 +846,46 @@ export class AnalyticsService {
   }
 
   async export_revenue_report(eventId: string, organizerId: string, format: 'csv' | 'pdf', startDate?: string, endDate?: string): Promise<{ contentType: string; filename: string; body: Buffer }> {
+    if (format !== 'csv' && format !== 'pdf') {
+      throw new BadRequestException('format must be csv or pdf');
+    }
     const report = await this.aggregate_revenue_data(eventId, organizerId, startDate, endDate);
     if (format === 'csv') {
-      const rows = [['section', 'name', 'quantity', 'revenue'], ...[
+      const rows: Array<Array<string | number>> = [['section', 'name', 'quantity', 'revenue'],
+        ['summary', 'startDate', '', report.startDate ?? ''],
+        ['summary', 'endDate', '', report.endDate ?? ''],
+        ['summary', 'ticketRevenue', '', report.ticketRevenue],
+        ['summary', 'merchRevenue', '', report.merchRevenue],
+        ['summary', 'totalRevenue', '', report.totalRevenue],
         ...report.ticketTiers.map((row) => ['ticket-tier', row.name, row.quantity, row.revenue]),
         ...report.promoCodes.map((row) => ['promo-code', row.name, row.quantity, row.revenue]),
         ...report.merchSales.map((row) => ['merch', row.name, row.quantity, row.revenue]),
-      ]];
+        ...report.timeSeries.map((point) => ['time-period', point.date, point.ticketsSold, point.revenue]),
+      ];
       const escape = (value: unknown) => `"${String(value).replace(/"/g, '""')}"`;
       return { contentType: 'text/csv; charset=utf-8', filename: `revenue-${eventId}.csv`, body: Buffer.from(rows.map((row) => row.map(escape).join(',')).join('\n')) };
     }
     return new Promise((resolve, reject) => {
-      const PDFDocument = require('pdfkit');
       const doc = new PDFDocument({ margin: 48 });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve({ contentType: 'application/pdf', filename: `revenue-${eventId}.pdf`, body: Buffer.concat(chunks) }));
       doc.on('error', reject);
       doc.fontSize(20).text('Revenue report');
-      doc.moveDown().fontSize(11).text(`Event: ${eventId}`).text(`Total revenue: ${report.totalRevenue.toFixed(2)}`);
+      doc.moveDown().fontSize(11)
+        .text(`Event: ${eventId}`)
+        .text(`Period: ${report.startDate ?? 'All time'} to ${report.endDate ?? 'Present'}`)
+        .text(`Ticket revenue: ${report.ticketRevenue.toFixed(2)}`)
+        .text(`Merch revenue: ${report.merchRevenue.toFixed(2)}`)
+        .text(`Total revenue: ${report.totalRevenue.toFixed(2)}`);
       for (const [title, rows] of [['Ticket tiers', report.ticketTiers], ['Promo codes', report.promoCodes], ['Merch sales', report.merchSales] ] as const) {
         doc.moveDown().fontSize(14).text(title);
         rows.forEach((row) => doc.fontSize(10).text(`${row.name}: ${row.quantity} x ${row.revenue.toFixed(2)}`));
       }
+      doc.moveDown().fontSize(14).text('Revenue by day');
+      report.timeSeries.forEach((point) =>
+        doc.fontSize(10).text(`${point.date}: ${point.ticketsSold} tickets, ${point.revenue.toFixed(2)} revenue`),
+      );
       doc.end();
     });
   }

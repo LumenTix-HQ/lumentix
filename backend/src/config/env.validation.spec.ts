@@ -20,6 +20,11 @@ function buildEnv(overrides: Record<string, unknown> = {}): Record<string, unkno
     SMTP_USER: 'user@test.com',
     SMTP_PASS: 'pass',
     MAIL_FROM: 'noreply@test.com',
+    WEBHOOK_SECRET: 'webhook-secret',
+    INTERNAL_SECRET: 'internal-secret',
+    GOOGLE_CLIENT_ID: 'google-client-id',
+    GOOGLE_CLIENT_SECRET: 'google-client-secret',
+    GOOGLE_CALLBACK_URL: 'http://localhost:3000/auth/google/callback',
     ...overrides,
   };
 }
@@ -107,5 +112,24 @@ describe('envValidationSchema', () => {
       { abortEarly: false },
     );
     expect(error).toBeUndefined();
+  });
+
+  it('accepts an authenticated rediss:// REDIS_URL', () => {
+    const { error } = envValidationSchema.validate(
+      buildEnv({
+        REDIS_URL: 'rediss://default:secret@redis.example.com:6380/0',
+      }),
+      { abortEarly: false },
+    );
+    expect(error).toBeUndefined();
+  });
+
+  it('rejects a REDIS_URL that is not redis:// or rediss://', () => {
+    const { error } = envValidationSchema.validate(
+      buildEnv({ REDIS_URL: 'https://redis.example.com' }),
+      { abortEarly: false },
+    );
+    expect(error).toBeDefined();
+    expect(error?.details.some((d) => d.path.includes('REDIS_URL'))).toBe(true);
   });
 });

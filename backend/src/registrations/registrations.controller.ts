@@ -1,3 +1,6 @@
+import { Inject } from '@nestjs/common';
+import Redis from 'ioredis';
+import { REDIS_CLIENT } from '../common/redis/redis.provider';
 import {
   Controller,
   Delete,
@@ -38,7 +41,10 @@ import { IdempotencyInterceptor } from '../common/interceptors/idempotency.inter
 @ApiResponse({ status: 403, description: 'Forbidden' })
 @ApiResponse({ status: 404, description: 'Resource not found' })
 export class RegistrationsController {
-  constructor(private readonly service: RegistrationsService) {}
+  constructor(
+    private readonly service: RegistrationsService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
 
   @Post('events/:id/register')
   @UseInterceptors(IdempotencyInterceptor)
@@ -128,7 +134,7 @@ export class RegistrationsController {
   @ApiOperation({
     summary: "Get current user's registrations",
     description:
-      'Authenticated. Returns the current user's registrations and waitlist entries with pagination support.',
+      "Authenticated. Returns the current user's registrations and waitlist entries with pagination support.",
   })
   @ApiResponse({ status: 200, description: 'User registrations retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -162,7 +168,7 @@ export class RegistrationsController {
   @ApiOperation({
     summary: 'Cancel a registration',
     description:
-      'Authenticated. Cancels the current user's registration when the registration is still cancellable.',
+      "Authenticated. Cancels the current user's registration when the registration is still cancellable.",
   })
   @ApiParam({ name: 'id', description: 'Registration UUID' })
   @ApiResponse({ status: 204, description: 'Registration cancelled' })

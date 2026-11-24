@@ -3,19 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useWalletConnection } from '@/hooks/useWalletConnection';
 import { WalletProvider } from '@/contexts/WalletContext';
+import { freighterMock, resetFreighterMock, TEST_PUBLIC_KEY } from '../mocks/freighter';
 import { WalletType } from '@/types/wallet';
 
-// Mock Freighter API
-const mockFreighterAPI = {
-  isConnected: vi.fn(),
-  requestAccess: vi.fn(),
-};
-
-vi.mock('@stellar/freighter-api', () => ({
-  isConnected: () => mockFreighterAPI.isConnected(),
-  requestAccess: () => mockFreighterAPI.requestAccess(),
-  getNetworkDetails: vi.fn(),
-}));
+// Shared Freighter mock (v6 return shapes); see tests/mocks/freighter.ts
+vi.mock('@stellar/freighter-api', async () => (await import('../mocks/freighter')).freighterModule);
+const mockFreighterAPI = freighterMock;
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <WalletProvider>{children}</WalletProvider>
@@ -25,11 +18,7 @@ describe('useWalletConnection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    mockFreighterAPI.isConnected.mockResolvedValue({ isConnected: true, error: null });
-    mockFreighterAPI.requestAccess.mockResolvedValue({
-      address: 'GTEST1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-      error: null,
-    });
+    resetFreighterMock();
   });
 
   it('should return wallet state with connection helpers', () => {
@@ -61,7 +50,7 @@ describe('useWalletConnection', () => {
     expect(result.current.isConnected).toBe(true);
     expect(result.current.isConnecting).toBe(false);
     expect(result.current.connectionError).toBeNull();
-    expect(result.current.publicKey).toBe('GTEST1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+    expect(result.current.publicKey).toBe(TEST_PUBLIC_KEY);
   });
 
   it('should set isConnecting to true during connection', async () => {
@@ -101,11 +90,12 @@ describe('useWalletConnection', () => {
     const { result } = renderHook(() => useWalletConnection(), { wrapper });
 
     await act(async () => {
-      await expect(result.current.connectWallet(WalletType.FREIGHTER)).rejects.toThrow();
+      await expect(result.current.connectWallet(WalletType.FREIGHTER)).rejects.toThrow('Wallet is locked');
     });
 
     expect(result.current.isConnected).toBe(false);
     expect(result.current.isConnecting).toBe(false);
+    expect(result.current.connectionError).toContain('Wallet is locked');
   });
 
   it('should disconnect wallet', async () => {
@@ -173,7 +163,7 @@ describe('useWalletConnection', () => {
 
     mockFreighterAPI.isConnected.mockResolvedValueOnce({ isConnected: true, error: null });
     mockFreighterAPI.requestAccess.mockResolvedValueOnce({
-      address: 'GTEST1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      address: TEST_PUBLIC_KEY,
       error: null,
     });
 

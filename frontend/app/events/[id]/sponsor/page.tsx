@@ -6,8 +6,7 @@ import { SponsorTierCard, SponsorTier } from '@/components/SponsorTierCard';
 import { useSponsorContribution } from '@/hooks/useSponsorContribution';
 import { useWallet } from '@/contexts/WalletContext';
 import { WalletType } from '@/types/wallet';
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+import { apiClient } from '@/lib/api-client';
 
 interface EventSummary {
   id: string;
@@ -34,8 +33,8 @@ export default function SponsorPage() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API_BASE}/events/${eventId}`)
-      .then((r) => r.json())
+    apiClient
+      .getSponsorEvent(eventId)
       .then((data) => {
         // Sort tiers by minAmount ascending
         const tiers: SponsorTier[] = (data.sponsorTiers ?? []).sort(

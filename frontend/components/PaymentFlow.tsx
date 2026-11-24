@@ -38,6 +38,7 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
   const insufficientFunds = effectivePrice > 0 && hasInsufficientFunds(effectivePrice);
   const shortfall = getShortfall(effectivePrice);
   const isBlocked = !isConnected || flowState !== 'idle' || insufficientFunds || networkMismatch;
+  const isBusy = flowState === 'connecting' || flowState === 'initiating';
 
   // Refresh balance after successful payment
   useEffect(() => {
@@ -161,7 +162,7 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
 
   return (
     <div className="space-y-3">
-      {error && <p role="alert" className="text-red-400 text-sm">{error}</p>}
+      {error && <p id={`payment-error-${eventId}`} role="alert" className="text-red-400 text-sm">{error}</p>}
 
       {/* Tax breakdown — only shown for paid tickets */}
       {ticketPrice > 0 && (
@@ -183,8 +184,18 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
       )}
 
       <button
+        type="button"
         onClick={handleRegister}
         disabled={isBlocked}
+        aria-busy={isBusy}
+        aria-describedby={
+          [
+            error ? `payment-error-${eventId}` : null,
+            !isConnected ? `payment-wallet-hint-${eventId}` : null,
+          ]
+            .filter(Boolean)
+            .join(' ') || undefined
+        }
         className={`w-full py-3 rounded-xl font-semibold transition-colors ${
           isBlocked
             ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
@@ -205,7 +216,9 @@ export default function PaymentFlow({ eventId, ticketPrice, currency }: PaymentF
       </button>
 
       {!isConnected && (
-        <p className="text-xs text-gray-500 text-center">Requires Freighter wallet</p>
+        <p id={`payment-wallet-hint-${eventId}`} className="text-xs text-gray-500 text-center">
+          Requires Freighter wallet
+        </p>
       )}
     </div>
   );

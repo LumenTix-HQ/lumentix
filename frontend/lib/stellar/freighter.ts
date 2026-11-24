@@ -16,15 +16,24 @@ export class FreighterError extends Error {
 
 export const connectFreighter = async (network: NetworkType): Promise<string> => {
   try {
-    // Use requestAccess which handles the full flow
-    const publicKey = await requestAccess();
-    
+    // Use requestAccess which handles the full flow. freighter-api v6 resolves to
+    // `{ address, error }` rather than throwing.
+    const access = await requestAccess();
+    if (access.error) {
+      throw new Error(access.error.message ?? String(access.error));
+    }
+    const publicKey = access.address;
+
     if (!publicKey) {
       throw new FreighterError('Failed to retrieve public key from Freighter');
     }
 
-    // Verify network
-    const freighterNetwork = await getNetwork();
+    // Verify network (v6: `{ network, networkPassphrase, error }`)
+    const networkResult = await getNetwork();
+    if (networkResult.error) {
+      throw new Error(networkResult.error.message ?? String(networkResult.error));
+    }
+    const freighterNetwork = networkResult.network;
     const expectedNetwork = network === NetworkType.MAINNET ? 'PUBLIC' : 'TESTNET';
     
     if (freighterNetwork !== expectedNetwork) {
@@ -61,12 +70,18 @@ export const signTransactionWithFreighter = async (
 ): Promise<string> => {
   try {
     const networkPassphrase = getNetworkPassphrase(network);
-    const signedXdr = await signTransaction(xdr, {
-      network: network === NetworkType.MAINNET ? 'PUBLIC' : 'TESTNET',
-      networkPassphrase,
-    });
+    // freighter-api v6 resolves to { signedTxXdr, signerAddress, error }.
+    const result = await signTransaction(xdr, { networkPassphrase });
+    if (result.error) {
+      throw new Error(
+        typeof result.error === 'string'
+          ? result.error
+          : (result.error as { message?: string }).message ??
+            'Transaction signing failed',
+      );
+    }
 
-    return signedXdr;
+    return result.signedTxXdr;
   } catch (error) {
     if (error instanceof Error) {
       if (error.message.includes('User declined')) {
@@ -80,9 +95,9 @@ export const signTransactionWithFreighter = async (
 
 export const checkFreighterNetwork = async (expectedNetwork: NetworkType): Promise<boolean> => {
   try {
-    const freighterNetwork = await getNetwork();
+    const { network, error } = await getNetwork();
     const expected = expectedNetwork === NetworkType.MAINNET ? 'PUBLIC' : 'TESTNET';
-    return freighterNetwork === expected;
+    return !error && network === expected;
   } catch {
     return false;
   }
@@ -90,8 +105,8 @@ export const checkFreighterNetwork = async (expectedNetwork: NetworkType): Promi
 
 export const isFreighterAvailable = async (): Promise<boolean> => {
   try {
-    const result = await isConnected();
-    return result === true;
+    const { isConnected: connected, error } = await isConnected();
+    return !error && connected === true;
   } catch {
     return false;
   }

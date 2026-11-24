@@ -25,6 +25,9 @@ import { SocialService } from './social.service';
 import { EnableSocialFeaturesDto } from './dto/enable-social-features.dto';
 import { ConnectAttendeesDto } from './dto/connect-attendees.dto';
 import { CreateMeetupGroupDto } from './dto/create-meetup-group.dto';
+import { GenerateReferralLinkDto } from './dto/generate-referral-link.dto';
+import { TrackReferralConversionDto } from './dto/track-referral-conversion.dto';
+import { IssueReferralRewardDto } from './dto/issue-referral-reward.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 
@@ -229,5 +232,72 @@ export class SocialController {
   @ApiResponse({ status: 200, description: 'Members returned' })
   getMeetupGroupMembers(@Param('id', ParseUUIDPipe) id: string) {
     return this.socialService.getMeetupGroupMembers(id);
+  }
+
+  // ── Social Sharing Referral Incentive Program (#1536) ─────────────────────
+
+  @Post('referral/generate')
+  @ApiOperation({
+    summary: 'Generate referral link',
+    description:
+      'Generate a unique social media referral link with embedded tracking code to earn loyalty points or discount codes when friends purchase tickets.',
+  })
+  @ApiResponse({ status: 201, description: 'Referral link generated successfully' })
+  generateReferralLink(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: GenerateReferralLinkDto,
+  ) {
+    return this.socialService.generate_referral_link(req.user.id, dto);
+  }
+
+  @Post('referral/convert')
+  @ApiOperation({
+    summary: 'Track referral conversion',
+    description:
+      'Track when a referred friend purchases a ticket and qualify the referrer for loyalty rewards.',
+  })
+  @ApiResponse({ status: 200, description: 'Referral conversion tracked and reward triggered' })
+  trackReferralConversion(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: TrackReferralConversionDto,
+  ) {
+    return this.socialService.track_referral_conversion(req.user.id, dto);
+  }
+
+  @Post('referral/reward/:id')
+  @ApiOperation({
+    summary: 'Issue referral reward',
+    description:
+      'Manually or programmatically issue loyalty points or discount codes for a converted referral.',
+  })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'Referral ID' })
+  @ApiResponse({ status: 200, description: 'Reward issued successfully' })
+  issueReferralReward(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto?: IssueReferralRewardDto,
+  ) {
+    return this.socialService.issue_referral_reward(id, dto?.rewardType);
+  }
+
+  @Get('referral/my-referrals')
+  @ApiOperation({ summary: 'Get my generated referral links' })
+  @ApiResponse({ status: 200, description: 'List of user referrals' })
+  getMyReferrals(@Req() req: AuthenticatedRequest) {
+    return this.socialService.getMyReferrals(req.user.id);
+  }
+
+  @Get('referral/stats')
+  @ApiOperation({ summary: 'Get summary statistics of referrals and earned rewards' })
+  @ApiResponse({ status: 200, description: 'Referral statistics' })
+  getReferralStats(@Req() req: AuthenticatedRequest) {
+    return this.socialService.getReferralStats(req.user.id);
+  }
+
+  @Get('referral/validate/:code')
+  @ApiOperation({ summary: 'Validate a referral code' })
+  @ApiParam({ name: 'code', description: 'Referral code (e.g. REF-ABC123)' })
+  @ApiResponse({ status: 200, description: 'Referral details' })
+  validateReferralCode(@Param('code') code: string) {
+    return this.socialService.getReferralByCode(code);
   }
 }

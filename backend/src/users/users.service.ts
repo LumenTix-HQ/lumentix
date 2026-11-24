@@ -323,6 +323,20 @@ export class UsersService {
     return this.sanitize(newUser);
   }
 
+  async findByStellarPublicKey(publicKey: string): Promise<User | null> {
+    return this.usersRepository.findOne({ where: { stellarPublicKey: publicKey } });
+  }
+
+  /** Creates a passwordless account for a wallet-only sign-in. */
+  async createWalletUser(publicKey: string): Promise<User> {
+    const user = this.usersRepository.create({
+      email: `${publicKey.toLowerCase()}@wallet.lumentix.local`,
+      passwordHash: '',
+      stellarPublicKey: publicKey,
+    });
+    return this.usersRepository.save(user);
+  }
+
   async findByGoogleId(googleId: string) {
     return this.usersRepository.findOne({ where: { googleId } });
   }
@@ -386,7 +400,14 @@ export class UsersService {
   }
 
   private sanitize(user: User): Omit<User, 'passwordHash'> {
-    const { passwordHash, ...sanitized } = user;
+    // Return a User *instance* (not a spread plain object) so the global
+    // ClassSerializerInterceptor can still honour the entity's @Exclude()
+    // metadata (mfaConfig, mfaSessions, googleId, verification tokens…).
+    const sanitized = Object.assign(
+      Object.create(Object.getPrototypeOf(user) as object) as User,
+      user,
+    );
+    delete (sanitized as Partial<User>).passwordHash;
     return sanitized;
   }
 }

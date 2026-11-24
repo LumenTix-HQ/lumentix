@@ -1,5 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Min,
+  Max,
+  IsNumber,
+  IsIn,
+} from 'class-validator';
 
 export class ManageContentDeliveryDto {
   @ApiProperty({ example: 'https://cdn.lumentix.example' })
@@ -10,7 +20,10 @@ export class ManageContentDeliveryDto {
   @IsUrl()
   streamUrl: string;
 
-  @ApiPropertyOptional({ example: 'auto', enum: ['auto', '1080p', '720p', '480p'] })
+  @ApiPropertyOptional({
+    example: 'auto',
+    enum: ['auto', '1080p', '720p', '480p'],
+  })
   @IsOptional()
   @IsString()
   qualityProfile?: string;
@@ -72,4 +85,38 @@ export class StreamPerformanceResponseDto {
 
   @ApiProperty()
   lastMeasuredAt: Date;
+}
+
+export class BufferingEventDto {
+  @ApiProperty() @IsNumber() @Min(0) @Max(3_600_000) durationMs: number;
+  @ApiProperty() @IsNumber() @Min(0) @Max(10_000_000) bandwidthKbps: number;
+}
+
+/** Measured downstream throughput reported by a viewer's player (#1557). */
+export class DetectViewerBandwidthDto {
+  @ApiProperty({ example: 1800, description: 'Measured bandwidth in kbps' })
+  @IsNumber()
+  @Min(0)
+  @Max(10_000_000)
+  bandwidthKbps: number;
+}
+
+/** Manual bitrate tier override for a viewer, with `auto` as default (#1557). */
+export class SwitchBitrateTierDto {
+  @ApiProperty({ example: 'auto', enum: ['auto', '1080p', '720p', '480p'] })
+  @IsIn(['auto', '1080p', '720p', '480p'])
+  tier: 'auto' | '1080p' | '720p' | '480p';
+}
+
+export class ViewerBandwidthResponseDto {
+  @ApiProperty() bandwidthKbps: number;
+  @ApiProperty({ enum: ['1080p', '720p', '480p'] }) recommendedTier: string;
+}
+
+export class ViewerBitrateTierResponseDto {
+  @ApiProperty() eventId: string;
+  @ApiProperty() viewerId: string;
+  @ApiProperty({ enum: ['auto', '1080p', '720p', '480p'] }) tier: string;
+  @ApiProperty() bitrateKbps: number;
+  @ApiProperty() adaptive: boolean;
 }

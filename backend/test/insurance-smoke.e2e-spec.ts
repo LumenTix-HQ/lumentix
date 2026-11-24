@@ -2,8 +2,8 @@
  * Smoke tests for InsuranceModule.
  *
  * Boot the full application and assert that the insurance routes are
- * registered and return non-404 responses, confirming the module is
- * correctly wired into AppModule.
+ * registered. Every route is behind JwtAuthGuard, so unauthenticated
+ * requests must return 401 (a 404 would mean the module is not wired).
  */
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
@@ -30,31 +30,25 @@ describe('InsuranceModule smoke tests (e2e)', () => {
     await app.close();
   });
 
-  it('GET /insurance/products — module is wired (returns 200, not 404)', async () => {
-    const res = await request(app.getHttpServer())
-      .get('/insurance/products')
-      .expect(200);
-
-    // Returns a paginated envelope
-    expect(res.body).toHaveProperty('data');
-    expect(Array.isArray(res.body.data)).toBe(true);
-    expect(res.body).toHaveProperty('total');
+  it('GET /insurance/pool — requires authentication (401, not 404)', async () => {
+    await request(app.getHttpServer()).get('/insurance/pool').expect(401);
   });
 
-  it('GET /insurance/products/compare — module is wired (returns 200 for empty query)', async () => {
-    // productIds is required — omitting it should give 400 (not 404)
-    const res = await request(app.getHttpServer())
-      .get('/insurance/products/compare')
-      .expect(400);
-
-    // 400 proves the route exists; 404 would mean the module is not wired
-    expect(res.status).not.toBe(404);
+  it('GET /insurance/me — requires authentication (401, not 404)', async () => {
+    await request(app.getHttpServer()).get('/insurance/me').expect(401);
   });
 
-  it('POST /insurance/insurers/register — requires authentication (returns 401, not 404)', async () => {
+  it('POST /insurance/purchase — requires authentication (401, not 404)', async () => {
     await request(app.getHttpServer())
-      .post('/insurance/insurers/register')
-      .send({ companyName: 'Test Co', licenseNumber: 'LIC-001' })
+      .post('/insurance/purchase')
+      .send({ ticketId: '00000000-0000-4000-8000-000000000000' })
+      .expect(401);
+  });
+
+  it('POST /insurance/claim — requires authentication (401, not 404)', async () => {
+    await request(app.getHttpServer())
+      .post('/insurance/claim')
+      .send({ ticketId: '00000000-0000-4000-8000-000000000000', cancellationReason: 'OTHER' })
       .expect(401);
   });
 });

@@ -22,6 +22,9 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../audit/entities/audit-log.entity';
 import { MailerService } from '../mailer/mailer.service';
 import { StellarWebhookService, DlqItem } from '../stellar/stellar-webhook.service';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
+import { EventStateService } from '../events/state/event-state.service';
+import { EventCacheService } from '../events/cache/event-cache.service';
 
 @Injectable()
 export class AdminService {
@@ -32,9 +35,13 @@ export class AdminService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(RoleRequest)
     private readonly roleRequestRepository: Repository<RoleRequest>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
     private readonly auditService: AuditService,
     private readonly mailerService: MailerService,
     private readonly stellarWebhookService: StellarWebhookService,
+    private readonly eventStateService: EventStateService,
+    private readonly eventCacheService: EventCacheService,
   ) {}
 
   // ── Audit Logs ────────────────────────────────────────────────────────────
@@ -48,29 +55,23 @@ export class AdminService {
   async approveEvent(eventId: string): Promise<Event> {
     const event = await this.findEventOrFail(eventId);
 
-    if (event.status !== EventStatus.DRAFT) {
-      throw new BadRequestException(
-        `Only draft events can be approved. Current status: "${event.status}".`,
-      );
-    }
+    this.eventStateService.validateTransition(event.status, EventStatus.PUBLISHED);
 
     event.status = EventStatus.PUBLISHED;
-    return this.eventRepository.save(event);
+    const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(eventId);
+    return saved;
   }
 
   async suspendEvent(eventId: string): Promise<Event> {
     const event = await this.findEventOrFail(eventId);
 
-    if (event.status === EventStatus.CANCELLED) {
-      throw new BadRequestException('Event is already cancelled.');
-    }
-
-    if (event.status === EventStatus.COMPLETED) {
-      throw new BadRequestException('Completed events cannot be suspended.');
-    }
+    this.eventStateService.validateTransition(event.status, EventStatus.CANCELLED);
 
     event.status = EventStatus.CANCELLED;
-    return this.eventRepository.save(event);
+    const saved = await this.eventRepository.save(event);
+    await this.eventCacheService.invalidateCacheEntry(eventId);
+    return saved;
   }
 
   // ── Users ─────────────────────────────────────────────────────────────────
@@ -83,7 +84,23 @@ export class AdminService {
     }
 
     user.status = UserStatus.BLOCKED;
-    return this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+    // Cut off access immediately: outstanding refresh tokens must not keep
+    // minting new access tokens for a blocked user.
+    if (this.refreshTokenRepository) {
+      await this.refreshTokenRepository.update(
+        { userId: user.id, revoked: false },
+        { revoked: true },
+      );
+    }
+
+    await this.auditService.log({
+      action: AuditAction.USER_SUSPENDED,
+      userId: user.id,
+      meta: { email: user.email },
+    });
+
+    return saved;
   }
 
   async unblockUser(userId: string): Promise<User> {
@@ -94,7 +111,15 @@ export class AdminService {
     }
 
     user.status = UserStatus.ACTIVE;
-    return this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+
+    await this.auditService.log({
+      action: AuditAction.USER_REACTIVATED,
+      userId: user.id,
+      meta: { email: user.email },
+    });
+
+    return saved;
   }
 
   async listUsers(dto: ListAdminUsersDto): Promise<PaginatedResult<User>> {
@@ -137,20 +162,53 @@ export class AdminService {
     return paginate(qb, dto, 'user');
   }
 
+  /**
+   * Search users by criteria (issue #1459).
+   */
+  async search_users(dto: ListAdminUsersDto): Promise<PaginatedResult<User>> {
+    return this.listUsers(dto);
+  }
+
+  /**
+   * Update user role (issue #1459).
+   */
+  async update_user_role(userId: string, role: UserRole): Promise<User> {
+    return this.updateUser(userId, { role });
+  }
+
+  /**
+   * Suspend a user account (issue #1459).
+   */
+  async suspend_user_account(userId: string): Promise<User> {
+    return this.blockUser(userId);
+  }
+
   async updateUser(
     userId: string,
     dto: UpdateAdminUserDto,
   ): Promise<User> {
     const user = await this.findUserOrFail(userId);
 
+    let previousRole: UserRole | undefined;
     if (dto.role !== undefined) {
       if (!Object.values(UserRole).includes(dto.role)) {
         throw new BadRequestException(`Invalid role value: ${dto.role}`);
       }
+      previousRole = user.role;
       user.role = dto.role;
     }
 
-    return this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+
+    if (dto.role !== undefined) {
+      await this.auditService.log({
+        action: AuditAction.USER_ROLE_UPDATED,
+        userId: user.id,
+        meta: { previousRole, newRole: dto.role },
+      });
+    }
+
+    return saved;
   }
 
   async softDeleteUser(userId: string): Promise<void> {
@@ -263,11 +321,11 @@ export class AdminService {
     });
 
     this.mailerService
-      .send(
-        user.email,
-        'Your role request has been approved',
-        `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been approved.</p>`,
-      )
+      .send({
+        to: user.email,
+        subject: 'Your role request has been approved',
+        html: `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been approved.</p>`,
+      })
       .catch(() => undefined);
 
     return saved;
@@ -294,11 +352,11 @@ export class AdminService {
 
     const user = await this.findUserOrFail(request.userId);
     this.mailerService
-      .send(
-        user.email,
-        'Your role request has been declined',
-        `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been declined.${reason ? ` Reason: ${reason}` : ''}</p>`,
-      )
+      .send({
+        to: user.email,
+        subject: 'Your role request has been declined',
+        html: `<p>Your request to become a <strong>${request.requestedRole}</strong> on Lumentix has been declined.${reason ? ` Reason: ${reason}` : ''}</p>`,
+      })
       .catch(() => undefined);
 
     return saved;

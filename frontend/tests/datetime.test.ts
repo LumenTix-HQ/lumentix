@@ -117,12 +117,14 @@ describe("formatLocalWithOriginalTimezone", () => {
     const utc = "2025-06-15T13:00:00.000Z"; // 13:00 UTC
 
     it("shows the viewer's local time first and original in parentheses", () => {
-        // Viewer in Lagos sees 2:00 PM WAT, original UTC is 1:00 PM UTC.
+        // Viewer in Lagos sees 2:00 PM, original UTC is 1:00 PM UTC. The viewer's zone label
+        // (WAT vs GMT+1) depends on the ICU data in the Node build, so it is not asserted.
         const out = formatLocalWithOriginalTimezone(utc, "UTC", "Africa/Lagos");
         expect(out).toContain("2:00");
         expect(out).toContain("1:00");
-        // Parens enclose the original zone.
-        expect(out).toMatch(/\(1:00\s+\w+\)/);
+        // Parens enclose the original time, AM/PM marker and zone (\s also matches the
+        // narrow no-break space newer ICU versions put before PM).
+        expect(out).toMatch(/\(1:00\s*PM\s+UTC\)/);
     });
 
     it("collapses output when viewer and original timezone are the same", () => {

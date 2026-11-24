@@ -1,7 +1,7 @@
 #![allow(clippy::len_zero)]
 
 use crate::error::LumentixError;
-use soroban_sdk::{Address, String};
+use soroban_sdk::{Address, Env, String};
 
 /// Validate that an address is not invalid
 /// In Soroban, addresses are validated by the SDK, but we keep this for consistency
@@ -78,6 +78,34 @@ pub fn validate_currency_code(code: &String) -> Result<(), LumentixError> {
     Ok(())
 }
 
+/// Validate that a country code is ISO 3166-1 alpha-2: exactly two uppercase
+/// ASCII letters (Issue #1448).
+pub fn validate_country_code(code: &String) -> Result<(), LumentixError> {
+    let bytes = code.to_bytes();
+    if bytes.len() != 2 {
+        return Err(LumentixError::InvalidCountryCode);
+    }
+    for i in 0..2 {
+        match bytes.get(i) {
+            Some(b) if b >= b'A' && b <= b'Z' => {}
+            _ => return Err(LumentixError::InvalidCountryCode),
+        }
+    }
+    Ok(())
+}
+
+/// Uppercase an ASCII country code so "us" and "US" compare equal.
+pub fn normalize_country_code(env: &Env, code: &String) -> String {
+    let bytes = code.to_bytes();
+    let len = bytes.len().min(64);
+    let mut buf = [0u8; 64];
+    for i in 0..len {
+        let b = bytes.get(i).unwrap_or(0);
+        buf[i as usize] = if b >= b'a' && b <= b'z' { b - 32 } else { b };
+    }
+    String::from_bytes(env, &buf[..len as usize])
+}
+
 /// Validate that a wasm hash is not all zeros
 pub fn validate_wasm_hash(hash: &soroban_sdk::BytesN<32>) -> Result<(), LumentixError> {
     let mut all_zero = true;
@@ -137,6 +165,33 @@ pub fn validate_offset_amount(amount: i128) -> Result<(), LumentixError> {
 pub fn validate_identity_level(level: u32) -> Result<(), LumentixError> {
     if level == 0 || level > 5 {
         return Err(LumentixError::InvalidIdentityProof);
+    }
+    Ok(())
+}
+
+/// Maximum accepted length (in bytes) for an idempotency key.
+pub const MAX_IDEMPOTENCY_KEY_LEN: u32 = 64;
+
+/// Validate the format of an idempotency key.
+///
+/// Rejects empty keys and keys longer than [`MAX_IDEMPOTENCY_KEY_LEN`] with
+/// [`LumentixError::InvalidIdempotencyKey`].
+pub fn validate_idempotency_key_format(key: &String) -> Result<(), LumentixError> {
+    let len = key.len();
+    if len == 0 || len > MAX_IDEMPOTENCY_KEY_LEN {
+        return Err(LumentixError::InvalidIdempotencyKey);
+    }
+    Ok(())
+}
+
+/// Validate that a provided nonce is strictly greater than the last recorded
+/// nonce, preventing duplicate or out-of-order (replayed) transactions.
+///
+/// Returns [`LumentixError::NonceOutOfOrder`] when `provided_nonce` is not
+/// greater than `last_nonce`.
+pub fn validate_nonce_ordering(last_nonce: u64, provided_nonce: u64) -> Result<(), LumentixError> {
+    if provided_nonce <= last_nonce {
+        return Err(LumentixError::NonceOutOfOrder);
     }
     Ok(())
 }
@@ -245,6 +300,51 @@ mod tests {
         assert_eq!(
             validate_currency_code(&empty),
             Err(LumentixError::EmptyString)
+        );
+    }
+
+    #[test]
+    fn test_validate_idempotency_key_format() {
+        let env = Env::default();
+        let valid = String::from_str(&env, "order-12345");
+        let empty = String::from_str(&env, "");
+
+        assert!(validate_idempotency_key_format(&valid).is_ok());
+        assert_eq!(
+            validate_idempotency_key_format(&empty),
+            Err(LumentixError::InvalidIdempotencyKey)
+        );
+
+        // Exactly at the max length is allowed.
+        let mut buf = [b'a'; 64];
+        let at_max = String::from_bytes(&env, &buf);
+        assert!(validate_idempotency_key_format(&at_max).is_ok());
+
+        // One byte over the max length is rejected.
+        buf[63] = b'b';
+        let over_max = String::from_bytes(&env, &[b'a'; 65]);
+        assert_eq!(
+            validate_idempotency_key_format(&over_max),
+            Err(LumentixError::InvalidIdempotencyKey)
+        );
+    }
+
+    #[test]
+    fn test_validate_nonce_ordering() {
+        assert!(validate_nonce_ordering(0, 1).is_ok());
+        assert!(validate_nonce_ordering(5, 6).is_ok());
+        assert!(validate_nonce_ordering(0, u64::MAX).is_ok());
+        assert_eq!(
+            validate_nonce_ordering(5, 5),
+            Err(LumentixError::NonceOutOfOrder)
+        );
+        assert_eq!(
+            validate_nonce_ordering(5, 4),
+            Err(LumentixError::NonceOutOfOrder)
+        );
+        assert_eq!(
+            validate_nonce_ordering(0, 0),
+            Err(LumentixError::NonceOutOfOrder)
         );
     }
 }

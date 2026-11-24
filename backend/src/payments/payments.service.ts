@@ -115,6 +115,7 @@ export class PaymentsService {
     currency?: string,
     usePathPayment?: boolean,
     sourceAsset?: string,
+    includeCarbonOffset?: boolean,
   ) {
     const event = await this.eventsService.getEventById(eventId);
 
@@ -189,15 +190,15 @@ export class PaymentsService {
 
         if (ownedTicketsCount > 0) {
           finalPrice = finalPrice * (1 - Number(series.discountPercentage) / 100);
-
-                    // Add this block
-          if (includeCarbonOffset) {
-            const offsetAmount = await this.calculate_travel_offset(eventId);
-            finalPrice += offsetAmount;
-            payment.carbonOffsetAmount = offsetAmount;
-          }
         }
       }
+    }
+
+    // Optional carbon offset, added on top of the (possibly discounted) price
+    let carbonOffsetAmount = 0;
+    if (includeCarbonOffset) {
+      carbonOffsetAmount = await this.calculate_travel_offset(eventId);
+      finalPrice += carbonOffsetAmount;
     }
 
     const payment = this.paymentsRepository.create({
@@ -210,6 +211,7 @@ export class PaymentsService {
       transactionHash: null,
       seriesId: event.seriesId,
       isSeasonPass: false,
+      carbonOffsetAmount,
     });
     const saved = await this.paymentsRepository.save(payment);
 
@@ -240,17 +242,20 @@ export class PaymentsService {
         const user = await this.userRepository.findOne({ where: { id: userId } });
         const userPublicKey = user?.stellarPublicKey ?? null;
         if (userPublicKey) {
-          const pathResult = await this.stellarService.findPaymentPath(
+          const pathResults = await this.stellarService.findPaymentPath(
             userPublicKey,
             sourceAsset,
             selectedCurrency,
             String(finalPrice),
           );
-          if (pathResult) {
+          const best = this.selectBestPath(pathResults);
+          if (best) {
             pathPayment = {
               sendAsset: sourceAsset,
-              sendAmount: pathResult.source_amount ?? String(finalPrice),
-              path: pathResult.path ?? [],
+              sendAmount: best.source_amount ?? String(finalPrice),
+              path: (best.path ?? []).map((hop) =>
+                hop.asset_type === 'native' ? 'XLM' : (hop.asset_code ?? ''),
+              ),
             };
           }
         }
@@ -611,6 +616,16 @@ export class PaymentsService {
         error,
       );
     }
+  }
+
+  /** Picks the path that costs the sender the least; undefined when there are none. */
+  private selectBestPath<T extends { source_amount?: string }>(paths: T[] | null | undefined): T | undefined {
+    if (!paths || paths.length === 0) return undefined;
+    return paths.reduce((best, candidate) =>
+      Number(candidate.source_amount ?? Infinity) < Number(best.source_amount ?? Infinity)
+        ? candidate
+        : best,
+    );
   }
 
   async calculate_travel_offset(eventId: string): Promise<number> {

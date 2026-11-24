@@ -21,7 +21,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles, Role } from '../../common/decorators/roles.decorator';
 import { DynamicQrService } from './dynamic-qr.service';
 import { ValidateOtpDto } from './dto/validate-otp.dto';
-import { AuthenticatedRequest } from '../../auth/interfaces/authenticated-request.interface';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @ApiTags('Tickets - Dynamic QR')
 @Controller('tickets')
@@ -82,15 +82,20 @@ export class DynamicQrController {
     },
   })
   @ApiResponse({ status: 404, description: 'Ticket not found' })
-  async validateOtp(@Body() dto: ValidateOtpDto) {
+  async validateOtp(
+    @Body() dto: ValidateOtpDto,
+    @Request() req: any,
+  ) {
+    const validatorIp = req.ip || req.connection?.remoteAddress;
     const result = await this.dynamicQrService.validateTimeOtp(
       dto.ticketId,
       dto.otp,
       dto.validatorTimestampMs,
+      validatorIp,
     );
 
     return {
-      message: result.valid ? 'OTP is valid' : 'OTP is invalid or expired',
+      message: result.valid ? 'OTP is valid' : result.message,
       ...result,
     };
   }

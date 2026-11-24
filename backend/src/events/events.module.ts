@@ -21,6 +21,11 @@ import { BullModule } from '@nestjs/bull';
 import { CancelEventProcessor } from './jobs/cancel-event.processor';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { StellarModule } from '../stellar';
+import { CalendarModule } from '../calendar/calendar.module';
+import { SchedulingModule } from '../scheduling/scheduling.module';
+import { SmartRefundService } from './smart-refund.service';
+
+import { StorageModule } from '../common/storage/storage.module';
 
 @Module({
   imports: [
@@ -32,12 +37,15 @@ import { StellarModule } from '../stellar';
     forwardRef(() => RefundModule),
     WebhooksModule,
     StellarModule,
+    StorageModule,
+    CalendarModule,
+    SchedulingModule,
     BullModule.registerQueue({
       name: 'events',
     }),
   ],
   controllers: [EventsController],
-  providers: [EventsService, EventStateService, EventCacheService, CancelEventProcessor],
-  exports: [EventsService],
+  providers: [EventsService, EventStateService, EventCacheService, CancelEventProcessor, SmartRefundService],
+  exports: [EventsService, EventStateService, EventCacheService],
 })
 export class EventsModule {}

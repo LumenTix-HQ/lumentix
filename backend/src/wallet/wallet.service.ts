@@ -14,6 +14,7 @@ import Redis from 'ioredis';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { StellarService } from '../stellar/stellar.service';
+import { verifySignature } from '../stellar/verify-signature.util';
 import { REDIS_CLIENT } from '../common/redis/redis.provider';
 import { UserWallet } from './entities/user-wallet.entity';
 
@@ -195,7 +196,7 @@ export class WalletService {
     }
 
     const message = `Sign this message to link wallet: ${nonce}`;
-    const isValid = this.verifySignature(publicKey, message, signature);
+    const isValid = verifySignature(publicKey, signature, message);
 
     if (!isValid) {
       throw new UnauthorizedException('Invalid signature.');
@@ -251,29 +252,118 @@ export class WalletService {
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────
 
-  private verifySignature(
-    publicKey: string,
-    message: string,
-    signatureHex: string,
-  ): boolean {
-    try {
-      const keypair = Keypair.fromPublicKey(publicKey);
-      const messageBuffer = Buffer.from(message, 'utf8');
-      const signatureBuffer = Buffer.from(signatureHex, 'hex');
-      return keypair.verify(messageBuffer, signatureBuffer);
-    } catch (err) {
-      this.logger.warn(
-        `Signature verification error: ${(err as Error).message}`,
-      );
-      return false;
-    }
-  }
-
   private validatePublicKeyFormat(publicKey: string): void {
     try {
       Keypair.fromPublicKey(publicKey);
     } catch {
       throw new BadRequestException('Invalid Stellar public key format.');
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // WalletConnect session management (#1533)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Initiate a WalletConnect session for a given public key.
+   *
+   * Generates a unique session ID and pairing topic, stores them in Redis
+   * with a 5-minute TTL, and returns them so the frontend can display the
+   * pairing URI / QR code.
+   */
+  async initiateWalletConnectSession(
+    publicKey: string,
+  ): Promise<{ sessionId: string; pairingTopic: string }> {
+    this.validatePublicKeyFormat(publicKey);
+
+    const sessionId = crypto.randomUUID();
+    const pairingTopic = crypto.randomBytes(16).toString('hex');
+
+    const sessionData = JSON.stringify({
+      publicKey,
+      pairingTopic,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Store with 5-minute TTL
+    await this.redis.set(
+      `walletconnect:session:${sessionId}`,
+      sessionData,
+      'EX',
+      NONCE_TTL_SECONDS,
+    );
+
+    this.logger.log(`WalletConnect session initiated: ${sessionId} for ${publicKey}`);
+
+    return { sessionId, pairingTopic };
+  }
+
+  /**
+   * Approve a pending WalletConnect session.
+   *
+   * Validates the session exists and is still pending, then marks it as
+   * active. The public key from the session is returned so the caller can
+   * proceed with wallet linking.
+   */
+  async approveWalletConnectSession(
+    sessionId: string,
+    publicKey: string,
+    topic: string,
+  ): Promise<{ success: boolean; publicKey: string }> {
+    const raw = await this.redis.get(`walletconnect:session:${sessionId}`);
+    if (!raw) {
+      throw new BadRequestException(
+        'WalletConnect session not found or has expired. Please initiate a new session.',
+      );
+    }
+
+    const session = JSON.parse(raw) as {
+      publicKey: string;
+      pairingTopic: string;
+      status: string;
+    };
+
+    if (session.status !== 'pending') {
+      throw new BadRequestException('WalletConnect session has already been approved or disconnected.');
+    }
+
+    if (session.pairingTopic !== topic) {
+      throw new BadRequestException('Pairing topic mismatch.');
+    }
+
+    this.validatePublicKeyFormat(publicKey);
+
+    // Mark session as active, extend TTL to 30 minutes
+    const updated = JSON.stringify({ ...session, status: 'active', publicKey });
+    await this.redis.set(`walletconnect:session:${sessionId}`, updated, 'EX', 1800);
+
+    this.logger.log(`WalletConnect session approved: ${sessionId}`);
+
+    return { success: true, publicKey };
+  }
+
+  /**
+   * Disconnect an active WalletConnect session.
+   *
+   * Removes the session from Redis so it can no longer be used.
+   */
+  async disconnectWalletConnectSession(
+    sessionId: string,
+    publicKey: string,
+  ): Promise<{ success: boolean }> {
+    const raw = await this.redis.get(`walletconnect:session:${sessionId}`);
+
+    if (raw) {
+      const session = JSON.parse(raw) as { publicKey: string };
+      if (session.publicKey !== publicKey) {
+        throw new BadRequestException('Public key does not match the session.');
+      }
+    }
+
+    await this.redis.del(`walletconnect:session:${sessionId}`);
+    this.logger.log(`WalletConnect session disconnected: ${sessionId}`);
+
+    return { success: true };
   }
 }

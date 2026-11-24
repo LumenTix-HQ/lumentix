@@ -163,14 +163,26 @@ describe('RegistrationsService', () => {
       );
     });
 
-    it('cancels a CONFIRMED registration successfully', async () => {
-      registrationRepo.findOne.mockResolvedValue(ACTIVE_REGISTRATION);
-      const cancelled = { ...ACTIVE_REGISTRATION, status: RegistrationStatus.CANCELLED };
-      registrationRepo.save.mockResolvedValue(cancelled);
+    it('cancels a CONFIRMED registration and makes its ticket non-scannable', async () => {
+      registrationRepo.findOne.mockResolvedValue({
+        ...ACTIVE_REGISTRATION,
+        ticketId: 'ticket-1',
+      });
+      const em = {
+        save: jest.fn((_entity: unknown, reg: unknown) => Promise.resolve(reg)),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+      };
+      dataSource.transaction.mockImplementation(((cb: (m: unknown) => unknown) =>
+        cb(em)) as never);
 
       const result = await service.cancel('reg-1', 'user-1');
 
       expect(result.status).toBe(RegistrationStatus.CANCELLED);
+      expect(em.update).toHaveBeenCalledWith(
+        expect.anything(),
+        { id: 'ticket-1' },
+        { status: 'cancelled' },
+      );
     });
   });
 });

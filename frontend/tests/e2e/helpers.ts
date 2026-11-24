@@ -19,15 +19,20 @@ export async function mockFreighter(page: Page, publicKey = 'GFAKEFREIGHTERPUBLI
 }
 
 /** Seed an auth cookie so protected routes are reachable in tests. */
-export async function seedAuthCookie(page: Page, baseURL: string) {
+export async function seedAuthCookie(
+  page: Page,
+  baseURL: string,
+  role: string = 'organizer',
+) {
   const url = new URL(baseURL);
   await page.context().addCookies([
     {
-      name: 'access_token',
-      // A JWT-shaped token with a far-future exp and a "user" role.
+      // Must match the cookie read by middleware.ts and lib/auth/token.ts.
+      name: 'lumentix_access_token',
+      // A JWT-shaped token with a far-future exp and the requested role.
       value:
         'header.' +
-        btoa(JSON.stringify({ sub: 'u1', role: 'user', exp: 9999999999 }))
+        btoa(JSON.stringify({ sub: 'u1', role, exp: 9999999999 }))
           .replace(/\+/g, '-')
           .replace(/\//g, '_')
           .replace(/=+$/, '') +

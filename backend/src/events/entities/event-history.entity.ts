@@ -4,7 +4,10 @@ import {
   Column,
   CreateDateColumn,
   Index,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Event } from './event.entity';
 
 @Entity('event_history')
 export class EventHistory {
@@ -14,6 +17,14 @@ export class EventHistory {
   @Index()
   @Column()
   eventId: string;
+
+  /**
+   * Read-only relation back to the live event. Used to filter archived history
+   * by the event's organizer/category without denormalising those fields.
+   */
+  @ManyToOne(() => Event, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'eventId' })
+  event: Event;
 
   @Column({ type: 'jsonb' })
   snapshot: Record<string, unknown>;

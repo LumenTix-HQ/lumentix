@@ -1,4 +1,3 @@
-import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 import {
   Body,
   Controller,
@@ -26,8 +25,8 @@ import { BruteForceService } from '../common/services/brute-force.service';
 import { ListAdminEventsDto } from './dto/list-admin-events.dto';
 import { ListAdminUsersDto } from './dto/list-admin-users.dto';
 import { UpdateAdminUserDto } from './dto/update-admin-user.dto';
-import { Roles } from './roles.decorator';
-import { RolesGuard } from './roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { AdminService } from './admin.service';
 import { PaginationDto } from '../common/pagination/dto/pagination.dto';
 import { RoleRequestStatus } from '../users/entities/role-request.entity';
@@ -35,6 +34,7 @@ import { UserRole } from '../users/enums/user-role.enum';
 import { StellarService } from '../stellar/stellar.service';
 import { StellarWebhookService } from '../stellar/stellar-webhook.service';
 import { RejectRoleRequestDto } from './dto/reject-role-request.dto';
+import { ListAuditLogsDto } from '../audit/dto/list-audit-logs.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -55,7 +55,12 @@ export class AdminController {
   // ─── Audit Logs ───────────────────────────────────────────────────────────
 
   @Get('audit-logs')
-  @ApiOperation({ summary: 'List audit log entries' })
+  @ApiOperation({
+    summary: 'List audit log entries',
+    deprecated: true,
+    description:
+      'Deprecated alias that delegates to the same AuditService query as GET /admin/audit, which is the canonical audit API (search, per-user logs and CSV/JSON export).',
+  })
   @ApiResponse({ status: 200, description: 'Audit logs retrieved' })
   listAuditLogs(@Query() dto: ListAuditLogsDto) {
     return this.adminService.listAuditLogs(dto);
@@ -154,6 +159,30 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'User blocked successfully' })
   blockUser(@Param('id', ParseUUIDPipe) id: string) {
     return this.adminService.blockUser(id);
+  }
+
+  @Get('users/search')
+  @ApiOperation({ summary: 'Search users (issue #1459)' })
+  @ApiResponse({ status: 200, description: 'Users found' })
+  search_users(@Query() dto: ListAdminUsersDto) {
+    return this.adminService.search_users(dto);
+  }
+
+  @Patch('users/:id/role')
+  @ApiOperation({ summary: 'Update user role (issue #1459)' })
+  @ApiResponse({ status: 200, description: 'User role updated' })
+  update_user_role(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('role') role: UserRole,
+  ) {
+    return this.adminService.update_user_role(id, role);
+  }
+
+  @Patch('users/:id/suspend')
+  @ApiOperation({ summary: 'Suspend user account (issue #1459)' })
+  @ApiResponse({ status: 200, description: 'User suspended' })
+  suspend_user_account(@Param('id', ParseUUIDPipe) id: string) {
+    return this.adminService.suspend_user_account(id);
   }
 
   // ── Events ────────────────────────────────────────────────────────────────

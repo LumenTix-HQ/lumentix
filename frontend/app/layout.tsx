@@ -10,6 +10,8 @@ import ToastContainer from "@/components/Toast";
 import AnalyticsConsentBanner from "@/components/AnalyticsConsentBanner";
 import { Providers } from "./providers";
 import ServiceWorkerRegister from "./ServiceWorkerRegister";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: 'Lumentix – Stellar Event Platform',
@@ -21,8 +23,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const messages = await getMessages();
 
   return (
-    <html lang={locale}>
+    // suppressHydrationWarning: the theme script sets data-theme/class on
+    // <html> before React hydrates.
+    <html lang={locale} data-theme="dark" className="dark" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="antialiased">
+        <ThemeProvider>
         <NextIntlClientProvider locale={locale} messages={messages}>
           <AuthProvider>
             <WalletProvider>
@@ -36,6 +44,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </WalletProvider>
           </AuthProvider>
         </NextIntlClientProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

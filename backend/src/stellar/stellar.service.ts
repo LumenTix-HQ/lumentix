@@ -12,6 +12,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { Repository } from 'typeorm';
 import { Queue } from 'bull';
 import { UsersService } from '../users/users.service';
+import { verifySignature as verifyStellarSignature } from './verify-signature.util';
 import { InsufficientBalanceException } from '../common/exceptions/insufficient-balance.exception';
 import { Payment } from '../payments/entities/payment.entity';
 import {
@@ -80,6 +81,9 @@ export class StellarService implements OnModuleDestroy {
     @Optional()
     @InjectQueue(PAYMENT_RETRY_QUEUE)
     private readonly paymentRetryQueue?: Queue,
+    @Optional()
+    @InjectRepository(PersistedXdr)
+    private readonly xdrRepository?: Repository<PersistedXdr>,
   ) {
     const horizonUrl =
       this.configService.get<string>('stellar.horizonUrl') ??
@@ -125,13 +129,19 @@ export class StellarService implements OnModuleDestroy {
     xdr: string,
     paymentId?: string,
   ): Promise<Horizon.HorizonApi.SubmitTransactionResponse> {
-    const record = this.xdrRepository.create({
+    const xdrRepository = this.xdrRepository;
+    if (!xdrRepository) {
+      // Persistence is not configured (e.g. unit tests): submit directly.
+      return this.submitTransaction(xdr);
+    }
+
+    const record = xdrRepository.create({
       xdr,
       networkPassphrase: this.networkPassphrase,
       status: XdrStatus.PENDING,
       paymentId: paymentId ?? null,
     });
-    const saved = await this.xdrRepository.save(record);
+    const saved = await xdrRepository.save(record);
 
     try {
       const result = await this.submitTransaction(xdr);
@@ -142,14 +152,14 @@ export class StellarService implements OnModuleDestroy {
         saved.lastError =
           (result as { extras?: { result_codes?: { transaction?: string } } }).extras?.result_codes?.transaction ?? 'Submission failed';
       }
-      await this.xdrRepository.save(saved);
+      await xdrRepository.save(saved);
 
       return result;
     } catch (err: unknown) {
       saved.status = XdrStatus.FAILED;
       saved.lastError = err instanceof Error ? err.message : String(err);
       saved.nextRetryAt = new Date(Date.now() + 30_000); // first retry in 30s
-      await this.xdrRepository.save(saved);
+      await xdrRepository.save(saved);
       throw err;
     }
   }
@@ -568,22 +578,13 @@ export class StellarService implements OnModuleDestroy {
     return tx.toXDR();
   }
 
+  /** @param signature Base64-encoded signature. See verify-signature.util.ts. */
   verifySignature(
     publicKey: string,
     signature: string,
     message: string,
   ): boolean {
-    try {
-      const keypair = Keypair.fromPublicKey(publicKey);
-      const messageBuffer = Buffer.from(message, 'utf8');
-      const signatureBuffer = Buffer.from(signature, 'base64');
-      return keypair.verify(messageBuffer, signatureBuffer);
-    } catch (err) {
-      this.logger.warn(
-        `Signature verification failed: ${(err as Error).message}`,
-      );
-      return false;
-    }
+    return verifyStellarSignature(publicKey, signature, message);
   }
 
   /**

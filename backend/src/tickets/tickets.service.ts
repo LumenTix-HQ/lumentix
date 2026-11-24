@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import * as qrcode from 'qrcode';
 
 import { TicketEntity } from './entities/ticket.entity';
@@ -172,7 +172,7 @@ export class TicketsService {
       const eventIds = events.map((e) => e.id);
       const existingTickets = await this.ticketRepo.find({
         where: eventIds.map((eventId) => ({
-          transactionHash: payment.transactionHash,
+          transactionHash: payment.transactionHash ?? IsNull(),
           eventId,
         })),
       });
@@ -422,6 +422,89 @@ export class TicketsService {
   }
 
   /**
+   * Render the provenance chain as an HTML timeline with rich details for display.
+   * Useful for secondary marketplace buyers to verify ticket authenticity.
+   */
+  async render_provenance_timeline(ticketId: string): Promise<string> {
+    const provenance = await this.fetch_provenance_chain(ticketId);
+    const event = await this.eventRepo.findOne({ where: { id: (await this.ticketRepo.findOne({ where: { id: ticketId } }))?.eventId } });
+    
+    let html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ticket Provenance - ${provenance.ticketId}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 40px; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    h1 { color: #333; margin-bottom: 10px; }
+    .meta { color: #666; font-size: 14px; margin-bottom: 30px; }
+    .timeline { position: relative; padding-left: 40px; }
+    .timeline::before { content: ''; position: absolute; left: 15px; top: 0; bottom: 0; width: 2px; background: #ddd; }
+    .event { position: relative; margin-bottom: 30px; padding-left: 20px; }
+    .event::before { content: ''; position: absolute; left: -29px; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: #4CAF50; border: 2px solid white; box-shadow: 0 0 0 2px #4CAF50; }
+    .event.initial::before { background: #2196F3; box-shadow: 0 0 0 2px #2196F3; }
+    .event h3 { margin: 0 0 8px 0; color: #333; font-size: 16px; }
+    .event .timestamp { color: #888; font-size: 13px; margin-bottom: 8px; }
+    .event .details { background: #f9f9f9; padding: 12px; border-radius: 4px; font-size: 14px; line-height: 1.6; }
+    .event .details div { margin-bottom: 4px; }
+    .event .details strong { color: #555; }
+    .event .details code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-size: 12px; word-break: break-all; }
+    .verified { display: inline-block; background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Ticket Ownership History</h1>
+    <div class="meta">
+      <strong>Ticket ID:</strong> ${provenance.ticketId}<br>
+      <strong>Asset Code:</strong> ${provenance.assetCode}<br>
+      ${event ? `<strong>Event:</strong> ${event.title}<br>` : ''}
+      <strong>Issued:</strong> ${new Date(provenance.issuedAt).toLocaleString()}<br>
+      <strong>Current Owner:</strong> ${provenance.currentOwnerId}
+    </div>
+    <div class="timeline">
+      <div class="event initial">
+        <h3>🎫 Ticket Issued <span class="verified">VERIFIED</span></h3>
+        <div class="timestamp">${new Date(provenance.issuedAt).toLocaleString()}</div>
+        <div class="details">
+          <div><strong>Original Owner:</strong> ${provenance.currentOwnerId}</div>
+          <div><strong>Asset:</strong> ${provenance.assetCode}</div>
+        </div>
+      </div>
+`;
+
+    for (const transfer of provenance.chain) {
+      const timestamp = new Date(transfer.timestamp).toLocaleString();
+      html += `
+      <div class="event">
+        <h3>↗️ Transfer #${transfer.sequence} <span class="verified">ON-CHAIN</span></h3>
+        <div class="timestamp">${timestamp}</div>
+        <div class="details">
+          <div><strong>From:</strong> ${transfer.fromUserId}</div>
+          <div><strong>To:</strong> ${transfer.toUserId}</div>
+          ${transfer.fromPublicKey ? `<div><strong>From Wallet:</strong> <code>${transfer.fromPublicKey}</code></div>` : ''}
+          ${transfer.toPublicKey ? `<div><strong>To Wallet:</strong> <code>${transfer.toPublicKey}</code></div>` : ''}
+          ${transfer.transactionHash ? `<div><strong>Transaction:</strong> <code>${transfer.transactionHash}</code></div>` : ''}
+        </div>
+      </div>
+`;
+    }
+
+    html += `
+    </div>
+    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #666; font-size: 13px; text-align: center;">
+      All transfers are verified on the Stellar blockchain. This ticket has a complete chain of custody from issuance to current owner.
+    </div>
+  </div>
+</body>
+</html>`;
+    
+    return html;
+  }
+
+  /**
    * Transfer a ticket to a new owner, recording the transfer on-chain (Stellar)
    * and writing an audit event. The DB update is rolled back if Stellar fails.
    */
@@ -543,6 +626,7 @@ export class TicketsService {
 
 
     const previousOwnerId = ticket.ownerId;
+    const previousOwnerPublicKey = ticket.ownerPublicKey;
     const saved = await this.dataSource.transaction(async (em) => {
       ticket.ownerId = recipient.id;
       ticket.ownerPublicKey = recipient.stellarPublicKey;
@@ -551,7 +635,7 @@ export class TicketsService {
         {
           from: previousOwnerId,
           to: recipient.id,
-          fromPublicKey: ticket.ownerPublicKey,
+          fromPublicKey: previousOwnerPublicKey,
           toPublicKey: recipient.stellarPublicKey,
           transactionHash: dto.transactionHash,
           timestamp: new Date().toISOString(),
@@ -636,12 +720,25 @@ export class TicketsService {
         },
       });
 
-      await this.notificationService.notifyUser(t.recipientUserId, {
-        title: 'Ticket Received',
-        body: `You received a ticket for event ${t.eventId}`,
-        type: 'ticket_transferred',
-        data: { ticketId: t.ticketId },
-      });
+      // The transfer is already committed; a notification failure must not undo or fail it.
+      try {
+        const [recipient, event] = await Promise.all([
+          this.userRepo.findOne({ where: { id: t.recipientUserId } }),
+          this.eventRepo.findOne({ where: { id: t.eventId } }),
+        ]);
+        if (recipient?.email) {
+          await this.notificationService.queueTicketEmail({
+            userId: recipient.id,
+            email: recipient.email,
+            ticketId: t.ticketId,
+            eventName: event?.title ?? t.eventId,
+          });
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Could not queue transfer notification for ticket ${t.ticketId}: ${(err as Error).message}`,
+        );
+      }
     }
   }
 
@@ -715,13 +812,31 @@ export class TicketsService {
     return this.ticketRepo.save(ticket);
   }
 
-  async verifyTicket(ticketId: string, signature: string): Promise<TicketEntity> {
+  async verifyTicket(
+    ticketId: string,
+    signature: string,
+    actor: { id: string; role: string },
+  ): Promise<TicketEntity> {
     if (!this.ticketSigningService.verify(ticketId, signature)) {
       throw new UnauthorizedException('Invalid ticket signature');
     }
 
     const ticket = await this.ticketRepo.findOne({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
+
+    // Same ownership rule as verifyQrCheckIn: only admins or the organizer of
+    // the ticket's own event may mark it as used.
+    if (actor.role !== 'admin') {
+      const event = await this.eventRepo.findOne({
+        where: { id: ticket.eventId },
+      });
+      if (!event) throw new NotFoundException('Event not found');
+      if (event.organizerId !== actor.id) {
+        throw new ForbiddenException(
+          'You cannot verify tickets for this event',
+        );
+      }
+    }
 
     if (ticket.status === 'used') {
       throw new BadRequestException('Ticket has already been used');
@@ -730,16 +845,30 @@ export class TicketsService {
       throw new BadRequestException('Ticket is no longer valid');
     }
 
+    // Conditional flip so concurrent verifications cannot both succeed.
+    const updated = await this.ticketRepo.update(
+      { id: ticket.id, status: 'valid' },
+      { status: 'used' },
+    );
+    if (updated.affected !== 1) {
+      throw new BadRequestException('Ticket has already been used');
+    }
+
     ticket.status = 'used';
-    return this.ticketRepo.save(ticket);
+    return ticket;
   }
 
-  async verifyQrCheckIn(qrData: string): Promise<{
+  async verifyQrCheckIn(
+    qrData: string,
+    actor: { id: string; role: string },
+    expectedEventId?: string,
+  ): Promise<{
     ticketId: string;
     status: string;
     eventId: string;
     attendeeName: string;
     attendeeEmail: string;
+    attendeePhotoUrl: string | null;
     ticketType: string;
   }> {
     let parsed: { ticketId: string; signature: string };
@@ -749,7 +878,11 @@ export class TicketsService {
       throw new BadRequestException('Invalid QR code data');
     }
 
-    if (!parsed.ticketId || !parsed.signature) {
+    if (
+      !parsed ||
+      typeof parsed.ticketId !== 'string' ||
+      typeof parsed.signature !== 'string'
+    ) {
       throw new BadRequestException('QR code missing ticketId or signature');
     }
 
@@ -760,6 +893,15 @@ export class TicketsService {
     const ticket = await this.ticketRepo.findOne({ where: { id: parsed.ticketId } });
     if (!ticket) throw new NotFoundException('Ticket not found');
 
+    if (expectedEventId && ticket.eventId !== expectedEventId) {
+      throw new BadRequestException('Ticket belongs to a different event');
+    }
+    const event = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+    if (!event) throw new NotFoundException('Event not found');
+    if (actor.role !== 'admin' && event.organizerId !== actor.id) {
+      throw new ForbiddenException('You cannot check in attendees for this event');
+    }
+
     if (ticket.status === 'used') {
       throw new BadRequestException('Ticket has already been checked in');
     }
@@ -767,12 +909,17 @@ export class TicketsService {
       throw new BadRequestException('Ticket is no longer valid');
     }
 
-    ticket.status = 'used';
-    await this.ticketRepo.save(ticket);
+    const updated = await this.ticketRepo.update(
+      { id: ticket.id, ownerId: ticket.ownerId, status: 'valid' },
+      { status: 'used' },
+    );
+    if (updated.affected !== 1) {
+      throw new BadRequestException('Ticket has already been checked in or transferred');
+    }
 
     await this.auditService.log({
       action: 'TICKET_CHECKED_IN' as any,
-      userId: ticket.ownerId,
+      userId: actor.id,
       resourceId: ticket.id,
       meta: { eventId: ticket.eventId, method: 'qr_scan' },
     });
@@ -783,8 +930,9 @@ export class TicketsService {
       ticketId: ticket.id,
       status: 'checked_in',
       eventId: ticket.eventId,
-      attendeeName: (user as any)?.displayName ?? 'Unknown',
-      attendeeEmail: (user as any)?.email ?? '',
+      attendeeName: user?.displayName ?? 'Unknown',
+      attendeeEmail: user?.email ?? '',
+      attendeePhotoUrl: user?.logoUrl ?? null,
       ticketType: ticket.assetCode ?? 'general',
     };
   }

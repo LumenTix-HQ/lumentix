@@ -1,10 +1,22 @@
 name: Backend CI
 
+# Single backend workflow: this replaces the old ci.yml + backend.yml split,
+# which ran lint twice and did nine independent cold installs per PR (#1610).
 on:
   push:
     branches: [main, develop]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -17,11 +29,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm run format:check
 
   typecheck:
     name: Typecheck
@@ -33,11 +46,36 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Verify package-lock.json is in sync
+        run: git diff --exit-code package-lock.json
+      - name: Check for undeclared dependencies
+        run: |
+          npx --yes depcheck@1.4.7 --json | node -e "
+            const report = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const missing = Object.keys(report.missing);
+            if (missing.length) { console.error('Undeclared imports: ' + missing.join(', ')); process.exit(1); }
+          "
+      - run: npm run build
 
   test:
     name: Unit Tests
@@ -49,7 +87,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
@@ -60,8 +98,8 @@ jobs:
           name: coverage-report
           path: backend/coverage/
 
-  security-audit:
-    name: Security Audit
+  source-integrity:
+    name: Source Integrity
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -70,11 +108,51 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      - run: npm audit --audit-level=high
+      # Fails fast, and by name, on imports that don't resolve (e.g. a spec
+      # whose source was deleted) and on *.module.ts files never wired into
+      # AppModule. `npm test` also runs it, but there it is easy to miss.
+      - run: npm run test:integrity
+
+  check-migrations:
+    name: Migration Check
+    runs-on: ubuntu-latest
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: lumentix_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lumentix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lumentix_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Run migrations and check for entity/migration drift
+        run: npm run check-migrations
 
   e2e:
     name: E2E Tests
@@ -111,12 +189,8 @@ jobs:
       DB_NAME: lumentix_test
       REDIS_HOST: localhost
       REDIS_PORT: 6379
-      JWT_SECRET: test-secret-for-e2e
-      SMTP_HOST: localhost
-      SMTP_PORT: 1025
-      SMTP_USER: test
-      SMTP_PASS: test
-      MAIL_FROM: noreply@lumentix.test
+      # Every other required variable (JWT_SECRET >= 32 chars, Stellar, SMTP, webhook,
+      # Google OAuth, escrow encryption, ...) comes from backend/.env.test via test/jest-setup.ts.
     defaults:
       run:
         working-directory: backend
@@ -124,8 +198,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm run test:e2e
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high

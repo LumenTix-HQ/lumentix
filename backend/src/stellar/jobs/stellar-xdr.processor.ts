@@ -67,7 +67,8 @@ export class StellarXdrReplayProcessor {
         );
       } else {
         const errMsg =
-          result.extras?.result_codes?.transaction ?? 'Unknown error';
+          (result as { extras?: { result_codes?: { transaction?: string } } })
+            .extras?.result_codes?.transaction ?? 'Unknown error';
         record.status = XdrStatus.FAILED;
         record.lastError = errMsg;
         this.logger.warn(`XDR ${xdrId} replay failed: ${errMsg}`);

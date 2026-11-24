@@ -266,20 +266,20 @@ pub enum LumentixError {
     SecurityIncidentNotFound = 108,
 
     // ═══════════════════════════════════════════════════════════════════════
-    // AI-Powered Networking & Matchmaking errors (111–120)
+    // AI-Powered Networking & Matchmaking errors (152–157)
     // ═══════════════════════════════════════════════════════════════════════
     /// Attendee profile not found
-    ProfileNotFound = 111,
+    ProfileNotFound = 152,
     /// Attendee profile already exists
-    ProfileAlreadyExists = 112,
+    ProfileAlreadyExists = 153,
     /// Connection request not found
-    ConnectionRequestNotFound = 113,
+    ConnectionRequestNotFound = 154,
     /// Connection request already exists between these attendees for this event
-    ConnectionAlreadyExists = 114,
+    ConnectionAlreadyExists = 155,
     /// Cannot send a connection request to yourself
-    CannotSelfConnect = 115,
+    CannotSelfConnect = 156,
     /// Attendee's privacy settings restrict this operation
-    PrivacyLevelRestricted = 116,
+    PrivacyLevelRestricted = 157,
     /// Ticket transfers are currently locked by an organizer-defined blackout window
     TransferBlackoutActive = 109,
     /// Referral link code is already claimed by another referrer
@@ -457,4 +457,218 @@ pub enum LumentixError {
     OfflineScanOutsideWindow = 233,
     /// Requested proof validity window is zero or exceeds the permitted maximum
     InvalidProofValidityWindow = 234,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Biometric Authentication errors (Issue #649)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// User has not granted biometric enrollment/consent
+    BiometricConsentRequired = 235,
+    /// No biometric credential is registered for this user/event
+    BiometricCredentialNotFound = 236,
+    /// A biometric credential already exists for this user/event
+    BiometricCredentialAlreadyExists = 237,
+    /// Biometric credential has been disabled by the user
+    BiometricCredentialDisabled = 238,
+    /// Biometric credential has been revoked/deleted
+    BiometricCredentialRevoked = 239,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages errors (Issue #906)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Pass package configuration is invalid (no events or zero allowance)
+    InvalidPassPackageConfig = 240,
+    /// Pass package with the given ID does not exist
+    PassPackageNotFound = 241,
+    /// Pass package has expired or been deactivated
+    PassPackageExpired = 242,
+    /// Pass package has no remaining allowance
+    PassPackageExhausted = 243,
+    /// Requested event is not part of this pass package
+    PassPackageEventNotEligible = 244,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Transaction replay protection errors (Issue #1007)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// The supplied idempotency key has already been consumed by a prior call
+    IdempotencyKeyAlreadyUsed = 245,
+    /// The supplied nonce does not match the account's expected next nonce
+    InvalidTransactionNonce = 246,
+
+// ═══════════════════════════════════════════════════════════════════════
+    // Emergency circuit breaker errors
+    // ═══════════════════════════════════════════════════════════════════════
+    CircuitBreakerActive = 247,
+    CircuitBreakerNotActive = 248,
+    CircuitBreakerNotConfigured = 249,
+    InvalidCircuitBreakerConfig = 250,
+    InsufficientResumeApprovals = 251,
+    DuplicateResumeApprover = 252,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Age Verification errors (Issue #970)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No age proof exists for the subject
+    AgeProofNotFound = 253,
+    /// Age proof has passed its validity window
+    AgeProofExpired = 254,
+    /// Age proof does not clear the event's minimum age requirement
+    AgeVerificationFailed = 255,
+    /// Purchase rejected because the buyer is underage for the event
+    UnderageEventPurchase = 256,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Royalty splits errors (Issue #1206)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No royalty splits configured for the event
+    RoyaltySplitsNotConfigured = 257,
+    /// Royalty split basis points must sum to 10 000 (100%)
+    InvalidRoyaltySplit = 258,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFT errors (Issue #1208)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Owner does not meet the milestone threshold or already holds an active badge for it
+    BadgeNotEligible = 259,
+    /// Badge does not exist
+    BadgeNotFound = 260,
+    /// Badge is already revoked
+    BadgeAlreadyRevoked = 261,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Venue capacity errors (Issue #1245)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No venue capacity has been configured for the event
+    VenueCapacityNotConfigured = 262,
+    /// Requested venue capacity is zero
+    InvalidVenueCapacity = 263,
+    /// Minting this many more tickets would exceed the venue capacity
+    VenueCapacityExceeded = 264,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Escrow payment split errors (Issue #1247)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No escrow split exists with the given ID
+    EscrowSplitNotFound = 265,
+    /// The proposed split is empty, names an organizer twice, or does not add up
+    InvalidEscrowSplit = 266,
+    /// The escrow split has already been released
+    EscrowSplitAlreadyReleased = 267,
+    /// The escrow split is already frozen by an open dispute
+    EscrowSplitAlreadyDisputed = 268,
+    /// The event has not finished yet, so held funds cannot be split out
+    EscrowSplitEventNotConcluded = 269,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Achievement badge NFT errors, continued (Issue #1430)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Badge cannot be revoked as expired: it has no expiry or has not reached it
+    BadgeNotExpired = 270,
+    /// Badge expiry must be 0 (no expiry) or a future ledger timestamp
+    InvalidBadgeExpiry = 271,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Dynamic pricing curve errors (Issue #1451)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Pricing curve has zero thresholds, a min above its max, or out-of-range bounds
+    InvalidPricingCurve = 272,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Geographic purchase restrictions errors (Issue #1448)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Geo-fence rules are enabled but the region list is empty or malformed
+    InvalidGeoFenceRules = 273,
+    /// Buyer location must be a 2-letter uppercase ISO 3166-1 alpha-2 code
+    InvalidCountryCode = 274,
+    /// Geo-fenced event, but the buyer has no attested location on record
+    BuyerLocationRequired = 275,
+    /// Buyer's region is not permitted by the event's geo-fence rules
+    BuyerLocationNotAllowed = 276,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Smart contract event replay protection errors (Issue #1473)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Duplicate transaction detected: nonce already consumed or idempotency key reused
+    ReplayAttempt = 277,
+    /// Idempotency key is malformed or empty
+    InvalidIdempotencyKey = 278,
+    /// Nonce is not greater than the last consumed nonce for the account
+    NonceOutOfOrder = 279,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Attendee heatmap errors (Issue #1499)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No heatmap grid has been configured for the event
+    HeatmapNotConfigured = 280,
+    /// Heatmap grid has a zero or oversized dimension, tile size or threshold
+    InvalidHeatmapConfig = 281,
+    /// A scanned position falls outside the configured heatmap grid
+    ScanPositionOutOfBounds = 282,
+    /// Scan batch is empty or larger than the per-call limit
+    InvalidScanBatch = 283,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Checkout currency conversion errors (Issue #1500)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// An oracle price backing the exchange rate is older than the allowed age
+    StaleExchangeRate = 284,
+    /// No exchange-rate lock matches the given ID, event and currency
+    ExchangeRateLockNotFound = 285,
+    /// The exchange-rate lock's window has passed
+    ExchangeRateLockExpired = 286,
+    /// The exchange-rate lock has already been used for a checkout
+    ExchangeRateLockConsumed = 287,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Livestream chat moderation errors (Issue #1501)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// Slow-mode interval is above the one-hour maximum
+    InvalidSlowModeInterval = 288,
+    /// Chat message is empty or longer than the maximum length
+    InvalidChatMessage = 289,
+    /// Word filter list is too long, or holds an empty or oversized word
+    InvalidChatWordFilter = 290,
+    /// The user is already banned from this event's chat
+    ChatUserAlreadyBanned = 291,
+    /// The user is not banned from this event's chat
+    ChatUserNotBanned = 292,
+    /// The event's organizer and the contract admin cannot be banned or muted
+    CannotModerateOrganizer = 293,
+    /// Mute duration is above the seven-day maximum
+    InvalidMuteDuration = 294,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Premium seat upgrade auction errors (Issue #1456)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// No upgrade auction exists with the given ID
+    UpgradeAuctionNotFound = 295,
+    /// Auction tier, minimum bid, increment or duration is invalid, or it would run past the event start
+    InvalidUpgradeAuction = 296,
+    /// The auction is closed to bids: it has ended or been finalized
+    UpgradeAuctionClosed = 297,
+    /// The auction's bidding window has not ended yet
+    UpgradeAuctionStillOpen = 298,
+    /// The bid is below the minimum bid or the current highest bid plus the increment
+    UpgradeBidTooLow = 299,
+    /// The ticket is not owned by the bidder, belongs to another event, or can no longer be upgraded
+    UpgradeBidTicketInvalid = 300,
+    /// The ticket already holds the tier being auctioned
+    UpgradeTierAlreadyHeld = 301,
+    /// The auction has reached its maximum number of recorded bids
+    UpgradeAuctionBidLimit = 302,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // GDPR data export and deletion errors (Issue #1452)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// A data-deletion request is already on record for this user
+    DeletionAlreadyRequested = 303,
+    /// No data-deletion request is on record for this user
+    DeletionNotRequested = 304,
+    /// Page size is zero or above the per-call limit
+    InvalidDataPageSize = 305,
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Cross-Event Pass Packages errors (Issue #1420)
+    // ═══════════════════════════════════════════════════════════════════════
+    /// This pass package has already been redeemed for the requested event
+    PassPackageEventAlreadyRedeemed = 306,
 }

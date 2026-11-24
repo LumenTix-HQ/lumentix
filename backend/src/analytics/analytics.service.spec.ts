@@ -5,7 +5,6 @@ import { Event } from '../events/entities/event.entity';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 import { Registration, RegistrationStatus } from '../registrations/entities/registration.entity';
-import { AgeVerification } from '../age-verification/entities/age-verification.entity';
 import { User } from '../users/entities/user.entity';
 import { MerchItem } from '../merch/entities/merch-item.entity';
 import { MerchReservation } from '../merch/entities/merch-reservation.entity';
@@ -16,7 +15,7 @@ describe('AnalyticsService', () => {
 	let ticketRepo: any;
 	let paymentRepo: any;
 	let registrationRepo: any;
-	let ageVerificationRepo: any;
+	let merchReservationRepo: any;
 
 	beforeEach(async () => {
 		const module: TestingModule = await Test.createTestingModule({
@@ -39,10 +38,6 @@ describe('AnalyticsService', () => {
 					useValue: { find: jest.fn(), createQueryBuilder: jest.fn() },
 				},
 				{
-					provide: getRepositoryToken(AgeVerification),
-					useValue: { find: jest.fn() },
-				},
-				{
 					provide: getRepositoryToken(User),
 					useValue: {},
 				},
@@ -62,7 +57,7 @@ describe('AnalyticsService', () => {
 		ticketRepo = module.get(getRepositoryToken(TicketEntity));
 		paymentRepo = module.get(getRepositoryToken(Payment));
 		registrationRepo = module.get(getRepositoryToken(Registration));
-		ageVerificationRepo = module.get(getRepositoryToken(AgeVerification));
+		merchReservationRepo = module.get(getRepositoryToken(MerchReservation));
 	});
 
 	it('generates a sales report for an organizer event', async () => {
@@ -108,11 +103,6 @@ describe('AnalyticsService', () => {
 		};
 		registrationRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder);
 
-		ageVerificationRepo.find.mockResolvedValue([
-			{ status: 'verified', dateOfBirth: '2000-01-01', eventId: 'event-1' },
-			{ status: 'failed', dateOfBirth: '2010-01-01', eventId: 'event-1' },
-		]);
-
 		paymentRepo.find.mockResolvedValue([
 			{ amount: 100, currency: 'USD', status: PaymentStatus.CONFIRMED },
 			{ amount: 10, currency: 'XLM', status: PaymentStatus.CONFIRMED },
@@ -121,6 +111,8 @@ describe('AnalyticsService', () => {
 		const demographics = await service.trackDemographicData('event-1', 'org-1');
 
 		expect(demographics.totalAttendees).toBe(2);
+		expect(demographics.demographics.ageVerificationRate).toBe(0);
+		expect(demographics.demographics.averageAge).toBeNull();
 		expect(demographics.currencyBreakdown).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ currency: 'USD', ticketCount: 1 }),
@@ -148,8 +140,9 @@ describe('AnalyticsService', () => {
 		paymentRepo.find.mockResolvedValue([
 			{ amount: 100, productType: 'ticket', ticketTier: 'VIP', promoCode: 'WELCOME', createdAt: new Date('2026-04-01T01:00:00.000Z') },
 			{ amount: 50, productType: 'ticket', ticketTier: 'General', promoCode: null, createdAt: new Date('2026-04-02T01:00:00.000Z') },
+			{ amount: 40, productType: 'merch', ticketTier: null, promoCode: null, createdAt: new Date('2026-04-02T02:00:00.000Z') },
 		]);
-		module.get(getRepositoryToken(MerchReservation)).find.mockResolvedValue([
+		merchReservationRepo.find.mockResolvedValue([
 			{ status: 'purchased', purchasedAt: new Date('2026-04-02T02:00:00.000Z'), merchItem: { eventId: 'event-1', name: 'Hoodie', price: 40 } },
 		]);
 
@@ -164,5 +157,29 @@ describe('AnalyticsService', () => {
 		expect(report.promoCodes).toEqual([expect.objectContaining({ name: 'WELCOME', revenue: 100 })]);
 		expect(report.merchSales).toEqual([expect.objectContaining({ name: 'Hoodie', quantity: 1, revenue: 40 })]);
 		expect(report.timeSeries).toHaveLength(2);
+		expect(report.timeSeries.find((point) => point.date === '2026-04-02')?.revenue).toBe(90);
+	});
+
+	it('rejects reversed revenue date ranges', async () => {
+		eventRepo.findOne.mockResolvedValue({ id: 'event-1', organizerId: 'org-1' });
+
+		await expect(
+			service.aggregate_revenue_data('event-1', 'org-1', '2026-04-03', '2026-04-01'),
+		).rejects.toThrow('startDate must not be after endDate');
+	});
+
+	it('exports summary and daily revenue rows as CSV', async () => {
+		eventRepo.findOne.mockResolvedValue({ id: 'event-1', organizerId: 'org-1' });
+		paymentRepo.find.mockResolvedValue([
+			{ amount: 25, productType: 'ticket', ticketTier: 'General', promoCode: null, createdAt: new Date('2026-04-02T01:00:00.000Z') },
+		]);
+		merchReservationRepo.find.mockResolvedValue([]);
+
+		const report = await service.export_revenue_report('event-1', 'org-1', 'csv');
+		const csv = report.body.toString('utf8');
+
+		expect(report.contentType).toContain('text/csv');
+		expect(csv).toContain('"summary","totalRevenue","","25"');
+		expect(csv).toContain('"time-period","2026-04-02","1","25"');
 	});
 });

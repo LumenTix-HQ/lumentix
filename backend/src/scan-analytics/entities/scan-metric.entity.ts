@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { Event } from '../../events/entities/event.entity';
 
-@Index(['eventId', 'createdAt'])
+@Index(['eventId', 'recordedAt'])
 @Index(['eventId', 'gateId'])
 @Entity('scan_metrics')
 export class ScanMetric {

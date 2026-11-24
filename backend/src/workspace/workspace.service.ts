@@ -160,4 +160,41 @@ export class WorkspaceService {
       conflict: true,
     });
   }
+
+  async getWorkspaceChanges(workspaceId: string, userId: string) {
+    await this.assertMember(workspaceId, userId);
+    const changes = await this.changeRepository.find({
+      where: { workspaceId },
+      order: { resultVersion: 'ASC' },
+    });
+    return { workspaceId, changes };
+  }
+
+  async resolveEditConflictManual(
+    workspaceId: string,
+    userId: string,
+    field: string,
+    resolution: 'accept' | 'reject',
+    payload?: any,
+  ) {
+    const workspace = await this.getWorkspace(workspaceId, userId);
+    
+    if (resolution === 'accept') {
+      const change = this.changeRepository.create({
+        workspaceId: workspace.id,
+        userId,
+        field,
+        payload: payload || {},
+        baseVersion: workspace.version,
+        resultVersion: workspace.version + 1,
+        conflict: false,
+      });
+      workspace.version += 1;
+      await this.changeRepository.save(change);
+      await this.workspaceRepository.save(workspace);
+      return { resolved: true, field, version: workspace.version };
+    }
+
+    return { resolved: false, field, reason: 'rejected' };
+  }
 }

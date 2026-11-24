@@ -31,6 +31,13 @@ import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { SponsorContribution } from '../sponsors/entities/sponsor-contribution.entity';
 import { RefundService } from '../payments/refunds/refund.service';
+import { SmartRefundService } from './smart-refund.service';
+import { EventImage } from './entities/event-image.entity';
+import { EventSeries } from './entities/event-series.entity';
+import { EventHistory } from './entities/event-history.entity';
+import { CalendarService } from '../calendar/calendar.service';
+import { EventCacheService } from './cache/event-cache.service';
+import { CurrenciesService } from '../currencies/currencies.service';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -134,6 +141,18 @@ describe('Event Lifecycle — creation to escrow release', () => {
         // Real state service — validates transitions without mocking
         EventStateService,
         { provide: getRepositoryToken(Event), useValue: eventRepo },
+        { provide: getRepositoryToken(EventImage), useValue: { create: jest.fn(), save: jest.fn(), count: jest.fn(), update: jest.fn(), delete: jest.fn() } },
+        { provide: getRepositoryToken(EventSeries), useValue: { findOne: jest.fn(), save: jest.fn() } },
+        { provide: getRepositoryToken(EventHistory), useValue: { save: jest.fn() } },
+        {
+          provide: EventCacheService,
+          useValue: {
+            fetchCachedMetadata: jest.fn().mockResolvedValue(null),
+            cacheEventMetadata: jest.fn(),
+            invalidateCacheEntry: jest.fn(),
+          },
+        },
+        { provide: CurrenciesService, useValue: { findActiveCodes: jest.fn().mockResolvedValue(['USD']) } },
         {
           provide: getRepositoryToken(User),
           useValue: {
@@ -154,7 +173,16 @@ describe('Event Lifecycle — creation to escrow release', () => {
         { provide: AuditService, useValue: auditService },
         { provide: NotificationService, useValue: notificationService },
         { provide: RefundService, useValue: refundService },
+        {
+          provide: SmartRefundService,
+          useValue: {
+            cancelEventOnChain: jest.fn(),
+            executeMassRefund: jest.fn(),
+            verifyRefundCompletion: jest.fn(),
+          },
+        },
         { provide: getQueueToken('events'), useValue: eventsQueue },
+        { provide: CalendarService, useValue: {} },
       ],
     }).compile();
 
@@ -315,7 +343,11 @@ describe('Event Lifecycle — creation to escrow release', () => {
 
     expect(result.status).toBe('cancellation_in_progress');
     expect(result.jobId).toBe('job-id-1');
-    expect(eventsQueue.add).toHaveBeenCalledWith('cancel-event', { eventId: EVENT_ID });
+    expect(eventsQueue.add).toHaveBeenCalledWith(
+      'cancel-event',
+      { eventId: EVENT_ID },
+      { attempts: 5, backoff: { type: 'exponential', delay: 5000 } },
+    );
     expect(auditService.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AuditAction.EVENT_CANCELLED,

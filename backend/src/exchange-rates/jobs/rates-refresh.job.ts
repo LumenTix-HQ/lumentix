@@ -73,13 +73,13 @@ export class RatesRefreshJob {
 
     if (this.adminEmail) {
       try {
-        await this.mailerService.send(
-          this.adminEmail,
-          `[LumenTix] ${staleRates.length} stale exchange rate(s) detected`,
-          `<p><strong>${staleRates.length} exchange rate(s) have not been refreshed in over ${this.staleRateWarningHours} hour(s):</strong></p>
+        await this.mailerService.send({
+          to: this.adminEmail,
+          subject: `[LumenTix] ${staleRates.length} stale exchange rate(s) detected`,
+          html: `<p><strong>${staleRates.length} exchange rate(s) have not been refreshed in over ${this.staleRateWarningHours} hour(s):</strong></p>
            <pre>${staleList}</pre>
            <p>Check the exchange rate service and external provider connectivity.</p>`,
-        );
+        });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.error(`Failed to send stale rate alert email: ${msg}`);

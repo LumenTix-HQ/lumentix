@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useProfile } from '@/hooks/useProfile';
+import { useAuth } from '@/contexts/AuthContext';
 import WalletLinkSection from '@/components/WalletLinkSection';
 import NotificationPreferences from '@/components/NotificationPreferences';
 import { getAnalyticsOptOut, setAnalyticsOptOut } from '@/lib/analytics/analytics';
@@ -228,12 +229,12 @@ export default function ProfilePage() {
     profile,
     isLoading,
     isSaving,
-    token,
     updateDisplayName,
     updateEmailOptOut,
     setWalletAddress,
     deactivateAccount,
   } = useProfile();
+  const { isAuthenticated } = useAuth();
 
   // Display name edit state
   const [displayName, setDisplayName] = useState('');
@@ -298,7 +299,7 @@ export default function ProfilePage() {
   }
 
   // ── Not authenticated ──────────────────────────────────────────────────────
-  if (!isLoading && !token) {
+  if (!isLoading && !isAuthenticated) {
     return (
       <main className="min-h-screen pt-24 pb-16 px-4 flex items-center justify-center">
         <div className="text-center max-w-sm">
@@ -435,7 +436,6 @@ export default function ProfilePage() {
               >
                 <WalletLinkSection
                   linkedAddress={profile?.walletAddress ?? null}
-                  token={token}
                   onLinked={setWalletAddress}
                   onToast={pushToast}
                 />

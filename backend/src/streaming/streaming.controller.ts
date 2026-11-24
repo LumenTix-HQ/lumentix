@@ -17,10 +17,15 @@ import {
 } from '@nestjs/swagger';
 import { StreamingService } from './streaming.service';
 import {
+  BufferingEventDto,
+  DetectViewerBandwidthDto,
   ManageContentDeliveryDto,
   OptimizeStreamQualityDto,
   StreamDeliveryResponseDto,
   StreamPerformanceResponseDto,
+  SwitchBitrateTierDto,
+  ViewerBandwidthResponseDto,
+  ViewerBitrateTierResponseDto,
 } from './dto/streaming.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -34,9 +39,67 @@ import { AuthenticatedRequest } from '../common/interfaces/authenticated-request
 export class StreamingController {
   constructor(private readonly streamingService: StreamingService) {}
 
+  @Get('events/:eventId/playback')
+  viewerPlayback(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.streamingService.viewerPlayback(eventId, req.user.id);
+  }
+
+  @Post('events/:eventId/buffering')
+  reportBuffering(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: BufferingEventDto,
+  ) {
+    return this.streamingService.report_buffering_event(
+      eventId,
+      req.user.id,
+      dto.durationMs,
+      dto.bandwidthKbps,
+    );
+  }
+
+  @Post('events/:eventId/bandwidth')
+  @ApiOperation({
+    summary: 'Detect a viewer’s bandwidth and the recommended bitrate tier',
+  })
+  @ApiResponse({ status: 201, type: ViewerBandwidthResponseDto })
+  detectViewerBandwidth(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: DetectViewerBandwidthDto,
+  ): Promise<ViewerBandwidthResponseDto> {
+    return this.streamingService.detect_viewer_bandwidth(
+      eventId,
+      req.user.id,
+      dto.bandwidthKbps,
+    );
+  }
+
+  @Put('events/:eventId/bitrate-tier')
+  @ApiOperation({
+    summary: 'Switch a viewer’s bitrate tier, or restore automatic selection',
+  })
+  @ApiResponse({ status: 200, type: ViewerBitrateTierResponseDto })
+  switchBitrateTier(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: SwitchBitrateTierDto,
+  ): Promise<ViewerBitrateTierResponseDto> {
+    return this.streamingService.switch_bitrate_tier(
+      eventId,
+      req.user.id,
+      dto.tier,
+    );
+  }
+
   @Put('events/:eventId/delivery')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Configure CDN and playback URLs for hybrid events' })
+  @ApiOperation({
+    summary: 'Configure CDN and playback URLs for hybrid events',
+  })
   @ApiResponse({ status: 200, type: StreamDeliveryResponseDto })
   manageContentDelivery(
     @Param('eventId', ParseUUIDPipe) eventId: string,
@@ -52,7 +115,9 @@ export class StreamingController {
 
   @Post('events/:eventId/optimize-quality')
   @Roles(Role.ORGANIZER)
-  @ApiOperation({ summary: 'Tune adaptive bitrate ladder for virtual attendees' })
+  @ApiOperation({
+    summary: 'Tune adaptive bitrate ladder for virtual attendees',
+  })
   @ApiResponse({ status: 200, type: StreamDeliveryResponseDto })
   optimizeStreamQuality(
     @Param('eventId', ParseUUIDPipe) eventId: string,

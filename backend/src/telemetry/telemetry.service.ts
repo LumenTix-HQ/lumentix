@@ -131,4 +131,29 @@ export class TelemetryService {
 
     return qb.orderBy('metric.createdAt', 'DESC').take(500).getMany();
   }
+
+  // Alias for snake_case function requirement in issue #1414
+  async record_metric_datapoint(
+    metricType: MetricType,
+    service: string,
+    value: number,
+    unit?: string,
+    tags?: Record<string, string>,
+  ): Promise<TelemetryMetric> {
+    return this.recordDataPoint(metricType, service, value, unit, tags);
+  }
+
+  // Alias for snake_case function requirement in issue #1414
+  async ping_system_services(): Promise<HealthStatus> {
+    return this.pingSystemServices();
+  }
+
+  // Alias for snake_case function requirement in issue #1414
+  async fetch_telemetry_status(
+    metricType?: MetricType,
+    service?: string,
+    hoursBack: number = 1,
+  ): Promise<TelemetryMetric[]> {
+    return this.fetchTelemetryStatus(metricType, service, hoursBack);
+  }
 }

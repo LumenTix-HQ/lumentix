@@ -5,6 +5,10 @@ import { Venue, VenueStatus } from './entities/venue.entity';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
 import { ListVenuesDto } from './dto/list-venues.dto';
+import { VenueSection } from './entities/venue-section.entity';
+import { Seat, SeatStatus } from './entities/seat.entity';
+import { CreateVenueLayoutDto } from './dto/create-venue-layout.dto';
+import { EventsService } from '../events/events.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -13,10 +17,6 @@ export interface PaginatedResult<T> {
   limit: number;
   totalPages: number;
 }
-import { VenueSection } from './entities/venue-section.entity';
-import { Seat, SeatStatus } from './entities/seat.entity';
-import { CreateVenueLayoutDto } from './dto/create-venue-layout.dto';
-import { EventsService } from '../events/events.service';
 
 @Injectable()
 export class VenuesService {
@@ -92,6 +92,7 @@ export class VenuesService {
       throw new ForbiddenException('You do not own this venue.');
     }
     await this.venueRepo.remove(venue);
+  }
 
   async createLayout(eventId: string, dto: CreateVenueLayoutDto, requesterId: string): Promise<VenueSection> {
     const event = await this.eventsService.getEventById(eventId);

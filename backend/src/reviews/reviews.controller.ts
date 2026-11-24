@@ -64,6 +64,20 @@ export class ReviewsController {
     return this.sentimentService.flagToxicReview(reviewId);
   }
 
+  // ── Issue #1461 aliases ────────────────────────────────────────────────────
+
+  @Get('event/:eventId/sentiment-summary')
+  @ApiOperation({ summary: 'Generate sentiment summary (issue #1461)' })
+  generate_sentiment_summary(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.sentimentService.generate_sentiment_summary(eventId);
+  }
+
+  @Post(':reviewId/flag-toxic-review')
+  @ApiOperation({ summary: 'Flag toxic review (issue #1461)' })
+  flag_toxic_review(@Param('reviewId', ParseUUIDPipe) reviewId: string) {
+    return this.sentimentService.flag_toxic_review(reviewId);
+  }
+
   // ── submit_event_review ───────────────────────────────────────────────────
 
   @Post()

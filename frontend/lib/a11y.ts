@@ -14,6 +14,7 @@ export function announceCartUpdate(message: string): void {
   if (!region) {
     region = document.createElement("div");
     region.id = LIVE_REGION_ID;
+    region.setAttribute("role", "status");
     region.setAttribute("aria-live", "polite");
     region.setAttribute("aria-atomic", "true");
     region.className = "sr-only";
@@ -28,7 +29,7 @@ export function announceCartUpdate(message: string): void {
 }
 
 function seatAriaLabel(seat: Seat, isSelected: boolean): string {
-  const rowLabel = String.fromCharCode(64 + seat.row);
+  const name = seat.seatIdentifier || `${String.fromCharCode(64 + seat.row)}${seat.number}`;
   const state = isSelected
     ? "selected"
     : seat.status === "booked"
@@ -36,13 +37,23 @@ function seatAriaLabel(seat: Seat, isSelected: boolean): string {
       : seat.status === "held"
         ? "held, unavailable"
         : "available";
-  return `Seat ${rowLabel}${seat.number}, ${state}`;
+  const details = [
+    seat.pricingTier,
+    typeof seat.price === "number" ? `${seat.price.toLocaleString()} XLM` : null,
+    seat.obstructedView ? "obstructed view" : null,
+  ].filter(Boolean);
+  return [`Seat ${name}`, state, ...details].join(", ");
 }
 
-function tierAriaLabel(tier: VipTier, isSelected: boolean, isFull: boolean): string {
+function tierAriaLabel(
+  tier: VipTier,
+  isSelected: boolean,
+  isFull: boolean,
+  priceLabel?: string,
+): string {
   const remaining = tier.maxSlots - tier.filledSlots;
   const state = isFull ? "sold out" : isSelected ? "selected" : `${remaining} remaining`;
-  return `${tier.name} tier, ${state}`;
+  return [`${tier.name} tier`, priceLabel, state].filter(Boolean).join(", ");
 }
 
 /** Descriptive aria-label builders for the ticket selection flow. */
@@ -51,29 +62,82 @@ export const injectAriaLabels = {
   tier: tierAriaLabel,
 };
 
+const NATIVE_FOCUSABLE = "a[href], button, input, select, textarea, summary";
+const WIDGET_ROLES = ["button", "checkbox", "radio", "switch", "tab", "option", "link", "gridcell"];
+
+function hasAccessibleName(el: Element): boolean {
+  if (el.getAttribute("aria-label")?.trim() || el.getAttribute("aria-labelledby")) return true;
+  if (el.getAttribute("title")?.trim()) return true;
+  if ((el.textContent ?? "").trim().length > 0) return true;
+  // An image with alt text inside the control names it.
+  return Array.from(el.querySelectorAll("img[alt]")).some(
+    (img) => (img.getAttribute("alt") ?? "").trim().length > 0,
+  );
+}
+
+function hasLabel(control: Element): boolean {
+  if (control.getAttribute("aria-label")?.trim() || control.getAttribute("aria-labelledby")) {
+    return true;
+  }
+  if (control.closest("label")) return true;
+  const id = control.getAttribute("id");
+  if (!id) return false;
+  return Array.from(control.ownerDocument?.querySelectorAll("label[for]") ?? []).some(
+    (label) => (label as HTMLLabelElement).htmlFor === id,
+  );
+}
+
+function describe(el: Element): string {
+  return el.outerHTML.slice(0, 80);
+}
+
 /**
- * Dev-only audit for common a11y omissions in the ticket purchase flow
- * (interactive elements missing an accessible name, images missing alt
- * text). Logs warnings and returns them; a no-op in production.
+ * Audits a subtree for common a11y omissions in the ticket purchase flow:
+ * - interactive elements without an accessible name
+ * - custom widgets (role="button" etc.) that can't receive keyboard focus
+ * - interactive elements hidden inside role="img" (children of an image are
+ *   presentational, so screen readers never reach them)
+ * - form controls without a label
+ * - images without alt text
+ * Logs and returns the issues found; a no-op in production builds.
  */
-export function validateA11yCompliance(root: HTMLElement | Document = document): string[] {
-  if (process.env.NODE_ENV !== "development") return [];
+export function validateA11yCompliance(root: ParentNode = document): string[] {
+  if (process.env.NODE_ENV === "production") return [];
 
   const issues: string[] = [];
+  const widgetSelector = WIDGET_ROLES.map((role) => `[role='${role}']`).join(", ");
 
-  root.querySelectorAll("button, [role='button']").forEach((el) => {
-    const hasName =
-      el.getAttribute("aria-label") ||
-      el.getAttribute("aria-labelledby") ||
-      (el.textContent ?? "").trim().length > 0;
-    if (!hasName) {
-      issues.push(`Button without an accessible name: ${el.outerHTML.slice(0, 80)}`);
+  root.querySelectorAll(`button, ${widgetSelector}`).forEach((el) => {
+    if (!hasAccessibleName(el)) {
+      issues.push(`Interactive element without an accessible name: ${describe(el)}`);
     }
   });
 
+  root.querySelectorAll(widgetSelector).forEach((el) => {
+    if (el.matches(NATIVE_FOCUSABLE)) return;
+    if (el.getAttribute("aria-disabled") === "true") return;
+    if (!el.hasAttribute("tabindex")) {
+      issues.push(`Custom widget is not keyboard focusable (missing tabindex): ${describe(el)}`);
+    }
+  });
+
+  root.querySelectorAll("[role='img']").forEach((img) => {
+    if (img.querySelector(`${NATIVE_FOCUSABLE}, ${widgetSelector}`)) {
+      issues.push(`Interactive content inside role="img" is hidden from screen readers: ${describe(img)}`);
+    }
+  });
+
+  root
+    .querySelectorAll("input:not([type='hidden']):not([type='submit']):not([type='button']), select, textarea")
+    .forEach((el) => {
+      if (!hasLabel(el)) {
+        issues.push(`Form control without a label: ${describe(el)}`);
+      }
+    });
+
   root.querySelectorAll("img").forEach((el) => {
     if (!el.hasAttribute("alt")) {
-      issues.push(`Image without alt text: ${el.outerHTML.slice(0, 80)}`);
+      issues.push(`Image without alt text: ${describe(el)}`);
     }
   });
 

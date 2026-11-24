@@ -2,5 +2,14 @@
   "extends": [
     "next/core-web-vitals",
     "next/typescript"
-  ]
+  ],
+  "rules": {
+    "@typescript-eslint/naming-convention": [
+      "error",
+      {
+        "selector": "function",
+        "format": ["camelCase", "PascalCase"]
+      }
+    ]
+  }
 }

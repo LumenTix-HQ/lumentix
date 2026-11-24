@@ -6,8 +6,8 @@ import {
   FraudFlagReason,
   FlagStatus,
 } from './entities/flagged-transaction.entity';
-import { User } from '../users/entities/user.entity';
-import { UserRole } from '../users/enums/user-role.enum';
+import { Role } from '../common/decorators/roles.decorator';
+import { AuthenticatedUser } from '../common/interfaces/authenticated-request.interface';
 
 interface TradePattern {
   transactionHash: string;
@@ -219,17 +219,29 @@ export class FraudDetectionService {
     return { data, total };
   }
 
+  async getFlaggedTransactionById(id: string): Promise<FlaggedTransaction> {
+    const flaggedTx = await this.flaggedTransactionRepository.findOne({
+      where: { id },
+    });
+
+    if (!flaggedTx) {
+      throw new NotFoundException('Flagged transaction not found');
+    }
+
+    return flaggedTx;
+  }
+
   /**
    * Review flagged transaction
    */
   async reviewFlaggedTransaction(
     flagId: string,
-    reviewer: User,
+    reviewer: AuthenticatedUser,
     newStatus: FlagStatus,
     notes: string,
   ): Promise<FlaggedTransaction> {
     // Only admins can review fraud flags
-    if (reviewer.role !== UserRole.ADMIN) {
+    if (reviewer.role !== Role.ADMIN) {
       throw new ForbiddenException(
         'Only administrators can review fraud flags',
       );
@@ -407,7 +419,7 @@ export class FraudDetectionService {
     // Detect rapid sequential trading (bot activity)
     sellerMap.forEach((sellerTrades, sellerId) => {
       if (sellerTrades.length > 5) {
-        const timeGaps = [];
+        const timeGaps: number[] = [];
         for (let i = 1; i < sellerTrades.length; i++) {
           const gap = Math.abs(
             sellerTrades[i].timestamp.getTime() -

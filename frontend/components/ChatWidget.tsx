@@ -4,12 +4,12 @@ import { useState } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? '';
 
-export async function connect_chat_socket(eventId: string, userId: string) {
+export async function connectChatSocket(eventId: string, userId: string) {
   const res = await fetch(`${API}/chat/connect?eventId=${eventId}&userId=${userId}`);
   return res.json();
 }
 
-export async function broadcast_chat_message(eventId: string, userId: string, username: string, message: string) {
+export async function broadcastChatMessage(eventId: string, userId: string, username: string, message: string) {
   const res = await fetch(`${API}/chat/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -18,7 +18,7 @@ export async function broadcast_chat_message(eventId: string, userId: string, us
   return res.json();
 }
 
-export async function moderate_chat_content(message: string) {
+export async function moderateChatContent(message: string) {
   const res = await fetch(`${API}/chat/moderate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -46,13 +46,13 @@ export default function ChatWidget({ eventId, userId, username }: ChatWidgetProp
   const [connected, setConnected] = useState(false);
 
   const handleConnect = async () => {
-    await connect_chat_socket(eventId, userId);
+    await connectChatSocket(eventId, userId);
     setConnected(true);
   };
 
   const handleSend = async () => {
     if (!input.trim()) return;
-    const msg = await broadcast_chat_message(eventId, userId, username, input);
+    const msg = await broadcastChatMessage(eventId, userId, username, input);
     setMessages(prev => [...prev, msg]);
     setInput('');
   };

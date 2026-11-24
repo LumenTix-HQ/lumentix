@@ -3,10 +3,16 @@ import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
-import { corsOptions, helmetOptions } from './common/security/security.config';
+import {
+  corsOptions,
+  helmetOptions,
+  swaggerHelmetOptions,
+} from './common/security/security.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody is required by InternalSignatureGuard, which signs over the exact
+  // request payload.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // ── Trust proxy hops so req.ip is the real client IP ─────────────────────
   const trustProxy = parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10);
@@ -14,7 +20,19 @@ async function bootstrap() {
     app.getHttpAdapter().getInstance().set('trust proxy', trustProxy);
   }
 
-  app.use(helmet(helmetOptions));
+  // Strict CSP everywhere; the Swagger UI (non-production only) gets its own
+  // relaxed policy because it needs inline scripts and styles.
+  const strictHelmet = helmet(helmetOptions);
+  const swaggerHelmet = helmet(swaggerHelmetOptions);
+  const swaggerEnabled = process.env.NODE_ENV !== 'production';
+  app.use((req: any, res: any, next: any) => {
+    const isDocs =
+      swaggerEnabled &&
+      (req.path === '/api' ||
+        req.path.startsWith('/api/') ||
+        req.path === '/api-json');
+    return (isDocs ? swaggerHelmet : strictHelmet)(req, res, next);
+  });
   app.enableCors(corsOptions);
 
   app.useGlobalPipes(
@@ -42,4 +60,4 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();

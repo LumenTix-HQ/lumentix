@@ -1,166 +1,180 @@
 # Wallet Integration Guide
 
-This document describes the wallet connection system implemented for LumenTix.
+Lumentix connects to Stellar wallets (Freighter today, WalletConnect optional)
+through React context. This is the single wallet document: it replaces the
+former `README_WALLET.md` and `WALLET_QUICKSTART.md`.
 
-## Features
+- [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [Usage](#usage)
+- [Transaction signing](#transaction-signing)
+- [Configuration](#configuration)
+- [Security model](#security-model)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [API reference](#api-reference)
+- [Adding a wallet](#adding-a-wallet)
 
-✅ Freighter wallet integration
-✅ Persistent wallet connection across page reloads
-✅ Network switching (Testnet/Mainnet)
-✅ Graceful error handling
-✅ Loading states
-✅ TypeScript support
-✅ React Context API for state management
+## Overview
 
-## Architecture
+The wallet layer lives in `frontend/`:
 
-### Core Components
-
-1. **WalletContext** (`contexts/WalletContext.tsx`)
-   - Central state management for wallet connection
-   - Handles connection persistence via localStorage
-   - Provides connect, disconnect, and switchNetwork methods
-
-2. **WalletButton** (`components/WalletButton.tsx`)
-   - Main UI component for wallet connection
-   - Displays connection status and wallet menu
-   - Shows formatted public key when connected
-
-3. **NetworkSwitcher** (`components/NetworkSwitcher.tsx`)
-   - Toggle between Testnet and Mainnet
-   - Validates network on wallet reconnection
-   - Shows warning when on Mainnet
-
-4. **WalletInfo** (`components/WalletInfo.tsx`)
-   - Displays detailed wallet information
-   - Shows wallet type, network, and full public key
-
-### Utilities
-
-- **wallet-utils.ts** - Storage helpers and network utilities
-- **freighter.ts** - Freighter-specific connection logic
-- **useWalletConnection.ts** - Custom hook for wallet operations
-
-## Installation
-
-```bash
-cd frontend
-npm install
+```
+frontend/
+├── types/wallet.ts                 # TypeScript definitions
+├── contexts/WalletContext.tsx      # Connection state (React context)
+├── lib/stellar/
+│   ├── wallet-utils.ts             # Storage and network helpers
+│   ├── freighter.ts                # Freighter integration
+│   └── transaction-helper.ts       # Transaction building/signing
+├── hooks/useWalletConnection.ts    # Convenience hook
+├── components/
+│   ├── WalletButton.tsx            # Connect/disconnect UI
+│   ├── NetworkSwitcher.tsx         # Testnet/Mainnet toggle
+│   └── WalletInfo.tsx              # Wallet details
+└── app/wallet-demo/                # Demo page
 ```
 
-The following dependency has been added:
-- `@stellar/freighter-api`: ^2.0.0
+Implemented:
+
+- Freighter connection and reconnect across reloads
+- Network switching (testnet/mainnet) with mismatch warnings
+- Transaction building, signing and submission
+- Balance lookup and friendly error states
+- TypeScript types for wallet, network and connection errors
+
+Not implemented yet: LOBSTR, hardware wallets, multi-signature accounts and a
+standalone balance widget.
+
+## Prerequisites
+
+- Node.js >= 20.19 (see the [README](./README.md))
+- [Freighter](https://www.freighter.app/) installed and unlocked
+- A Stellar account, funded from [Friendbot](https://friendbot.stellar.org)
+  when using testnet
 
 ## Usage
 
-### Basic Setup
-
-Wrap your app with the WalletProvider:
-
-```tsx
-import { WalletProvider } from '@/contexts/WalletContext';
-
-export default function App() {
-  return (
-    <WalletProvider>
-      {/* Your app components */}
-    </WalletProvider>
-  );
-}
-```
-
-### Using the Wallet Hook
+`app/layout.tsx` already wraps the app in `WalletProvider`; no extra setup is
+needed for pages. To consume the wallet:
 
 ```tsx
 import { useWallet } from '@/contexts/WalletContext';
 
-function MyComponent() {
-  const { isConnected, publicKey, connect, disconnect } = useWallet();
+export default function MyComponent() {
+  const { isConnected, publicKey, network, connect, disconnect } = useWallet();
+
+  if (!isConnected) {
+    return <button onClick={() => connect(WalletType.FREIGHTER)}>Connect wallet</button>;
+  }
 
   return (
     <div>
-      {isConnected ? (
-        <p>Connected: {publicKey}</p>
-      ) : (
-        <button onClick={() => connect(WalletType.FREIGHTER)}>
-          Connect
-        </button>
-      )}
+      <p>Connected: {publicKey}</p>
+      <p>Network: {network}</p>
+      <button onClick={disconnect}>Disconnect</button>
     </div>
   );
 }
 ```
 
-### Using Pre-built Components
+Pre-built components:
 
 ```tsx
 import { WalletButton } from '@/components/WalletButton';
 import { NetworkSwitcher } from '@/components/NetworkSwitcher';
 
-function Header() {
-  return (
-    <header>
-      <NetworkSwitcher />
-      <WalletButton />
-    </header>
-  );
+<header>
+  <NetworkSwitcher />
+  <WalletButton />
+</header>
+```
+
+A demo is available at `/wallet-demo` while `npm run dev` is running.
+
+## Transaction signing
+
+Never ask for a secret key in a form. Build the transaction, then hand it to the
+wallet for signing:
+
+```tsx
+import { TransactionHelper } from '@/lib/stellar/transaction-helper';
+import { useWallet } from '@/contexts/WalletContext';
+
+function PaymentButton() {
+  const { publicKey, network } = useWallet();
+
+  const sendPayment = async () => {
+    const helper = new TransactionHelper(network);
+    const tx = await helper.buildPaymentTransaction(publicKey!, 'GDESTINATION...', '10.00');
+    const result = await helper.signAndSubmitWithFreighter(tx);
+    console.log('Transaction hash:', result.hash);
+  };
+
+  return <button onClick={sendPayment}>Pay</button>;
 }
 ```
 
-## Testing
+Checkout uses the same pattern in `components/PaymentFlow.tsx`: the backend
+returns an unsigned intent, the wallet signs it, and only the transaction hash
+is sent back for confirmation.
 
-### Prerequisites
+## Configuration
 
-1. Install Freighter wallet extension:
-   - Chrome/Brave: https://chrome.google.com/webstore
-   - Firefox: https://addons.mozilla.org/firefox
-   - Or visit: https://www.freighter.app/
+Wallet behaviour is driven by the public environment variables in
+`env.example`:
 
-2. Create or import a Stellar account in Freighter
-
-### Test the Demo Page
-
-```bash
-npm run dev
+```env
+NEXT_PUBLIC_STELLAR_NETWORK=testnet
+NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=   # optional
 ```
 
-Navigate to: http://localhost:3000/wallet-demo
+For mainnet, set `NEXT_PUBLIC_STELLAR_NETWORK=mainnet` and
+`NEXT_PUBLIC_HORIZON_URL=https://horizon.stellar.org`. See
+[`env.example`](./env.example) for the full list.
 
-### Test Cases
+## Security model
 
-1. **Connect Wallet**
-   - Click "Connect Wallet"
-   - Select "Freighter"
-   - Approve connection in Freighter popup
-   - Verify public key is displayed
+- Private keys never leave the wallet extension; the app only sees public keys.
+- All transactions are signed inside the wallet.
+- The connected network is validated against `NEXT_PUBLIC_STELLAR_NETWORK`
+  before signing.
+- Only the public key and wallet type are persisted (localStorage).
+- The app authenticates with HttpOnly cookies through `/api/proxy`. Wallet
+  login/linking must not return raw JWTs to page JavaScript.
+- Wallet linking belongs to `POST /wallet/challenge` + `POST /wallet/verify`
+  (JWT-guarded), not the wallet-login endpoints.
 
-2. **Persistent Connection**
-   - Connect wallet
-   - Refresh the page
-   - Verify wallet remains connected
+## Testing
 
-3. **Network Switching**
-   - Connect wallet on Testnet
-   - Switch to Mainnet
-   - Verify Freighter prompts for network change
-   - Confirm connection persists
+The manual checklist also lives in
+[`TESTING_CHECKLIST.md`](./TESTING_CHECKLIST.md). With Freighter installed:
 
-4. **Disconnect**
-   - Click on connected wallet address
-   - Click "Disconnect"
-   - Verify wallet is disconnected
+1. Connect: click **Connect Wallet** → Freighter → approve. The public key is
+   displayed.
+2. Persistence: refresh; the wallet stays connected.
+3. Network switch: switch testnet ↔ mainnet; Freighter prompts and the app
+   warns on mainnet.
+4. Disconnect: open the wallet menu → **Disconnect**; state clears.
+5. Errors: connect with Freighter locked, with the wrong network, and with the
+   extension missing; each shows a readable message.
 
-5. **Error Handling**
-   - Try connecting without Freighter installed
-   - Try connecting with Freighter locked
-   - Try switching networks with wrong network in Freighter
-   - Verify error messages are user-friendly
+## Troubleshooting
 
-## API Reference
+**Wallet won't connect** — make sure Freighter is installed and unlocked, the
+selected network matches `NEXT_PUBLIC_STELLAR_NETWORK`, and no extension is
+blocking storage. Clear the site's localStorage and retry.
 
-### WalletContext
+**Connection does not persist** — localStorage may be disabled (private mode or
+embedded iframe). Check the console for storage errors.
 
-```typescript
+**Network mismatch** — open Freighter → Settings → Network and switch to the
+network the app expects, then reconnect.
+
+## API reference
+
+```ts
 interface WalletContextType {
   isConnected: boolean;
   publicKey: string | null;
@@ -172,88 +186,33 @@ interface WalletContextType {
   disconnect: () => void;
   switchNetwork: (network: NetworkType) => Promise<void>;
 }
-```
 
-### WalletType Enum
-
-```typescript
 enum WalletType {
   FREIGHTER = 'freighter',
   LOBSTR = 'lobstr',
   WALLET_CONNECT = 'walletconnect',
 }
-```
 
-### NetworkType Enum
-
-```typescript
 enum NetworkType {
   TESTNET = 'testnet',
   MAINNET = 'mainnet',
 }
 ```
 
-## Error Handling
+`useWalletConnection()` wraps the same state and adds `isConnecting`,
+`connectionError` and `clearError`.
 
-The system provides user-friendly error messages for common scenarios:
+## Adding a wallet
 
-- Freighter not installed
-- Wallet locked
-- Wrong network selected
-- Connection timeout
-- User rejection
+1. Implement the connector in `lib/stellar/<wallet>.ts`.
+2. Add the type to `WalletType` in `types/wallet.ts`.
+3. Extend `WalletContext.connect()`.
+4. Enable the option in `WalletButton`.
+5. Add tests and update this document.
 
-All errors are caught and displayed in the UI with clear instructions.
+## Resources
 
-## Future Enhancements
-
-### LOBSTR Integration (Optional)
-
-To add LOBSTR support:
-
-1. Install LOBSTR SDK
-2. Implement `connectLobstr()` in `lib/stellar/lobstr.ts`
-3. Update `WalletContext` connect method
-4. Enable LOBSTR button in `WalletButton`
-
-### WalletConnect Integration (Optional)
-
-To add WalletConnect support:
-
-1. Install `@walletconnect/stellar`
-2. Implement `connectWalletConnect()` in `lib/stellar/walletconnect.ts`
-3. Update `WalletContext` connect method
-4. Enable WalletConnect button in `WalletButton`
-
-## Security Considerations
-
-- Private keys never leave the wallet extension
-- All transactions are signed within the wallet
-- Network validation prevents wrong-network transactions
-- Connection state is stored in localStorage (public keys only)
-- No sensitive data is transmitted or stored
-
-## Troubleshooting
-
-### Wallet won't connect
-- Ensure Freighter is installed and unlocked
-- Check that you're on the correct network
-- Clear browser cache and localStorage
-- Try disconnecting and reconnecting
-
-### Connection not persisting
-- Check browser localStorage is enabled
-- Verify no browser extensions are blocking storage
-- Check console for errors
-
-### Network mismatch errors
-- Open Freighter settings
-- Switch to the correct network (Testnet/Mainnet)
-- Try connecting again
-
-## Support
-
-For issues or questions:
-- Check Freighter documentation: https://docs.freighter.app/
-- Review Stellar documentation: https://developers.stellar.org/
-- Open an issue in the LumenTix repository
+- [Freighter documentation](https://docs.freighter.app/)
+- [Stellar documentation](https://developers.stellar.org/)
+- [Stellar SDK](https://stellar.github.io/js-stellar-sdk/)
+- [Horizon API](https://developers.stellar.org/api/horizon)

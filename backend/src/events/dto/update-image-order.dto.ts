@@ -1,6 +1,5 @@
-import { IsArray, ValidateNested } from 'class-validator';
+import { IsArray, IsInt, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsString, IsInt, Min } from 'class-validator';
 
 export class ImageOrderItemDto {
   @IsString()

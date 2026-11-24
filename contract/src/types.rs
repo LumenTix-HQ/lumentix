@@ -293,6 +293,67 @@ pub struct PricingSchedule {
     pub last_minute_hours: u32,
 }
 
+/// Organizer-configurable demand and scarcity curve for dynamic pricing
+/// (Issue #1451). All multipliers are basis points applied on top of the
+/// time-based tier multiplier; `min_price_bps` / `max_price_bps` bound the
+/// final price relative to the event's base price.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DynamicPricingCurve {
+    /// Extra basis points added per demand step.
+    pub demand_step_bps: u32,
+    /// Sales-per-hour that constitutes one demand step.
+    pub demand_step_threshold: u32,
+    /// Upper bound on how many demand steps may stack.
+    pub max_demand_steps: u32,
+    /// Extra basis points added per scarcity step.
+    pub scarcity_step_bps: u32,
+    /// Remaining-inventory percentage at or below which scarcity pricing
+    /// starts to apply (e.g. 20 means the top 20% of inventory).
+    pub scarcity_threshold_pct: u32,
+    /// Floor for the adjusted price, as basis points of the base price.
+    pub min_price_bps: u32,
+    /// Cap for the adjusted price, as basis points of the base price.
+    pub max_price_bps: u32,
+}
+
+/// The most recent dynamic-pricing outcome for an event, recorded whenever a
+/// price adjustment is applied or a decision is logged (Issue #1451).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PricingDecision {
+    pub event_id: u64,
+    pub base_price: i128,
+    pub adjusted_price: i128,
+    pub price_tier: PriceTier,
+    pub demand_velocity_per_hour: u64,
+    pub remaining_inventory: u32,
+    pub decided_at: u64,
+}
+
+// ── Geo-fencing ────────────────────────────────────────────────────────────
+
+/// Whether listed regions are the only ones allowed or the only ones blocked
+/// (Issue #1448).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GeoRestrictionMode {
+    /// Only buyers in the listed regions may purchase.
+    Allowlist,
+    /// Buyers in the listed regions may not purchase.
+    Blocklist,
+}
+
+/// Per-event geographic purchase restrictions (Issue #1448). Regions are
+/// ISO 3166-1 alpha-2 country codes in uppercase (e.g. "US", "NG", "GB").
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GeoFenceRules {
+    pub enabled: bool,
+    pub mode: GeoRestrictionMode,
+    pub regions: Vec<String>,
+}
+
 /// Rolling batch-mint resource usage snapshot for fee optimization.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -918,6 +979,70 @@ pub struct EventCertificate {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Biometric Authentication (Issue #649)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Supported biometric modalities. The device performs the actual match —
+/// the contract only ever stores a public credential, never raw biometric data.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BiometricType {
+    Fingerprint,
+    FacialRecognition,
+}
+
+/// Privacy-control actions a user can take over their own biometric enrollment.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BiometricPrivacyAction {
+    /// Explicit consent to enroll/use biometric authentication.
+    GrantConsent,
+    /// Withdraw consent; disables any existing credential as a side effect.
+    RevokeConsent,
+    /// Re-enable a previously disabled (but not revoked) credential.
+    Enable,
+    /// Temporarily disable a credential without deleting it.
+    Disable,
+    /// Permanently delete the credential's public data.
+    Delete,
+}
+
+/// A registered biometric credential (WebAuthn/passkey-style public key),
+/// scoped to a single user and a single high-security event.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BiometricCredential {
+    pub user: Address,
+    pub event_id: u64,
+    pub credential_id: BytesN<32>,
+    pub public_key: BytesN<32>,
+    pub biometric_type: BiometricType,
+    pub registered_at: u64,
+    pub enabled: bool,
+    pub revoked: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Cross-Event Pass Packages (Issue #906)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A package deal granting entry into a limited subset of eligible events,
+/// e.g. "any 3 of 10 events", tracked by a decrementing allowance.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PassPackage {
+    pub package_id: u64,
+    pub owner: Address,
+    pub organizer: Address,
+    pub eligible_events: Vec<u64>,
+    pub total_allowance: u32,
+    pub remaining_allowance: u32,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub active: bool,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Anonymous Event Feedback Surveys
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1082,4 +1207,154 @@ pub struct OfflineScanResult {
     pub accepted: bool,
     /// Error discriminant explaining a rejection; zero when accepted.
     pub reason_code: u32,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Real-Time Health & Telemetry (Issue #1192)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Health status of a single system service.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ServiceHealthStatus {
+    Up,
+    Degraded,
+    Down,
+    Unknown,
+}
+
+/// Aggregated platform health snapshot.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SystemHealthStatus {
+    pub api: ServiceHealthStatus,
+    pub cache: ServiceHealthStatus,
+    pub stellar_rpc: ServiceHealthStatus,
+    pub database_primary: ServiceHealthStatus,
+    pub database_replica: ServiceHealthStatus,
+    pub prisma: ServiceHealthStatus,
+    pub jobs: ServiceHealthStatus,
+    pub indexer: ServiceHealthStatus,
+}
+
+/// A single telemetry datapoint recorded on-chain.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetricDatapoint {
+    pub metric_name: String,
+    pub value: i128,
+    pub recorded_at: u64,
+    pub source: String,
+}
+
+/// Aggregated telemetry status for dashboard consumption.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TelemetryStatus {
+    pub api_latency_ms: i128,
+    pub node_status: ServiceHealthStatus,
+    pub response_latency_ms: i128,
+    pub last_updated: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token-Gated Merchandise (Issue #1193)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Configuration for a token-gated merchandise restriction.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenGateConfig {
+    pub merchandise_id: u64,
+    /// Token contract address (e.g. VIP badge NFT or ticket NFT).
+    pub token_address: Address,
+    /// Minimum token balance required to purchase.
+    pub min_token_balance: i128,
+    /// Optional: restrict to holders of a specific token class / collection.
+    pub token_class: Option<String>,
+    /// Whether the gate is currently active.
+    pub active: bool,
+}
+
+/// Result of a token-gate eligibility check.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TokenGateEligibility {
+    pub eligible: bool,
+    pub reason: String,
+    pub user_balance: i128,
+    pub required_balance: i128,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Transaction Replay Protection (Issue #1473)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Maximum accepted length (in bytes) of an idempotency key.
+pub const MAX_IDEMPOTENCY_KEY_LEN: u32 = 64;
+
+/// Minimum accepted length (in bytes) of an idempotency key.
+pub const MIN_IDEMPOTENCY_KEY_LEN: u32 = 8;
+
+/// The highest nonce currently accepted for an account. Every state-changing
+/// transaction must carry a nonce strictly greater than `nonce`; the stored
+/// value is bumped to the submitted nonce once the transaction is applied.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransactionNonce {
+    /// Account the nonce belongs to.
+    pub account: Address,
+    /// Last accepted nonce for the account.
+    pub nonce: u64,
+    /// Ledger timestamp when the nonce was last advanced.
+    pub issued_at: u64,
+}
+
+/// A consumed idempotency key, recorded so that a retried or replayed
+/// transaction carrying the same key is rejected instead of re-executed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IdempotencyRecord {
+    /// Client-supplied idempotency key.
+    pub key: String,
+    /// Account that first consumed the key.
+    pub account: Address,
+    /// Ledger timestamp when the key was consumed.
+    pub consumed_at: u64,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Emergency Circuit Breaker (Issue #1547)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Thresholds that automatically trip the circuit breaker.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnomalyThresholdConfig {
+    /// Failed transfers tolerated inside a rolling window before tripping.
+    pub max_failed_transfers_window: u32,
+    /// Total transfer velocity tolerated inside a rolling window.
+    pub max_velocity_per_window: u32,
+    /// Length of the rolling window in seconds.
+    pub window_seconds: u32,
+}
+
+/// Persistent emergency pause state and its multi-sig resume progress.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircuitBreakerState {
+    /// Whether sales and transfers are currently halted.
+    pub is_active: bool,
+    /// Account that activated the breaker.
+    pub activated_by: Address,
+    /// Human-readable reason recorded at activation.
+    pub reason: String,
+    /// Ledger timestamp when the breaker was activated.
+    pub activated_at: u64,
+    /// Number of anomaly detections observed while active.
+    pub anomaly_count: u32,
+    /// Distinct signers that have approved resuming operations.
+    pub resume_approvals: Vec<Address>,
+    /// Number of distinct approvals required to resume operations.
+    pub required_resume_signatures: u32,
 }

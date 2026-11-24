@@ -1,6 +1,8 @@
-import { IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsIn, IsNotEmpty, IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TelemetryMetricType, TelemetryNodeStatus } from '../entities/telemetry-metric.entity';
+import { MetricType } from '../entities/telemetry-metric.entity';
+
+export type TelemetryNodeStatus = 'up' | 'down' | 'degraded';
 
 export class RecordMetricDatapointDto {
   @ApiProperty({ description: 'Name of the service or node this datapoint belongs to', example: 'api-gateway' })
@@ -8,10 +10,10 @@ export class RecordMetricDatapointDto {
   @IsNotEmpty()
   service!: string;
 
-  @ApiPropertyOptional({ description: 'Type of metric being recorded', enum: ['ping_latency', 'custom'], default: 'custom' })
+  @ApiPropertyOptional({ description: 'Type of metric being recorded', enum: MetricType })
   @IsOptional()
-  @IsIn(['ping_latency', 'custom'])
-  metricType?: TelemetryMetricType;
+  @IsEnum(MetricType)
+  metricType?: MetricType;
 
   @ApiProperty({ description: 'Numeric value of the datapoint', example: 128.4 })
   @IsNumber()

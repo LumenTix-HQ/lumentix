@@ -22,7 +22,7 @@ export class WebhookDelivery {
   @Column()
   attempt: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'int', nullable: true })
   statusCode: number | null;
 
   @Column({ type: 'text', nullable: true })
