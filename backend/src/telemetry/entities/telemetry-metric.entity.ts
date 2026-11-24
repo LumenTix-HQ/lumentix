@@ -15,8 +15,11 @@ export enum MetricType {
   DB_QUERY_TIME = 'DB_QUERY_TIME',
 }
 
-@Index(['metricType', 'createdAt'])
-@Index(['service', 'createdAt'])
+@Index('IDX_telemetry_metrics_metricType_createdAt', [
+  'metricType',
+  'createdAt',
+])
+@Index('IDX_telemetry_metrics_service_createdAt', ['service', 'createdAt'])
 @Entity('telemetry_metrics')
 export class TelemetryMetric {
   @PrimaryGeneratedColumn('uuid')

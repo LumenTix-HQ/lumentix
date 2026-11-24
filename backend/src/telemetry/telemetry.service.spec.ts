@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TelemetryService } from './telemetry.service';
-import { TelemetryMetric, MetricType } from './entities/telemetry-metric.entity';
+import {
+  TelemetryMetric,
+  MetricType,
+} from './entities/telemetry-metric.entity';
 
 describe('TelemetryService', () => {
   let service: TelemetryService;
@@ -19,22 +22,45 @@ describe('TelemetryService', () => {
   };
 
   const mockQueryBuilder = {
+    select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
+    getRawOne: jest.fn().mockResolvedValue({
+      sampleCount: '0',
+      avgLatency: null,
+      avgErrorRate: null,
+      requestCount: '0',
+    }),
     getMany: jest.fn().mockResolvedValue([mockMetric]),
   };
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+    mockQueryBuilder.getRawOne.mockResolvedValue({
+      sampleCount: '0',
+      avgLatency: null,
+      avgErrorRate: null,
+      requestCount: '0',
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TelemetryService,
         {
           provide: getRepositoryToken(TelemetryMetric),
           useValue: {
-            create: jest.fn().mockImplementation((dto) => ({ ...dto, id: 'metric-id', createdAt: new Date() })),
-            save: jest.fn().mockImplementation((metric) => Promise.resolve({ ...metric, id: 'metric-id' })),
+            create: jest.fn().mockImplementation((dto) => ({
+              ...dto,
+              id: 'metric-id',
+              createdAt: new Date(),
+            })),
+            save: jest
+              .fn()
+              .mockImplementation((metric) =>
+                Promise.resolve({ ...metric, id: 'metric-id' }),
+              ),
             find: jest.fn(),
             createQueryBuilder: jest.fn().mockReturnValue(mockQueryBuilder),
           },
@@ -99,47 +125,52 @@ describe('TelemetryService', () => {
       expect(health.status).toBe('unhealthy');
       expect(health.errorRate).toBe(1);
       expect(health.apiLatencyMs).toBe(0);
+      expect(health.nodeStatus).toBe('down');
     });
 
     it('should return healthy when latency and error rate are within thresholds', async () => {
-      const recentMetrics = [
+      mockQueryBuilder.getRawOne.mockResolvedValueOnce({
+        sampleCount: '20',
+        avgLatency: '150',
+        avgErrorRate: '0.01',
+        requestCount: '10',
+      });
+      (repository.find as jest.Mock).mockResolvedValueOnce([
         {
-          id: '1',
-          metricType: MetricType.API_LATENCY,
-          service: 'api',
-          value: 150,
+          metricType: MetricType.NODE_STATUS,
+          service: 'api-node',
+          value: 1,
+          tags: { nodeId: 'node-1', status: 'up' },
           createdAt: new Date(),
         },
-        {
-          id: '2',
-          metricType: MetricType.ERROR_RATE,
-          service: 'api',
-          value: 0.01,
-          createdAt: new Date(),
-        },
-      ] as TelemetryMetric[];
-
-      (repository.find as jest.Mock).mockResolvedValueOnce(recentMetrics);
+      ]);
 
       const health = await service.ping_system_services();
 
       expect(health.status).toBe('healthy');
+      expect(health.nodeStatus).toBe('up');
       expect(health.apiLatencyMs).toBe(150);
       expect(health.errorRate).toBe(1);
+      expect(health.requestCount).toBe(10);
+      expect(health.requestsPerMinute).toBe(2);
     });
 
     it('should return degraded when latency exceeds 1000ms', async () => {
-      const recentMetrics = [
+      mockQueryBuilder.getRawOne.mockResolvedValueOnce({
+        sampleCount: '5',
+        avgLatency: '1200',
+        avgErrorRate: '0',
+        requestCount: '2',
+      });
+      (repository.find as jest.Mock).mockResolvedValueOnce([
         {
-          id: '1',
-          metricType: MetricType.API_LATENCY,
-          service: 'api',
-          value: 1200,
+          metricType: MetricType.NODE_STATUS,
+          service: 'api-node',
+          value: 1,
+          tags: { nodeId: 'node-1', status: 'up' },
           createdAt: new Date(),
         },
-      ] as TelemetryMetric[];
-
-      (repository.find as jest.Mock).mockResolvedValueOnce(recentMetrics);
+      ]);
 
       const health = await service.pingSystemServices();
 
@@ -148,22 +179,49 @@ describe('TelemetryService', () => {
     });
 
     it('should return unhealthy when latency exceeds 5000ms', async () => {
-      const recentMetrics = [
+      mockQueryBuilder.getRawOne.mockResolvedValueOnce({
+        sampleCount: '5',
+        avgLatency: '6000',
+        avgErrorRate: '0',
+        requestCount: '2',
+      });
+      (repository.find as jest.Mock).mockResolvedValueOnce([
         {
-          id: '1',
-          metricType: MetricType.API_LATENCY,
-          service: 'api',
-          value: 6000,
+          metricType: MetricType.NODE_STATUS,
+          service: 'api-node',
+          value: 1,
+          tags: { nodeId: 'node-1', status: 'up' },
           createdAt: new Date(),
         },
-      ] as TelemetryMetric[];
-
-      (repository.find as jest.Mock).mockResolvedValueOnce(recentMetrics);
+      ]);
 
       const health = await service.ping_system_services();
 
       expect(health.status).toBe('unhealthy');
       expect(health.apiLatencyMs).toBe(6000);
+    });
+
+    it('should mark a node down when its heartbeat is stale', async () => {
+      mockQueryBuilder.getRawOne.mockResolvedValueOnce({
+        sampleCount: '1',
+        avgLatency: '0',
+        avgErrorRate: '0',
+        requestCount: '0',
+      });
+      (repository.find as jest.Mock).mockResolvedValueOnce([
+        {
+          metricType: MetricType.NODE_STATUS,
+          service: 'api-node',
+          value: 1,
+          tags: { nodeId: 'node-1', status: 'up' },
+          createdAt: new Date(Date.now() - 3 * 60 * 1000),
+        },
+      ]);
+
+      const health = await service.pingSystemServices();
+
+      expect(health.nodeStatus).toBe('down');
+      expect(health.status).toBe('unhealthy');
     });
   });
 
@@ -185,6 +243,12 @@ describe('TelemetryService', () => {
         { service: 'auth-service' },
       );
       expect(results).toEqual([mockMetric]);
+    });
+
+    it('rejects invalid time windows', async () => {
+      await expect(
+        service.fetchTelemetryStatus(undefined, undefined, 0),
+      ).rejects.toThrow('hoursBack must be an integer between 1 and 168');
     });
   });
 });
