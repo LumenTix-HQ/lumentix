@@ -41,7 +41,7 @@ export default function KioskPage({ params }: { params: { id: string } }) {
 
   return (
     <main
-      className="fixed inset-0 z-50 min-h-dvh overflow-y-auto bg-gray-950 px-4 py-8 text-white"
+      className="fixed inset-0 z-50 min-h-dvh overflow-y-auto bg-gray-950 px-3 py-[max(1rem,env(safe-area-inset-left))] pb-[max(1rem,env(safe-area-inset-bottom))] text-white touch-manipulation sm:px-4 sm:py-8"
       onClick={() => {
         if (!result) focusInput();
       }}
@@ -52,7 +52,7 @@ export default function KioskPage({ params }: { params: { id: string } }) {
             <h1 className="text-lg font-semibold text-gray-300">Gate Check-In Kiosk</h1>
             <p className="text-xs text-gray-500">Event {params.id}</p>
           </div>
-          <button type="button" onClick={launchKioskMode} className="min-h-12 rounded-xl border border-white/30 px-4">Enter full-screen</button>
+          <button type="button" onClick={launchKioskMode} className="min-h-12 rounded-xl border border-white/30 px-4 text-sm font-semibold touch-manipulation sm:text-base">Enter full-screen</button>
           <Link
             onClick={() => { if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); }}
             href={`/organizer/events/${params.id}/attendees`}
