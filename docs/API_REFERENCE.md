@@ -154,6 +154,24 @@ what each router covers so you know where to look.
 | `/internal/*` | `internal` | Service-to-service only — see `docs/internal-api.md` |
 | `/webhooks` | `webhooks` | Inbound webhook receivers (payment providers, etc.) |
 
+### Telemetry and platform health
+
+The admin console at `/admin/telemetry` polls platform telemetry every 15
+seconds. It displays the latest five-minute response latency, API request
+volume, server error rate, process uptime, and per-node heartbeat status.
+Requests outside `/telemetry` and `/health` are sampled automatically; node
+heartbeats are recorded once a minute.
+
+| Endpoint | Access | Description |
+|---|---|---|
+| `GET /telemetry/health` | Admin | Recent API metrics and node heartbeat status |
+| `GET /telemetry/status?hoursBack=1` | Admin | Up to 1,000 recent metric samples; `hoursBack` accepts 1–168 |
+| `POST /telemetry/metrics` | Admin | Record a metric sample |
+| `GET /health` | Public | Live DB, Redis, Stellar, and SMTP dependency checks |
+
+Telemetry samples are stored in `telemetry_metrics`; run the backend database
+migrations before enabling telemetry collection.
+
 ### Error format
 
 Every error response (from `HttpExceptionFilter`) has this shape regardless
