@@ -52,7 +52,7 @@ export function ScanResultDisplay({ result, onDismiss }: ScanResultDisplayProps)
     <div
       role="status"
       aria-live="assertive"
-      className={`flex min-h-[70vh] flex-col items-center justify-center gap-6 rounded-3xl p-10 text-center motion-safe:animate-[pulse_0.4s_ease-in-out_1] ${
+      className={`flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center gap-5 rounded-3xl p-5 text-center motion-safe:animate-[pulse_0.4s_ease-in-out_1] sm:min-h-[70vh] sm:gap-6 sm:p-10 ${
         isSuccess ? 'bg-green-600/90' : 'bg-red-600/90'
       }`}
     >
@@ -84,7 +84,7 @@ export function ScanResultDisplay({ result, onDismiss }: ScanResultDisplayProps)
         <p className="max-w-md text-lg text-white/90">{result.message}</p>
       )}
 
-      <button type="button" autoFocus onClick={onDismiss} className="min-h-14 rounded-xl border-2 border-white px-8 py-3 text-lg font-semibold">{isSuccess ? "Photo checked — scan next ticket" : "Scan next ticket"}</button>
+      <button type="button" autoFocus onClick={onDismiss} className="min-h-14 w-full rounded-xl border-2 border-white px-5 py-3 text-base font-semibold touch-manipulation sm:w-auto sm:px-8 sm:text-lg">{isSuccess ? "Photo checked — scan next ticket" : "Scan next ticket"}</button>
     </div>
   );
 }

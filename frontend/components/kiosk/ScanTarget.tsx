@@ -13,9 +13,9 @@ export interface ScanTargetProps {
  */
 export function ScanTarget({ inputRef, isSubmitting, onSubmit }: ScanTargetProps) {
   return (
-    <div className="flex min-h-[70vh] flex-col items-center justify-center gap-8 rounded-3xl border-4 border-dashed border-white/20 p-10 text-center">
+    <div className="flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center gap-6 rounded-3xl border-4 border-dashed border-white/20 p-5 text-center sm:min-h-[70vh] sm:gap-8 sm:p-10">
       <div
-        className={`flex h-40 w-40 items-center justify-center rounded-3xl border-4 border-purple-400/60 text-7xl transition-transform ${
+        className={`flex h-32 w-32 items-center justify-center rounded-3xl border-4 border-purple-400/60 text-6xl transition-transform sm:h-40 sm:w-40 sm:text-7xl ${
           isSubmitting ? 'scale-95 opacity-60' : 'animate-pulse'
         }`}
         aria-hidden="true"
