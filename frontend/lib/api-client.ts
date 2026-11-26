@@ -87,6 +87,65 @@ export interface EventTos {
   updatedAt: string;
 }
 
+export type TicketBackgroundPattern =
+  | "solid"
+  | "dots"
+  | "waves"
+  | "gradient"
+  | "custom_image";
+
+export interface TicketLayoutElement {
+  key: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
+export interface TicketDesign {
+  id: string;
+  eventId: string;
+  name: string;
+  backgroundPattern: TicketBackgroundPattern;
+  backgroundImageUrl: string | null;
+  backgroundColor: string;
+  textColor: string;
+  accentColor: string;
+  logoUrl: string | null;
+  layout: TicketLayoutElement[];
+  isActive: boolean;
+}
+
+export interface SaveTicketDesignInput {
+  name: string;
+  backgroundPattern: TicketBackgroundPattern;
+  backgroundImageUrl?: string | null;
+  backgroundColor: string;
+  textColor: string;
+  accentColor: string;
+  logoUrl?: string | null;
+  layout: TicketLayoutElement[];
+  isActive: boolean;
+}
+
+export interface RenderedTicketLayout {
+  designId: string;
+  eventId: string;
+  name: string;
+  background: {
+    pattern: TicketBackgroundPattern;
+    color: string;
+    imageUrl: string | null;
+    css: string;
+  };
+  colors: {
+    text: string;
+    accent: string;
+  };
+  logoUrl: string | null;
+  layout: TicketLayoutElement[];
+}
+
 export interface SaveEventTosInput {
   termsContent: string;
   liabilityDisclaimers?: string;
@@ -545,6 +604,29 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify(customOverrides ?? {}),
     }),
+
+  listTicketDesigns: (eventId: string) =>
+    request<TicketDesign[]>(`/events/${eventId}/ticket-designs`),
+  saveTicketDesign: (eventId: string, body: SaveTicketDesignInput) =>
+    request<TicketDesign>(`/events/${eventId}/ticket-designs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateTicketDesign: (
+    eventId: string,
+    designId: string,
+    body: SaveTicketDesignInput,
+  ) =>
+    request<TicketDesign>(`/events/${eventId}/ticket-designs/${designId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  renderTicketLayout: (eventId: string, designId: string) =>
+    request<RenderedTicketLayout>(
+      `/events/${eventId}/ticket-designs/${designId}/render`,
+    ),
+  compileDesignThemes: (eventId: string) =>
+    request<RenderedTicketLayout[]>(`/events/${eventId}/ticket-designs/themes`),
 
   // Scan Velocity & Gate Throughput (Issue #1195)
   calculateScanVelocity: (eventId: string, gateId?: string) =>
