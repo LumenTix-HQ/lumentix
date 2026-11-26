@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import EventForm, { type EventFormDiff } from "@/components/events/EventForm";
 import {
     defaultCreateEventValues,
@@ -115,6 +116,12 @@ export default function EditEventPage({ params }: { params: { id: string } }) {
             <section className="mx-auto w-full max-w-3xl rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-md sm:p-8">
                 <h1 className="bg-gradient-to-r from-purple-300 to-pink-400 bg-clip-text text-3xl font-extrabold text-transparent sm:text-4xl">Edit Event</h1>
                 <p className="mb-6 mt-2 text-sm text-gray-300">Update event details with validation and confirmation for published events.</p>
+                <Link
+                    href={`/organizer/events/${params.id}/ticket-designs`}
+                    className="mb-5 inline-flex rounded-lg border border-purple-400/40 px-4 py-2 text-sm font-semibold text-purple-200 transition-colors hover:bg-purple-400/10"
+                >
+                    Customize ticket design
+                </Link>
 
                 {loadError ? <p className="rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{loadError}</p> : null}
                 {!event && !loadError ? <p className="text-sm text-gray-300">Loading event...</p> : null}

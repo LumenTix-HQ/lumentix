@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -37,6 +42,32 @@ const PATTERN_CSS: Record<BackgroundPattern, (color: string, accent: string) => 
   [BackgroundPattern.CUSTOM_IMAGE]: (color) => `background-color: ${color};`,
 };
 
+function renderDesign(design: TicketDesign): RenderedTicketLayout {
+  const cssBuilder = PATTERN_CSS[design.backgroundPattern];
+  const css =
+    design.backgroundPattern === BackgroundPattern.CUSTOM_IMAGE && design.backgroundImageUrl
+      ? `background-color: ${design.backgroundColor}; background-image: url("${encodeURI(design.backgroundImageUrl)}"); background-size: cover; background-position: center;`
+      : cssBuilder(design.backgroundColor, design.accentColor);
+
+  return {
+    designId: design.id,
+    eventId: design.eventId,
+    name: design.name,
+    background: {
+      pattern: design.backgroundPattern,
+      color: design.backgroundColor,
+      imageUrl: design.backgroundImageUrl,
+      css,
+    },
+    colors: {
+      text: design.textColor,
+      accent: design.accentColor,
+    },
+    logoUrl: design.logoUrl,
+    layout: design.layout,
+  };
+}
+
 @Injectable()
 export class TicketDesignService {
   constructor(
@@ -64,14 +95,26 @@ export class TicketDesignService {
     Object.assign(design, {
       name: dto.name,
       backgroundPattern: dto.backgroundPattern ?? design.backgroundPattern ?? BackgroundPattern.SOLID,
-      backgroundImageUrl: dto.backgroundImageUrl ?? design.backgroundImageUrl ?? null,
+      backgroundImageUrl:
+        dto.backgroundImageUrl !== undefined
+          ? dto.backgroundImageUrl
+          : design.backgroundImageUrl ?? null,
       backgroundColor: dto.backgroundColor ?? design.backgroundColor ?? '#FFFFFF',
       textColor: dto.textColor ?? design.textColor ?? '#000000',
       accentColor: dto.accentColor ?? design.accentColor ?? '#6366F1',
-      logoUrl: dto.logoUrl ?? design.logoUrl ?? null,
+      logoUrl: dto.logoUrl !== undefined ? dto.logoUrl : design.logoUrl ?? null,
       layout: dto.layout ?? design.layout ?? [],
       isActive: dto.isActive ?? design.isActive ?? false,
     });
+
+    if (
+      design.backgroundPattern === BackgroundPattern.CUSTOM_IMAGE &&
+      !design.backgroundImageUrl
+    ) {
+      throw new BadRequestException(
+        'A background image URL is required for the custom-image pattern',
+      );
+    }
 
     const saved = await this.designRepository.save(design);
 
@@ -89,30 +132,7 @@ export class TicketDesignService {
 
   async renderTicketLayout(designId: string): Promise<RenderedTicketLayout> {
     const design = await this.getDesignById(designId);
-
-    const cssBuilder = PATTERN_CSS[design.backgroundPattern];
-    const css =
-      design.backgroundPattern === BackgroundPattern.CUSTOM_IMAGE && design.backgroundImageUrl
-        ? `background-image: url(${design.backgroundImageUrl}); background-size: cover;`
-        : cssBuilder(design.backgroundColor, design.accentColor);
-
-    return {
-      designId: design.id,
-      eventId: design.eventId,
-      name: design.name,
-      background: {
-        pattern: design.backgroundPattern,
-        color: design.backgroundColor,
-        imageUrl: design.backgroundImageUrl,
-        css,
-      },
-      colors: {
-        text: design.textColor,
-        accent: design.accentColor,
-      },
-      logoUrl: design.logoUrl,
-      layout: design.layout,
-    };
+    return renderDesign(design);
   }
 
   async compileDesignThemes(eventId: string): Promise<RenderedTicketLayout[]> {
@@ -121,7 +141,7 @@ export class TicketDesignService {
       order: { createdAt: 'ASC' },
     });
 
-    return Promise.all(designs.map((design) => this.renderTicketLayout(design.id)));
+    return designs.map(renderDesign);
   }
 
   // Snake_case aliases for the ticket design builder API
